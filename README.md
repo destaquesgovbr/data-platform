@@ -1,8 +1,10 @@
 # DestaquesGovBr Data Platform
 
-> **Status**: 🚧 Em desenvolvimento - Fase 0: Setup Inicial
+> **Status**: 🚧 Em desenvolvimento - Fase 1: Infraestrutura ✅ | Fase 2: PostgresManager 🚧
 >
 > Plataforma de dados para agregação, enriquecimento e disponibilização de notícias governamentais brasileiras.
+
+📚 **[Ver Documentação Completa](docs/README.md)**
 
 ---
 
@@ -22,14 +24,14 @@ Este projeto está migrando de **HuggingFace Dataset** (usado como banco de dado
 
 **Progresso**:
 - [x] Fase 0: Setup Inicial
-- [ ] Fase 1: Infraestrutura
+- [x] Fase 1: Infraestrutura (Cloud SQL provisionado ✅)
 - [ ] Fase 2: PostgresManager
 - [ ] Fase 3: Migração de Dados
 - [ ] Fase 4: Dual-Write
 - [ ] Fase 5: PostgreSQL Primary
 - [ ] Fase 6: Consumidores
 
-Ver detalhes em [_plan/README.md](_plan/README.md).
+Ver detalhes em [_plan/README.md](_plan/README.md) e [_plan/PROGRESS.md](_plan/PROGRESS.md).
 
 ---
 
@@ -37,6 +39,10 @@ Ver detalhes em [_plan/README.md](_plan/README.md).
 
 ```
 data-platform/
+├── docs/                   # 📚 Documentação
+│   ├── architecture/       # Arquitetura do sistema
+│   ├── database/           # Schemas e migrações
+│   └── development/        # Guias de desenvolvimento
 ├── _plan/                  # 📋 Documentação da migração
 ├── src/data_platform/      # 🐍 Código Python
 │   ├── managers/           # Gerenciadores de storage (PostgreSQL, HF)
@@ -169,15 +175,27 @@ poetry run mypy src/
 
 ## 📚 Documentação
 
+### Documentação Principal
+
+📖 **[Ver Documentação Completa em docs/](docs/README.md)**
+
 | Documento | Descrição |
 |-----------|-----------|
-| [CLAUDE.md](./CLAUDE.md) | Contexto geral do projeto |
+| [docs/README.md](./docs/README.md) | Índice completo da documentação |
+| [docs/architecture/overview.md](./docs/architecture/overview.md) | Arquitetura do sistema |
+| [docs/database/schema.md](./docs/database/schema.md) | Schemas das tabelas |
+| [docs/database/migrations.md](./docs/database/migrations.md) | Guia de setup e migrações |
+| [docs/development/setup.md](./docs/development/setup.md) | Setup do ambiente de desenvolvimento |
+
+### Documentação da Migração
+
+| Documento | Descrição |
+|-----------|-----------|
 | [_plan/README.md](./_plan/README.md) | Plano completo de migração (6 fases) |
-| [_plan/CONTEXT.md](./_plan/CONTEXT.md) | Contexto técnico detalhado para LLMs |
-| [_plan/SCHEMA.md](./_plan/SCHEMA.md) | Schema PostgreSQL completo |
+| [_plan/PROGRESS.md](./_plan/PROGRESS.md) | Log de progresso |
 | [_plan/DECISIONS.md](./_plan/DECISIONS.md) | Decisões arquiteturais (ADRs) |
 | [_plan/CHECKLIST.md](./_plan/CHECKLIST.md) | Checklist de verificação por fase |
-| [_plan/PROGRESS.md](./_plan/PROGRESS.md) | Log de progresso |
+| [_plan/CONTEXT.md](./_plan/CONTEXT.md) | Contexto técnico para LLMs |
 
 ---
 

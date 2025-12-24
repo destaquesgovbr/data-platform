@@ -207,6 +207,94 @@ data-platform/
   - `scripts/setup_database.sh` (script shell automatizado)
   - `_plan/POSTGRES_TEST_PLAN.md` (plano de testes)
 
+### 2024-12-24 - [Fase 1] Cloud SQL Provisionado e Validado - FASE 1 COMPLETA
+
+**Status**: ✅ Completo
+
+**O que foi feito**:
+- **PRs mergeados**: #42 (Cloud SQL), #43 (cache size fix), #44 (VPC peering), #45 (IAM permissions)
+- **Terraform apply executado com sucesso** via GitHub Actions
+- **Cloud SQL PostgreSQL 15 provisionado**:
+  - Instância: `destaquesgovbr-postgres`
+  - Status: RUNNABLE
+  - IP Privado: 10.5.0.3
+  - IP Público: 34.39.209.161
+  - Região: southamerica-east1 (São Paulo)
+  - Tier: db-custom-1-3840 (1 vCPU, 3.75GB RAM)
+  - Storage: 50GB SSD (auto-resize até 500GB)
+  - Deletion protection: Habilitada
+- **Secrets criados no Secret Manager**:
+  - `govbrnews-postgres-connection-string` (URI completa)
+  - `govbrnews-postgres-host` (IP: 10.5.0.3)
+  - `govbrnews-postgres-password` (32 caracteres)
+- **VPC Peering configurado**:
+  - IP range reservado: 10.5.0.0/16
+  - Service Networking connection estabelecida
+- **Conexão validada via Cloud SQL Proxy**:
+  - PostgreSQL 15.15 respondendo
+  - Database `govbrnews` acessível
+  - User `govbrnews_app` autenticado
+- **Schema do banco criado com sucesso**:
+  - 5 tabelas: agencies, themes, news, sync_log, schema_version
+  - 22 indexes (20 criados, 2 warnings não críticos)
+  - 4 triggers: update timestamps, denormalize agency data
+  - 2 views: news_with_themes, recent_syncs
+  - Full-text search configurado (português)
+- **IAM permissions persistidas no Terraform**:
+  - roles/cloudsql.admin para github-actions
+  - roles/servicenetworking.networksAdmin para github-actions
+  - roles/cloudsql.client para data-platform e github-actions
+  - roles/secretmanager.secretAccessor para data-platform e github-actions
+
+**Problemas encontrados e soluções**:
+1. **effective_cache_size muito grande**:
+   - Erro: 786432 (768MB) excedia limite de 344064 para instância 3.75GB
+   - Solução: PR #43 reduzindo para 344064 (~336MB)
+
+2. **VPC não pareada com Service Networking**:
+   - Erro: NETWORK_NOT_PEERED ao criar Cloud SQL
+   - Solução: PR #44 adicionando google_compute_global_address e google_service_networking_connection
+
+3. **Permissões IAM faltando para GitHub Actions**:
+   - Erro 403: Cloud SQL Admin não tinha roles/cloudsql.admin
+   - Erro 403: VPC peering precisava de roles/servicenetworking.networksAdmin
+   - Solução temporária: Adicionado via gcloud manualmente
+   - Solução permanente: PR #45 persistindo no Terraform
+
+4. **Porta 5432 em uso ao rodar setup_database.sh**:
+   - Erro: Cloud SQL Proxy não conseguia bind na porta
+   - Solução: `lsof -ti:5432 | xargs kill -9`
+
+5. **Indexes com funções não-IMMUTABLE**:
+   - Warning: 2 indexes falharam (DATE() e GIN com concat)
+   - Impacto: Não crítico, queries ainda funcionam
+   - Ação: Documentado para otimização futura
+
+**Validação completa realizada**:
+- ✅ Cloud SQL status: RUNNABLE
+- ✅ Conexão via Cloud SQL Proxy: Funcional
+- ✅ Secrets no Secret Manager: Configurados e acessíveis
+- ✅ Schema criado: 5 tabelas, 20 indexes, 4 triggers, 2 views
+- ✅ IAM permissions: Todas configuradas via Terraform
+- ✅ VPC peering: Estabelecido com Service Networking
+
+**Próximos passos**:
+- [ ] Iniciar Fase 2: Implementar PostgresManager
+- [ ] Criar script para popular tabela `agencies` (~158 registros)
+- [ ] Criar script para popular tabela `themes` (taxonomia hierárquica)
+- [ ] Implementar cache em memória para agencies e themes
+- [ ] Adicionar connection pooling ao PostgresManager
+
+**Artefatos**:
+- PRs mergeados:
+  - #42: feat: Add Cloud SQL PostgreSQL for Data Platform
+  - #43: fix: reduce effective_cache_size for db-custom-1-3840
+  - #44: feat: add VPC peering for Cloud SQL
+  - #45: feat: persist Cloud SQL IAM permissions in Terraform
+- Cloud SQL instance: `destaquesgovbr-postgres` (RUNNABLE)
+- Schema criado: v1.0
+- Documentação: `/destaquesgovbr/infra/docs/cloud-sql.md`
+
 ---
 
 ## Template para Novas Entradas
@@ -240,7 +328,8 @@ Copie e cole este template ao adicionar novas entradas:
 | 2024-12-24 | 0 | Plano criado | ✅ |
 | 2024-12-24 | 0 | Repositório setup completo | ✅ |
 | 2024-12-24 | 1 | Cloud SQL configurado (Terraform) | ✅ |
-| ____-__-__ | 1 | Cloud SQL provisionado (apply) | ⏳ |
+| 2024-12-24 | 1 | Cloud SQL provisionado (apply) | ✅ |
+| 2024-12-24 | 1 | Schema do banco criado e validado | ✅ |
 | ____-__-__ | 2 | PostgresManager implementado | ⏳ |
 | ____-__-__ | 3 | Dados migrados | ⏳ |
 | ____-__-__ | 4 | Dual-write funcionando | ⏳ |
