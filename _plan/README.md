@@ -108,6 +108,7 @@ data-platform/
 - [ ] Poetry/pip install funciona
 - [ ] Testes podem ser executados (mesmo que vazios)
 - [ ] Documentação atualizada (README.md, docs/)
+- [ ] PR criado documentando progresso da fase
 
 ---
 
@@ -158,6 +159,7 @@ google_secret_manager_secret.database_url
 - [ ] Secrets configurados no Secret Manager
 - [ ] GitHub Actions consegue acessar o banco
 - [ ] Documentação atualizada (docs/database/, infra/docs/)
+- [ ] PR criado documentando progresso da fase
 
 ---
 
@@ -201,6 +203,7 @@ class StorageBackend(Enum):
 - [ ] Testes de integração passam com banco real
 - [ ] Cobertura de testes > 80%
 - [ ] Documentação atualizada (docs/development/, API docs)
+- [ ] PR criado documentando progresso da fase
 
 ---
 
@@ -250,6 +253,7 @@ python scripts/validate_migration.py
 - [ ] Validação retorna 100% de integridade
 - [ ] Contagem PG == contagem HF
 - [ ] Documentação atualizada (scripts de migração, troubleshooting)
+- [ ] PR criado documentando progresso da fase
 
 ---
 
@@ -289,6 +293,7 @@ env:
 - [ ] Amostragem mostra 100% de consistência
 - [ ] Nenhum erro de escrita em nenhum backend
 - [ ] Documentação atualizada (monitoramento, validação)
+- [ ] PR criado documentando progresso da fase
 
 ---
 
@@ -332,6 +337,7 @@ HuggingFace (DADOS ABERTOS)
 - [ ] Lag máximo de 24h entre PG e HF
 - [ ] Pipeline funciona sem erros por 7+ dias
 - [ ] Documentação atualizada (arquitetura, fluxo de dados)
+- [ ] PR criado documentando progresso da fase
 
 ---
 
@@ -360,6 +366,7 @@ HuggingFace (DADOS ABERTOS)
 - [ ] Nenhum sistema lê diretamente do HuggingFace
 - [ ] Performance igual ou melhor
 - [ ] Documentação completa atualizada (arquitetura final, guias de consumidores)
+- [ ] PR criado documentando conclusão da migração
 
 ---
 

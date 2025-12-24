@@ -9,6 +9,7 @@ Comprehensive documentation for the DestaquesGovBr Data Platform.
 | Category | Document | Description |
 |----------|----------|-------------|
 | **Getting Started** | [Development Setup](development/setup.md) | Set up your development environment |
+| **Development** | [PostgresManager](development/postgres-manager.md) | PostgreSQL storage manager guide |
 | **Architecture** | [Overview](architecture/overview.md) | System architecture and design |
 | **Database** | [Schema](database/schema.md) | Database tables, indexes, and queries |
 | **Database** | [Migrations](database/migrations.md) | Setup and manage the database |
