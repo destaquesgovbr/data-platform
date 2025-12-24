@@ -4,6 +4,7 @@ PostgreSQL Storage Manager for DestaquesGovBr.
 Manages news storage in PostgreSQL with connection pooling, caching, and error handling.
 """
 
+import os
 import subprocess
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
@@ -55,13 +56,23 @@ class PostgresManager:
 
     def _get_connection_string(self) -> str:
         """
-        Get database connection string from Secret Manager or use localhost.
+        Get database connection string from environment, Secret Manager, or use localhost.
+
+        Priority:
+        1. DATABASE_URL environment variable
+        2. Secret Manager (for Cloud deployment)
+        3. Cloud SQL Proxy detection
 
         Returns:
             PostgreSQL connection string
         """
+        # Check for DATABASE_URL environment variable first (for local development)
+        if os.getenv("DATABASE_URL"):
+            logger.info("Using DATABASE_URL from environment")
+            return os.getenv("DATABASE_URL")
+
         try:
-            # Try Secret Manager first
+            # Try Secret Manager for Cloud deployment
             result = subprocess.run(
                 [
                     "gcloud",

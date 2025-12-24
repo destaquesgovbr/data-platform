@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -248,6 +249,12 @@ def main() -> None:
         action="store_true",
         help="Test mode - don't insert data",
     )
+    parser.add_argument(
+        "--db-url",
+        type=str,
+        default=None,
+        help="Database connection string (default: auto-detect or $DATABASE_URL)",
+    )
     args = parser.parse_args()
 
     # Configure logger
@@ -262,7 +269,13 @@ def main() -> None:
     themes = load_themes_yaml(args.source)
 
     # Get connection string
-    connection_string = get_db_connection_string()
+    if args.db_url:
+        connection_string = args.db_url
+    elif os.getenv("DATABASE_URL"):
+        connection_string = os.getenv("DATABASE_URL")
+        logger.info("Using DATABASE_URL from environment")
+    else:
+        connection_string = get_db_connection_string()
 
     # Populate database
     populate_themes(themes, connection_string, dry_run=args.dry_run)

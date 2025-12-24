@@ -295,6 +295,177 @@ data-platform/
 - Schema criado: v1.0
 - Documentação: `/destaquesgovbr/infra/docs/cloud-sql.md`
 
+### 2024-12-24 - [Fase 2] PostgresManager Implementado - FASE 2 COMPLETA
+
+**Status**: ✅ Completo
+
+**O que foi feito**:
+- **PostgresManager implementado** ([postgres_manager.py](src/data_platform/managers/postgres_manager.py)):
+  - Connection pooling com psycopg2 (min=1, max=10 connections)
+  - Cache em memória para agencies e themes
+  - Métodos CRUD: insert(), update(), get(), get_by_unique_id()
+  - Suporte a batch operations com execute_values
+  - Auto-detecção de connection string (Secret Manager ou Cloud SQL Proxy)
+  - Context manager para gestão de recursos
+- **Modelos Pydantic criados** ([models/news.py](src/data_platform/models/news.py)):
+  - NewsInsert (para inserção)
+  - News (completo com IDs)
+  - Agency
+  - Theme
+- **Scripts para popular tabelas mestres**:
+  - [populate_agencies.py](scripts/populate_agencies.py): 159 agências de agencies.yaml
+  - [populate_themes.py](scripts/populate_themes.py): 588 temas de themes_tree_enriched_full.yaml
+  - Ambos com suporte a Cloud SQL Proxy e dry-run mode
+- **Testes implementados**:
+  - test_postgres_manager.py com 10 casos de teste
+  - test_models.py validando Pydantic models
+  - Cobertura: > 80%
+- **Documentação**:
+  - README.md atualizado com uso do PostgresManager
+  - Docstrings em todos os métodos
+
+**Problemas encontrados e soluções**:
+1. **Foreign key constraint em agencies.parent_key**:
+   - Erro: agencies com parent_key referenciando agências não inseridas ainda
+   - Solução: Ordenação de inserção (pais primeiro) e tratamento de referencias circulares
+
+**Validação realizada**:
+- ✅ PostgresManager conecta ao Cloud SQL via proxy
+- ✅ Cache de agencies e themes funciona
+- ✅ Insert e update funcionando
+- ✅ Batch operations otimizadas
+- ✅ 159 agencies populadas com sucesso
+- ✅ 588 themes populados com sucesso
+- ✅ Todos os testes passando
+
+**Próximos passos**:
+- [x] Iniciar Fase 3: Migração de dados do HuggingFace
+- [x] Criar scripts de migração e validação
+- [x] Testar migração localmente com Docker
+
+**Artefatos**:
+- PR #1: feat: Phase 2 - PostgresManager Implementation (MERGED 2024-12-24 19:52)
+- Commits:
+  - `33c1e76`: feat: implement PostgresManager and populate master tables (Phase 2)
+  - `e3f78cd`: feat: add scripts to populate master tables
+- Arquivos criados:
+  - src/data_platform/managers/postgres_manager.py
+  - src/data_platform/models/news.py
+  - scripts/populate_agencies.py
+  - scripts/populate_themes.py
+  - tests/unit/test_postgres_manager.py
+  - tests/unit/test_models.py
+
+### 2024-12-24 - [Fase 3] Ambiente Docker e Scripts de Migração - FASE 3 EM PROGRESSO
+
+**Status**: ⚠️ Em progresso (scripts prontos, aguardando migração completa)
+
+**O que foi feito**:
+- **Ambiente Docker local criado**:
+  - [docker-compose.yml](docker-compose.yml) com PostgreSQL 15 Alpine
+  - Mesma configuração do Cloud SQL (PostgreSQL 15)
+  - Volume persistente para dados (`destaquesgovbr-postgres-data`)
+  - Healthcheck configurado
+  - [docker/postgres/init.sql](docker/postgres/init.sql) com schema completo
+  - Schema criado automaticamente na inicialização (5 tabelas, 22 indexes, 4 triggers, 2 views)
+- **Scripts de migração**:
+  - [migrate_hf_to_postgres.py](scripts/migrate_hf_to_postgres.py):
+    - Carrega dataset completo do HuggingFace (nitaibezerra/govbrnews - 309.193 registros)
+    - Migra em batches de 1000 registros com progress bar (tqdm)
+    - Mapeia agências e temas usando cache do PostgresManager
+    - Suporte a --max-records para testes
+    - Suporte a --dry-run
+    - Relatório detalhado de estatísticas
+  - [validate_migration.py](scripts/validate_migration.py):
+    - Valida contagem de registros (HF vs PG)
+    - Verifica integridade referencial (agencies, themes)
+    - Valida campos obrigatórios
+    - Amostragem de consistência (100 registros)
+    - Relatório em formato tabular
+- **Correções implementadas**:
+  - PostgresManager agora suporta DATABASE_URL environment variable
+  - Prioridade: DATABASE_URL → Secret Manager → Cloud SQL Proxy
+  - parse_datetime() corrigido para aceitar datetime objects (HuggingFace retorna objetos, não strings)
+  - populate_agencies.py e populate_themes.py com suporte a --db-url e DATABASE_URL
+  - Triggers temporariamente desabilitados durante populate de agencies (FK circulares)
+- **Utilitários**:
+  - [Makefile](Makefile) com comandos convenientes:
+    - `make docker-up`: Iniciar PostgreSQL
+    - `make setup-db`: Setup completo do banco local
+    - `make migrate`: Migrar dados do HF
+    - `make validate`: Validar migração
+    - `make test`: Rodar testes
+  - [.env.example](.env.example) com variáveis locais
+  - [scripts/setup_local_db.sh](scripts/setup_local_db.sh) para setup automatizado
+  - [.dockerignore](.dockerignore) para otimizar builds
+- **Documentação**:
+  - [docs/development/docker-setup.md](docs/development/docker-setup.md) (401 linhas):
+    - Quick start guide
+    - Arquitetura do ambiente
+    - Comandos úteis
+    - Troubleshooting completo
+    - CI/CD integration
+    - Diferenças vs Cloud SQL
+
+**Testes realizados com Docker local**:
+- ✅ Docker container iniciado com sucesso
+- ✅ PostgreSQL 15.10 respondendo com healthcheck
+- ✅ Schema criado automaticamente (5 tabelas: agencies, themes, news, sync_log, schema_version)
+- ✅ 159 agencies populadas no Docker local
+- ✅ 588 themes populados no Docker local
+- ✅ **Migração de 100 registros de teste executada com sucesso em 0.05s** (2.112 records/s)
+- ✅ Validação executada com todos os checks passando:
+  - 0 campos NULL obrigatórios
+  - 0 referências de agency inválidas
+  - 0 referências de theme inválidas
+  - 0 unique_ids duplicados
+  - Campos denormalizados consistentes (agency_key, agency_name)
+
+**Problemas encontrados e soluções**:
+1. **PostgresManager não reconhecia DATABASE_URL**:
+   - Erro: Tentava conectar via Secret Manager mesmo com DATABASE_URL setado
+   - Solução: Adicionado check de DATABASE_URL como prioridade máxima em `_get_connection_string()`
+
+2. **parse_datetime() falhava com datetime objects**:
+   - Erro: "argument of type 'datetime.datetime' is not iterable"
+   - Causa: HuggingFace datasets retorna datetime objects, não strings
+   - Solução: Adicionado `isinstance(dt_input, datetime)` check antes de parsing
+
+3. **Scripts populate não aceitavam connection string customizada**:
+   - Problema: Forçava uso do Secret Manager localmente
+   - Solução: Adicionado --db-url parameter e suporte a DATABASE_URL env var
+
+4. **FK constraint violation ao popular agencies**:
+   - Erro: parent_key referenciando agencies não inseridas
+   - Solução: `ALTER TABLE agencies DISABLE TRIGGER ALL` durante inserção
+
+**Próximos passos**:
+- [ ] Executar migração completa (~309k registros) no Cloud SQL (staging)
+- [ ] Validar migração completa com validate_migration.py
+- [ ] Atualizar documentação com resultados e lições aprendidas
+- [ ] Criar PR da Fase 3 incluindo todos os commits
+
+**Artefatos**:
+- Commits (aguardando PR):
+  - `e3f78cd`: feat: add scripts to populate master tables
+  - `87f04ef`: feat: add local Docker environment and migration scripts
+  - `25459ef`: fix: support DATABASE_URL env var and handle datetime objects
+- Arquivos criados:
+  - docker-compose.yml
+  - docker/postgres/init.sql
+  - docker/README.md
+  - .dockerignore
+  - .env.example
+  - Makefile
+  - docs/development/docker-setup.md
+  - scripts/migrate_hf_to_postgres.py
+  - scripts/validate_migration.py
+  - scripts/setup_local_db.sh
+- Arquivos modificados:
+  - src/data_platform/managers/postgres_manager.py (DATABASE_URL support)
+  - scripts/populate_agencies.py (--db-url support)
+  - scripts/populate_themes.py (--db-url support)
+
 ---
 
 ## Template para Novas Entradas
@@ -330,12 +501,15 @@ Copie e cole este template ao adicionar novas entradas:
 | 2024-12-24 | 1 | Cloud SQL configurado (Terraform) | ✅ |
 | 2024-12-24 | 1 | Cloud SQL provisionado (apply) | ✅ |
 | 2024-12-24 | 1 | Schema do banco criado e validado | ✅ |
-| ____-__-__ | 2 | PostgresManager implementado | ⏳ |
-| ____-__-__ | 3 | Dados migrados | ⏳ |
+| 2024-12-24 | 2 | PostgresManager implementado | ✅ |
+| 2024-12-24 | 2 | Tabelas mestres populadas (agencies, themes) | ✅ |
+| 2024-12-24 | 3 | Ambiente Docker local criado | ✅ |
+| 2024-12-24 | 3 | Scripts de migração criados e testados | ✅ |
+| ____-__-__ | 3 | Migração completa executada (309k) | ⏳ |
 | ____-__-__ | 4 | Dual-write funcionando | ⏳ |
 | ____-__-__ | 5 | PostgreSQL como primary | ⏳ |
 | ____-__-__ | 6 | Todos consumidores migrados | ⏳ |
 
 ---
 
-*Última atualização: 2024-12-24*
+*Última atualização: 2024-12-24 17:30*
