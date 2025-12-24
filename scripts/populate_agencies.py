@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Dict, Any
@@ -132,14 +133,21 @@ def populate_agencies(
         cursor.execute("DELETE FROM agencies")
         logger.info(f"Deleted {cursor.rowcount} existing records")
 
+        # Temporarily disable foreign key constraint for insertion
+        cursor.execute("ALTER TABLE agencies DISABLE TRIGGER ALL")
+
         # Insert agencies
         insert_query = """
             INSERT INTO agencies (key, name, type, parent_key, url)
             VALUES (%s, %s, %s, %s, %s)
         """
 
+        # Sort agencies: those without parent first, then with parent
+        agencies_list = [(key, data) for key, data in agencies.items()]
+        agencies_list.sort(key=lambda x: (x[1].get("parent") is not None, x[0]))
+
         inserted = 0
-        for key, data in agencies.items():
+        for key, data in agencies_list:
             cursor.execute(
                 insert_query,
                 (
@@ -151,6 +159,9 @@ def populate_agencies(
                 ),
             )
             inserted += 1
+
+        # Re-enable foreign key constraint
+        cursor.execute("ALTER TABLE agencies ENABLE TRIGGER ALL")
 
         # Commit transaction
         conn.commit()
@@ -187,6 +198,12 @@ def main() -> None:
         action="store_true",
         help="Test mode - don't insert data",
     )
+    parser.add_argument(
+        "--db-url",
+        type=str,
+        default=None,
+        help="Database connection string (default: auto-detect or $DATABASE_URL)",
+    )
     args = parser.parse_args()
 
     # Configure logger
@@ -201,7 +218,13 @@ def main() -> None:
     agencies = load_agencies_yaml(args.source)
 
     # Get connection string
-    connection_string = get_db_connection_string()
+    if args.db_url:
+        connection_string = args.db_url
+    elif os.getenv("DATABASE_URL"):
+        connection_string = os.getenv("DATABASE_URL")
+        logger.info("Using DATABASE_URL from environment")
+    else:
+        connection_string = get_db_connection_string()
 
     # Populate database
     populate_agencies(agencies, connection_string, dry_run=args.dry_run)
