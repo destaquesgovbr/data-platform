@@ -24,7 +24,10 @@ from loguru import logger
 def get_db_connection_string() -> str:
     """Get database connection string from environment or Secret Manager."""
     import subprocess
+    import os
+    from urllib.parse import quote_plus
 
+    # Get password from Secret Manager
     try:
         result = subprocess.run(
             [
@@ -39,11 +42,41 @@ def get_db_connection_string() -> str:
             text=True,
             check=True,
         )
-        return result.stdout.strip()
+        secret_conn_str = result.stdout.strip()
+
+        # Parse password from connection string
+        # Format: postgresql://user:password@host:port/db
+        # Password may contain special chars including @
+        if "://" in secret_conn_str and "@" in secret_conn_str:
+            # Extract password (between first : and last @)
+            after_protocol = secret_conn_str.split("://")[1]
+            # Split from right to handle @ in password
+            user_pass, _ = after_protocol.rsplit("@", 1)
+            if ":" in user_pass:
+                _, password = user_pass.split(":", 1)  # Everything after first :
+            else:
+                password = "password"
+        else:
+            password = "password"
+
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to fetch connection string from Secret Manager: {e}")
-        logger.info("Falling back to localhost (assuming Cloud SQL Proxy)")
-        return "postgresql://govbrnews_app:password@127.0.0.1:5432/govbrnews"
+        password = "password"
+
+    # Check if using Cloud SQL Proxy locally
+    proxy_check = subprocess.run(
+        ["pgrep", "-f", "cloud-sql-proxy"],
+        capture_output=True,
+    )
+
+    if proxy_check.returncode == 0:
+        logger.info("Cloud SQL Proxy detected, using localhost connection")
+        # URL-encode the password to handle special characters
+        encoded_password = quote_plus(password)
+        return f"postgresql://govbrnews_app:{encoded_password}@127.0.0.1:5432/govbrnews"
+
+    # Return original secret for direct connection
+    return secret_conn_str
 
 
 def load_themes_yaml(filepath: Path) -> List[Dict[str, Any]]:
