@@ -110,6 +110,58 @@ data-platform/
 - Git commit: `58e6dc0` - "feat: initial setup - Fase 0"
 - Repositório: `/Users/nitai/Dropbox/dev-mgi/destaquesgovbr/data-platform`
 
+### 2024-12-24 - [Fase 1] Infraestrutura Cloud SQL Configurada
+
+**Status**: ✅ Completo (Terraform criado, aguardando apply via CI/CD)
+
+**O que foi feito**:
+- Criado `cloud_sql.tf` com configuração completa do PostgreSQL:
+  - Instância PostgreSQL 15
+  - Tier: `db-custom-1-3840` (1 vCPU, 3.75GB RAM)
+  - Storage: 50GB SSD com auto-resize até 500GB
+  - Backups diários às 3 AM UTC (30 dias de retenção)
+  - Point-in-time recovery habilitado (7 dias)
+  - Região: southamerica-east1 (São Paulo)
+- Configurado secrets no Secret Manager:
+  - `govbrnews-postgres-connection-string` (URI completa)
+  - `govbrnews-postgres-host` (IP privado)
+  - `govbrnews-postgres-password` (senha gerada)
+- Criado service account `destaquesgovbr-data-platform`
+- Configurado IAM bindings para acesso aos secrets:
+  - data-platform service account
+  - github-actions service account
+- Adicionadas variáveis ao `variables.tf`:
+  - `postgres_tier`
+  - `postgres_disk_size_gb`
+  - `postgres_high_availability`
+  - `postgres_authorized_networks`
+- Adicionado provider `random` ao `main.tf` (geração de senhas)
+- Criada documentação completa: `docs/cloud-sql.md`
+
+**Configuração do Database**:
+- Nome: `govbrnews`
+- Charset: UTF8
+- User: `govbrnews_app` (senha gerenciada automaticamente)
+
+**Problemas encontrados**:
+- Nenhum
+
+**Próximos passos**:
+- [ ] Aplicar Terraform via CI/CD workflow
+- [ ] Testar conexão ao PostgreSQL via Cloud SQL Proxy
+- [ ] Validar acesso aos secrets
+- [ ] Criar schema do banco (agencies, themes, news)
+- [ ] Iniciar Fase 2: PostgresManager
+
+**Artefatos**:
+- Git commit (infra): `c2f525e` - "feat: add Cloud SQL PostgreSQL for Data Platform"
+- Arquivos criados:
+  - `/destaquesgovbr/infra/terraform/cloud_sql.tf`
+  - `/destaquesgovbr/infra/docs/cloud-sql.md`
+- Arquivos modificados:
+  - `/destaquesgovbr/infra/terraform/variables.tf`
+  - `/destaquesgovbr/infra/terraform/main.tf`
+
 ---
 
 ## Template para Novas Entradas
@@ -142,7 +194,8 @@ Copie e cole este template ao adicionar novas entradas:
 |------|------|-------|--------|
 | 2024-12-24 | 0 | Plano criado | ✅ |
 | 2024-12-24 | 0 | Repositório setup completo | ✅ |
-| ____-__-__ | 1 | Cloud SQL provisionado | ⏳ |
+| 2024-12-24 | 1 | Cloud SQL configurado (Terraform) | ✅ |
+| ____-__-__ | 1 | Cloud SQL provisionado (apply) | ⏳ |
 | ____-__-__ | 2 | PostgresManager implementado | ⏳ |
 | ____-__-__ | 3 | Dados migrados | ⏳ |
 | ____-__-__ | 4 | Dual-write funcionando | ⏳ |
