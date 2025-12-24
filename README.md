@@ -1,10 +1,15 @@
 # DestaquesGovBr Data Platform
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![PostgreSQL 15](https://img.shields.io/badge/postgresql-15-blue.svg)](https://www.postgresql.org/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 > **Status**: 🚧 Em desenvolvimento - Fase 1: Infraestrutura ✅ | Fase 2: PostgresManager 🚧
 >
 > Plataforma de dados para agregação, enriquecimento e disponibilização de notícias governamentais brasileiras.
 
-📚 **[Ver Documentação Completa](docs/README.md)**
+📚 **[Ver Documentação Completa](docs/README.md)** | 🗃️ **[Dataset Público](https://huggingface.co/datasets/nitaibezerra/govbrnews)**
 
 ---
 
