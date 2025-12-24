@@ -28,31 +28,41 @@ from data_platform.managers import PostgresManager
 from data_platform.models import NewsInsert
 
 
-def parse_datetime(dt_str: Optional[str]) -> Optional[datetime]:
-    """Parse datetime string to datetime object."""
-    if not dt_str:
+def parse_datetime(dt_input: Optional[any]) -> Optional[datetime]:
+    """Parse datetime string or object to datetime object."""
+    if not dt_input:
+        return None
+
+    # If already a datetime object, return it (ensure it has timezone)
+    if isinstance(dt_input, datetime):
+        if dt_input.tzinfo is None:
+            return dt_input.replace(tzinfo=timezone.utc)
+        return dt_input
+
+    # If not a string, can't parse
+    if not isinstance(dt_input, str):
         return None
 
     try:
         # Try ISO format first
-        if "T" in dt_str:
-            if dt_str.endswith("Z"):
-                dt_str = dt_str[:-1] + "+00:00"
-            return datetime.fromisoformat(dt_str)
+        if "T" in dt_input:
+            if dt_input.endswith("Z"):
+                dt_input = dt_input[:-1] + "+00:00"
+            return datetime.fromisoformat(dt_input)
 
         # Try common formats
         for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
             try:
-                dt = datetime.strptime(dt_str, fmt)
+                dt = datetime.strptime(dt_input, fmt)
                 return dt.replace(tzinfo=timezone.utc)
             except ValueError:
                 continue
 
-        logger.warning(f"Could not parse datetime: {dt_str}")
+        logger.warning(f"Could not parse datetime: {dt_input}")
         return None
 
     except Exception as e:
-        logger.warning(f"Error parsing datetime '{dt_str}': {e}")
+        logger.warning(f"Error parsing datetime '{dt_input}': {e}")
         return None
 
 
