@@ -162,6 +162,51 @@ data-platform/
   - `/destaquesgovbr/infra/terraform/variables.tf`
   - `/destaquesgovbr/infra/terraform/main.tf`
 
+### 2024-12-24 - [Fase 1] PR Criado e Schema SQL Preparado
+
+**Status**: ⚠️ Em progresso (aguardando merge do PR #42)
+
+**O que foi feito**:
+- Criado PR #42 no repositório infra: "feat: Add Cloud SQL PostgreSQL for Data Platform"
+- Terraform plan executado com sucesso via GitHub Actions
+- Plan output: "20 to add, 8 to change, 0 to destroy"
+- Corrigido erro de validação (removido `require_ssl` inválido)
+- **Preparação para Fase 2** (enquanto aguarda merge):
+  - Criado `scripts/create_schema.sql` com schema completo:
+    - 4 tabelas: agencies, themes, news, sync_log
+    - 15+ indexes otimizados para queries comuns
+    - 3 triggers (updated_at, denormalização)
+    - 2 views auxiliares (news_with_themes, recent_syncs)
+    - Validação automática de schema
+  - Criado `scripts/setup_database.sh`:
+    - Script automatizado para criar schema via Cloud SQL Proxy
+    - Validação de pré-requisitos
+    - Verificação de estado do banco
+    - Saída formatada e colorida
+  - Criado `_plan/POSTGRES_TEST_PLAN.md`:
+    - 6 categorias de testes pós-apply
+    - 15+ casos de teste validando infraestrutura
+    - Checklist de validação completo
+
+**Problemas encontrados**:
+- **Erro Terraform**: Argumento `require_ssl` não é válido em `ip_configuration` block
+  - **Solução**: Removido a linha, SSL é gerenciado pelo Cloud SQL Proxy
+
+**Próximos passos**:
+- [ ] Aguardar merge do PR #42 para executar terraform apply
+- [ ] Executar testes de validação conforme POSTGRES_TEST_PLAN.md
+- [ ] Rodar `scripts/setup_database.sh` para criar schema
+- [ ] Popular agencies e themes (scripts a criar)
+
+**Artefatos**:
+- PR #42: https://github.com/destaquesgovbr/infra/pull/42
+- Git branch: `feat/cloud-sql-postgres`
+- Workflow run: terraform-plan (ID: 20490642048) - ✅ SUCCESS
+- Arquivos criados (data-platform):
+  - `scripts/create_schema.sql` (500+ linhas de SQL)
+  - `scripts/setup_database.sh` (script shell automatizado)
+  - `_plan/POSTGRES_TEST_PLAN.md` (plano de testes)
+
 ---
 
 ## Template para Novas Entradas
