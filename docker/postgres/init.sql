@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS news (
     title TEXT NOT NULL,
     url TEXT,
     image_url TEXT,
+    video_url TEXT,
     category VARCHAR(500),
     tags TEXT[],
     content TEXT,
@@ -70,7 +71,6 @@ CREATE TABLE IF NOT EXISTS news (
     extracted_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    synced_to_hf_at TIMESTAMP WITH TIME ZONE,
 
     -- Denormalized (performance)
     agency_key VARCHAR(100),
@@ -84,7 +84,6 @@ CREATE INDEX IF NOT EXISTS idx_news_agency_id ON news(agency_id);
 CREATE INDEX IF NOT EXISTS idx_news_most_specific_theme ON news(most_specific_theme_id);
 CREATE INDEX IF NOT EXISTS idx_news_agency_key ON news(agency_key);
 CREATE INDEX IF NOT EXISTS idx_news_agency_date ON news(agency_id, published_at DESC);
-CREATE INDEX IF NOT EXISTS idx_news_synced_to_hf ON news(synced_to_hf_at) WHERE synced_to_hf_at IS NULL;
 
 -- Trigger to update updated_at automatically
 CREATE OR REPLACE FUNCTION update_updated_at_column()

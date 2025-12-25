@@ -55,6 +55,7 @@ class News(BaseModel):
     title: str
     url: Optional[str] = None
     image_url: Optional[str] = None
+    video_url: Optional[str] = None
     category: Optional[str] = None
     tags: Optional[List[str]] = None
     content: Optional[str] = None
@@ -70,7 +71,6 @@ class News(BaseModel):
     extracted_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    synced_to_hf_at: Optional[datetime] = None
 
     # Denormalized (performance)
     agency_key: Optional[str] = None
@@ -92,6 +92,7 @@ class NewsInsert(BaseModel):
     title: str
     url: Optional[str] = None
     image_url: Optional[str] = None
+    video_url: Optional[str] = None
     category: Optional[str] = None
     tags: Optional[List[str]] = None
     content: Optional[str] = None
