@@ -356,9 +356,70 @@ data-platform/
   - tests/unit/test_postgres_manager.py
   - tests/unit/test_models.py
 
-### 2024-12-24 - [Fase 3] Ambiente Docker e Scripts de Migração - FASE 3 EM PROGRESSO
+### 2024-12-25 - [Fase 3] Migração Completa para Cloud SQL - FASE 3 COMPLETA
 
-**Status**: ⚠️ Em progresso (scripts prontos, aguardando migração completa)
+**Status**: ✅ Completo
+
+**O que foi feito**:
+- **Migração de 309.050 registros executada com sucesso** (99.95% do dataset)
+  - 193 registros ignorados por terem published_at = NULL
+  - Taxa de inserção: ~450 registros/segundo (média)
+  - Tempo total: ~12 minutos
+- **Otimizações de performance aplicadas** (6-8x mais rápido):
+  - Dropped idx_news_fts (índice FTS de 262MB → 1.1GB)
+  - Disabled trigger denormalize_news_agency
+  - Dropped indexes não-críticos durante bulk insert
+- **Validação completa passou**:
+  - 0 campos NULL em campos obrigatórios
+  - 0 referências inválidas de agency
+  - 0 referências inválidas de theme
+  - 0 unique_ids duplicados
+  - 100% consistência em amostragem de 100 registros
+  - 95%+ cobertura de temas
+- **Índices recriados** (sem FTS - buscas via Typesense):
+  - idx_news_agency_date: 18 MB
+  - idx_news_synced_to_hf: 8192 bytes
+  - idx_news_theme_l1: 5976 kB
+  - Trigger denormalize_news_agency reabilitado
+- **Índice FTS removido permanentemente**:
+  - Buscas são feitas no Typesense, não no PostgreSQL
+  - Economia de 1.1GB de espaço
+  - Script recreate_indexes_after_migration.py atualizado
+
+**Problemas encontrados e soluções**:
+1. **Performance inicial muito lenta (40-95 rec/s)**:
+   - Causa: Índice FTS sendo atualizado a cada INSERT
+   - Solução: Dropped todos os índices não-críticos durante migração
+
+2. **Erro tsvector limit exceeded**:
+   - Erro: "string is too long for tsvector (2300174 bytes, max 1048575 bytes)"
+   - Causa: Alguns campos content excedem 1MB (limite do tsvector)
+   - Solução: Dropped índice FTS (não necessário - Typesense é usado para buscas)
+
+3. **CREATE INDEX CONCURRENTLY em transaction**:
+   - Erro: "cannot run inside a transaction block"
+   - Solução: Adicionado `conn.autocommit = True` no script
+
+**Documentação criada**:
+- [docs/migration/performance-optimization.md](docs/migration/performance-optimization.md)
+  - Root causes da lentidão
+  - Soluções aplicadas
+  - Resultados (6-8x improvement)
+  - Best practices para futuras migrações
+
+**Artefatos**:
+- Scripts executados:
+  - scripts/migrate_hf_to_postgres.py (migração completa)
+  - scripts/recreate_indexes_after_migration.py (índices sem FTS)
+- Arquivos modificados:
+  - scripts/recreate_indexes_after_migration.py (FTS removido)
+- Documentação: docs/migration/performance-optimization.md
+
+---
+
+### 2024-12-24 - [Fase 3] Ambiente Docker e Scripts de Migração
+
+**Status**: ✅ Completo (parte da Fase 3)
 
 **O que foi feito**:
 - **Ambiente Docker local criado**:
@@ -440,10 +501,10 @@ data-platform/
    - Solução: `ALTER TABLE agencies DISABLE TRIGGER ALL` durante inserção
 
 **Próximos passos**:
-- [ ] Executar migração completa (~309k registros) no Cloud SQL (staging)
-- [ ] Validar migração completa com validate_migration.py
-- [ ] Atualizar documentação com resultados e lições aprendidas
-- [ ] Criar PR da Fase 3 incluindo todos os commits
+- [x] Executar migração completa (~309k registros) no Cloud SQL
+- [x] Validar migração completa com validate_migration.py
+- [x] Atualizar documentação com resultados e lições aprendidas
+- [x] Criar PR da Fase 3 incluindo todos os commits
 
 **Artefatos**:
 - Commits (aguardando PR):
@@ -505,11 +566,11 @@ Copie e cole este template ao adicionar novas entradas:
 | 2024-12-24 | 2 | Tabelas mestres populadas (agencies, themes) | ✅ |
 | 2024-12-24 | 3 | Ambiente Docker local criado | ✅ |
 | 2024-12-24 | 3 | Scripts de migração criados e testados | ✅ |
-| ____-__-__ | 3 | Migração completa executada (309k) | ⏳ |
+| 2024-12-25 | 3 | Migração completa executada (309k) | ✅ |
 | ____-__-__ | 4 | Dual-write funcionando | ⏳ |
 | ____-__-__ | 5 | PostgreSQL como primary | ⏳ |
 | ____-__-__ | 6 | Todos consumidores migrados | ⏳ |
 
 ---
 
-*Última atualização: 2024-12-24 17:30*
+*Última atualização: 2024-12-25 15:30*
