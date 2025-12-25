@@ -1,0 +1,408 @@
+"""
+Storage Adapter for DestaquesGovBr.
+
+Provides a unified interface for storage backends (PostgreSQL, HuggingFace)
+supporting dual-write mode for migration phases.
+"""
+
+import os
+from enum import Enum
+from typing import Optional, List, OrderedDict, Dict, Any
+from datetime import datetime
+
+import pandas as pd
+from loguru import logger
+
+from data_platform.managers.postgres_manager import PostgresManager
+from data_platform.models.news import NewsInsert
+
+
+class StorageBackend(Enum):
+    """Available storage backends."""
+
+    HUGGINGFACE = "huggingface"
+    POSTGRES = "postgres"
+    DUAL_WRITE = "dual_write"
+
+
+class StorageAdapter:
+    """
+    Unified storage adapter that abstracts backend selection.
+
+    Supports three modes:
+    - HUGGINGFACE: Write to HuggingFace only (legacy)
+    - POSTGRES: Write to PostgreSQL only (target)
+    - DUAL_WRITE: Write to both backends (migration phase)
+
+    Read source can be configured separately via STORAGE_READ_FROM env var.
+
+    Environment variables:
+    - STORAGE_BACKEND: Backend for writes (huggingface, postgres, dual_write)
+    - STORAGE_READ_FROM: Backend for reads (huggingface, postgres)
+    - DATABASE_URL: PostgreSQL connection string
+    - HF_TOKEN: HuggingFace token (for HF backend)
+    """
+
+    def __init__(
+        self,
+        backend: Optional[StorageBackend] = None,
+        read_from: Optional[StorageBackend] = None,
+        postgres_manager: Optional[PostgresManager] = None,
+        dataset_manager: Optional[Any] = None,  # DatasetManager from scraper
+    ):
+        """
+        Initialize StorageAdapter.
+
+        Args:
+            backend: Storage backend for writes. Defaults to STORAGE_BACKEND env var.
+            read_from: Backend for reads. Defaults to STORAGE_READ_FROM env var.
+            postgres_manager: Optional pre-configured PostgresManager.
+            dataset_manager: Optional pre-configured DatasetManager (HuggingFace).
+        """
+        # Determine write backend
+        backend_str = os.getenv("STORAGE_BACKEND", "huggingface")
+        self.backend = backend or StorageBackend(backend_str.lower())
+
+        # Determine read backend (defaults to write backend for non-dual modes)
+        read_str = os.getenv("STORAGE_READ_FROM", backend_str)
+        if read_from:
+            self.read_from = read_from
+        elif self.backend == StorageBackend.DUAL_WRITE:
+            # During dual-write, default to reading from HF (legacy)
+            self.read_from = StorageBackend(read_str.lower())
+        else:
+            self.read_from = self.backend
+
+        logger.info(f"StorageAdapter initialized: write={self.backend.value}, read={self.read_from.value}")
+
+        # Lazy-load managers
+        self._postgres_manager = postgres_manager
+        self._dataset_manager = dataset_manager
+
+    @property
+    def postgres(self) -> PostgresManager:
+        """Lazy-load PostgresManager."""
+        if self._postgres_manager is None:
+            logger.info("Initializing PostgresManager...")
+            self._postgres_manager = PostgresManager()
+            self._postgres_manager.load_cache()
+        return self._postgres_manager
+
+    @property
+    def huggingface(self) -> Any:
+        """Lazy-load DatasetManager (HuggingFace)."""
+        if self._dataset_manager is None:
+            # Import here to avoid circular dependencies
+            # DatasetManager is in the scraper repo
+            try:
+                from dataset_manager import DatasetManager
+                logger.info("Initializing DatasetManager (HuggingFace)...")
+                self._dataset_manager = DatasetManager()
+            except ImportError:
+                raise ImportError(
+                    "DatasetManager not found. Make sure the scraper package is installed "
+                    "or STORAGE_BACKEND is set to 'postgres'."
+                )
+        return self._dataset_manager
+
+    def insert(self, new_data: OrderedDict, allow_update: bool = False) -> int:
+        """
+        Insert new records into storage.
+
+        Follows DatasetManager interface for compatibility.
+
+        Args:
+            new_data: OrderedDict with arrays for each column
+            allow_update: If True, update existing records with same unique_id
+
+        Returns:
+            Number of records inserted/updated
+        """
+        total_records = len(new_data.get("unique_id", []))
+        logger.info(f"Inserting {total_records} records (backend={self.backend.value})")
+
+        errors = []
+        inserted = 0
+
+        if self.backend in (StorageBackend.HUGGINGFACE, StorageBackend.DUAL_WRITE):
+            try:
+                self.huggingface.insert(new_data, allow_update=allow_update)
+                logger.success(f"HuggingFace: inserted {total_records} records")
+                inserted = total_records
+            except Exception as e:
+                logger.error(f"HuggingFace insert failed: {e}")
+                errors.append(("huggingface", str(e)))
+
+        if self.backend in (StorageBackend.POSTGRES, StorageBackend.DUAL_WRITE):
+            try:
+                news_list = self._convert_to_news_insert(new_data)
+                inserted = self.postgres.insert(news_list, allow_update=allow_update)
+                logger.success(f"PostgreSQL: inserted {inserted} records")
+            except Exception as e:
+                logger.error(f"PostgreSQL insert failed: {e}")
+                errors.append(("postgres", str(e)))
+
+        if errors:
+            if self.backend == StorageBackend.DUAL_WRITE:
+                # In dual-write mode, log errors but don't fail if at least one backend succeeded
+                for backend, error in errors:
+                    logger.warning(f"Backend {backend} failed: {error}")
+                if len(errors) == 2:
+                    raise Exception(f"All backends failed: {errors}")
+            else:
+                raise Exception(f"Insert failed: {errors[0]}")
+
+        return inserted
+
+    def update(self, updated_df: pd.DataFrame) -> int:
+        """
+        Update existing records.
+
+        Follows DatasetManager interface for compatibility.
+
+        Args:
+            updated_df: DataFrame with updates (must include unique_id column)
+
+        Returns:
+            Number of records updated
+        """
+        total_records = len(updated_df)
+        logger.info(f"Updating {total_records} records (backend={self.backend.value})")
+
+        errors = []
+        updated = 0
+
+        if self.backend in (StorageBackend.HUGGINGFACE, StorageBackend.DUAL_WRITE):
+            try:
+                self.huggingface.update(updated_df)
+                logger.success(f"HuggingFace: updated {total_records} records")
+                updated = total_records
+            except Exception as e:
+                logger.error(f"HuggingFace update failed: {e}")
+                errors.append(("huggingface", str(e)))
+
+        if self.backend in (StorageBackend.POSTGRES, StorageBackend.DUAL_WRITE):
+            try:
+                updated = self._update_postgres(updated_df)
+                logger.success(f"PostgreSQL: updated {updated} records")
+            except Exception as e:
+                logger.error(f"PostgreSQL update failed: {e}")
+                errors.append(("postgres", str(e)))
+
+        if errors:
+            if self.backend == StorageBackend.DUAL_WRITE:
+                for backend, error in errors:
+                    logger.warning(f"Backend {backend} failed: {error}")
+                if len(errors) == 2:
+                    raise Exception(f"All backends failed: {errors}")
+            else:
+                raise Exception(f"Update failed: {errors[0]}")
+
+        return updated
+
+    def get(
+        self,
+        min_date: str,
+        max_date: str,
+        agency: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Get records from storage by date range.
+
+        Follows DatasetManager interface for compatibility.
+
+        Args:
+            min_date: Minimum date (YYYY-MM-DD)
+            max_date: Maximum date (YYYY-MM-DD)
+            agency: Optional agency filter
+
+        Returns:
+            DataFrame with matching records
+        """
+        logger.info(f"Getting records: {min_date} to {max_date} (read_from={self.read_from.value})")
+
+        if self.read_from == StorageBackend.HUGGINGFACE:
+            return self.huggingface.get(min_date, max_date, agency=agency)
+        else:
+            return self._get_postgres(min_date, max_date, agency)
+
+    def get_count(self) -> int:
+        """Get total record count from read backend."""
+        if self.read_from == StorageBackend.POSTGRES:
+            return self.postgres.get_count()
+        else:
+            # For HuggingFace, load dataset and get length
+            df = self.huggingface.get("1900-01-01", "2099-12-31")
+            return len(df)
+
+    # -------------------------------------------------------------------------
+    # Private helper methods
+    # -------------------------------------------------------------------------
+
+    def _convert_to_news_insert(self, data: OrderedDict) -> List[NewsInsert]:
+        """Convert OrderedDict data to list of NewsInsert objects."""
+        news_list = []
+
+        # Get number of records
+        num_records = len(data.get("unique_id", []))
+
+        for i in range(num_records):
+            try:
+                # Extract fields with defaults
+                published_at = data.get("published_at", [None])[i]
+                if published_at is None:
+                    logger.warning(f"Skipping record {i}: missing published_at")
+                    continue
+
+                # Parse datetime if string
+                if isinstance(published_at, str):
+                    published_at = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+
+                # Resolve agency_key to agency_id
+                agency_key = data.get("agency", [""])[i]
+                agency = self.postgres._agencies_by_key.get(agency_key)
+                if not agency:
+                    logger.warning(f"Skipping record {i}: unknown agency '{agency_key}'")
+                    continue
+                agency_id = agency.id
+
+                # Resolve theme codes to IDs
+                theme_l1_code = data.get("theme_1_level_1_code", [None])[i]
+                theme_l2_code = data.get("theme_1_level_2_code", [None])[i]
+                theme_l3_code = data.get("theme_1_level_3_code", [None])[i]
+                most_specific_code = data.get("most_specific_theme_code", [None])[i]
+
+                theme_l1_id = self._resolve_theme_id(theme_l1_code)
+                theme_l2_id = self._resolve_theme_id(theme_l2_code)
+                theme_l3_id = self._resolve_theme_id(theme_l3_code)
+                most_specific_id = self._resolve_theme_id(most_specific_code)
+
+                news = NewsInsert(
+                    unique_id=data.get("unique_id", [""])[i],
+                    agency_id=agency_id,
+                    agency_key=agency_key,
+                    agency_name=agency.name,
+                    theme_l1_id=theme_l1_id,
+                    theme_l2_id=theme_l2_id,
+                    theme_l3_id=theme_l3_id,
+                    most_specific_theme_id=most_specific_id,
+                    title=data.get("title", [""])[i],
+                    url=data.get("url", [None])[i],
+                    image_url=data.get("image", [None])[i],  # HF uses 'image', not 'image_url'
+                    video_url=data.get("video_url", [None])[i],
+                    category=data.get("category", [None])[i],
+                    tags=data.get("tags", [[]])[i] or [],
+                    content=data.get("content", [None])[i],
+                    editorial_lead=data.get("editorial_lead", [None])[i],
+                    subtitle=data.get("subtitle", [None])[i],
+                    summary=data.get("summary", [None])[i],
+                    published_at=published_at,
+                    updated_datetime=self._parse_datetime(data.get("updated_datetime", [None])[i]),
+                    extracted_at=self._parse_datetime(data.get("extracted_at", [None])[i]),
+                )
+                news_list.append(news)
+            except Exception as e:
+                logger.warning(f"Error converting record {i}: {e}")
+                continue
+
+        return news_list
+
+    def _resolve_theme_id(self, theme_code: Optional[str]) -> Optional[int]:
+        """Resolve theme code to ID using cache."""
+        if not theme_code:
+            return None
+        theme = self.postgres._themes_by_code.get(theme_code)
+        return theme.id if theme else None
+
+    def _parse_datetime(self, value: Any) -> Optional[datetime]:
+        """Parse datetime from various formats."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except:
+                return None
+        # Handle pandas Timestamp
+        if hasattr(value, "to_pydatetime"):
+            return value.to_pydatetime()
+        return None
+
+    def _update_postgres(self, updated_df: pd.DataFrame) -> int:
+        """Update records in PostgreSQL from DataFrame."""
+        updated = 0
+
+        for _, row in updated_df.iterrows():
+            unique_id = row.get("unique_id")
+            if not unique_id:
+                continue
+
+            # Build updates dict from row, excluding unique_id
+            updates = {}
+            for col, value in row.items():
+                if col == "unique_id":
+                    continue
+                if pd.notna(value):
+                    updates[col] = value
+
+            if updates:
+                if self.postgres.update(unique_id, updates):
+                    updated += 1
+
+        return updated
+
+    def _get_postgres(
+        self,
+        min_date: str,
+        max_date: str,
+        agency: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """Get records from PostgreSQL."""
+        filters = {
+            "published_at__gte": min_date,
+            "published_at__lte": max_date,
+        }
+
+        if agency:
+            filters["agency_key"] = agency
+
+        records = self.postgres.get(filters=filters)
+
+        # Convert to DataFrame matching HuggingFace format
+        if not records:
+            return pd.DataFrame()
+
+        data = []
+        for record in records:
+            data.append({
+                "unique_id": record.unique_id,
+                "agency": record.agency_key,
+                "title": record.title,
+                "url": record.url,
+                "image": record.image_url,  # Match HF column name
+                "video_url": record.video_url,
+                "category": record.category,
+                "tags": record.tags,
+                "content": record.content,
+                "editorial_lead": record.editorial_lead,
+                "subtitle": record.subtitle,
+                "summary": record.summary,
+                "published_at": record.published_at,
+                "updated_datetime": record.updated_datetime,
+                "extracted_at": record.extracted_at,
+                "theme_1_level_1_code": self._get_theme_code(record.theme_l1_id),
+                "theme_1_level_2_code": self._get_theme_code(record.theme_l2_id),
+                "theme_1_level_3_code": self._get_theme_code(record.theme_l3_id),
+                "most_specific_theme_code": self._get_theme_code(record.most_specific_theme_id),
+            })
+
+        return pd.DataFrame(data)
+
+    def _get_theme_code(self, theme_id: Optional[int]) -> Optional[str]:
+        """Get theme code from ID using cache."""
+        if theme_id is None:
+            return None
+        theme = self.postgres._themes_by_id.get(theme_id)
+        return theme.code if theme else None
