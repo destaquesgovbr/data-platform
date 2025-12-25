@@ -567,10 +567,13 @@ Copie e cole este template ao adicionar novas entradas:
 | 2024-12-24 | 3 | Ambiente Docker local criado | ✅ |
 | 2024-12-24 | 3 | Scripts de migração criados e testados | ✅ |
 | 2024-12-25 | 3 | Migração completa executada (309k) | ✅ |
-| ____-__-__ | 4 | Dual-write funcionando | ⏳ |
+| 2024-12-25 | 4 | StorageAdapter implementado (PR #5) | ✅ |
+| 2024-12-25 | 4 | StorageWrapper no scraper criado | ✅ |
+| 2024-12-25 | 4 | Dual-write testado localmente (13 records) | ✅ |
+| ____-__-__ | 4 | GitHub Actions configurado dual_write | ⏳ |
 | ____-__-__ | 5 | PostgreSQL como primary | ⏳ |
 | ____-__-__ | 6 | Todos consumidores migrados | ⏳ |
 
 ---
 
-*Última atualização: 2024-12-25 15:30*
+*Última atualização: 2024-12-25 16:15*

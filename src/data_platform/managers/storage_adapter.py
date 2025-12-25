@@ -246,10 +246,15 @@ class StorageAdapter:
         # Get number of records
         num_records = len(data.get("unique_id", []))
 
+        def safe_get(field: str, default=None):
+            """Safely get a value from data at index i, with default if missing."""
+            values = data.get(field, [])
+            return values[i] if i < len(values) else default
+
         for i in range(num_records):
             try:
                 # Extract fields with defaults
-                published_at = data.get("published_at", [None])[i]
+                published_at = safe_get("published_at")
                 if published_at is None:
                     logger.warning(f"Skipping record {i}: missing published_at")
                     continue
@@ -259,18 +264,18 @@ class StorageAdapter:
                     published_at = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
 
                 # Resolve agency_key to agency_id
-                agency_key = data.get("agency", [""])[i]
+                agency_key = safe_get("agency", "")
                 agency = self.postgres._agencies_by_key.get(agency_key)
                 if not agency:
                     logger.warning(f"Skipping record {i}: unknown agency '{agency_key}'")
                     continue
                 agency_id = agency.id
 
-                # Resolve theme codes to IDs
-                theme_l1_code = data.get("theme_1_level_1_code", [None])[i]
-                theme_l2_code = data.get("theme_1_level_2_code", [None])[i]
-                theme_l3_code = data.get("theme_1_level_3_code", [None])[i]
-                most_specific_code = data.get("most_specific_theme_code", [None])[i]
+                # Resolve theme codes to IDs (themes may not be present for new records)
+                theme_l1_code = safe_get("theme_1_level_1_code")
+                theme_l2_code = safe_get("theme_1_level_2_code")
+                theme_l3_code = safe_get("theme_1_level_3_code")
+                most_specific_code = safe_get("most_specific_theme_code")
 
                 theme_l1_id = self._resolve_theme_id(theme_l1_code)
                 theme_l2_id = self._resolve_theme_id(theme_l2_code)
@@ -278,7 +283,7 @@ class StorageAdapter:
                 most_specific_id = self._resolve_theme_id(most_specific_code)
 
                 news = NewsInsert(
-                    unique_id=data.get("unique_id", [""])[i],
+                    unique_id=safe_get("unique_id", ""),
                     agency_id=agency_id,
                     agency_key=agency_key,
                     agency_name=agency.name,
@@ -286,19 +291,19 @@ class StorageAdapter:
                     theme_l2_id=theme_l2_id,
                     theme_l3_id=theme_l3_id,
                     most_specific_theme_id=most_specific_id,
-                    title=data.get("title", [""])[i],
-                    url=data.get("url", [None])[i],
-                    image_url=data.get("image", [None])[i],  # HF uses 'image', not 'image_url'
-                    video_url=data.get("video_url", [None])[i],
-                    category=data.get("category", [None])[i],
-                    tags=data.get("tags", [[]])[i] or [],
-                    content=data.get("content", [None])[i],
-                    editorial_lead=data.get("editorial_lead", [None])[i],
-                    subtitle=data.get("subtitle", [None])[i],
-                    summary=data.get("summary", [None])[i],
+                    title=safe_get("title", ""),
+                    url=safe_get("url"),
+                    image_url=safe_get("image"),  # HF uses 'image', not 'image_url'
+                    video_url=safe_get("video_url"),
+                    category=safe_get("category"),
+                    tags=safe_get("tags") or [],
+                    content=safe_get("content"),
+                    editorial_lead=safe_get("editorial_lead"),
+                    subtitle=safe_get("subtitle"),
+                    summary=safe_get("summary"),
                     published_at=published_at,
-                    updated_datetime=self._parse_datetime(data.get("updated_datetime", [None])[i]),
-                    extracted_at=self._parse_datetime(data.get("extracted_at", [None])[i]),
+                    updated_datetime=self._parse_datetime(safe_get("updated_datetime")),
+                    extracted_at=self._parse_datetime(safe_get("extracted_at")),
                 )
                 news_list.append(news)
             except Exception as e:
