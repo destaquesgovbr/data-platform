@@ -26,10 +26,11 @@ def recreate_indexes(dry_run: bool = False) -> None:
     Recreate indexes dropped during migration.
 
     Indexes to recreate:
-    1. idx_news_fts - Full-text search (GIN, truncated content)
-    2. idx_news_agency_date - Composite index for agency queries
-    3. idx_news_synced_to_hf - Partial index for HF sync
-    4. idx_news_theme_l1 - Simple index on theme_l1_id
+    1. idx_news_agency_date - Composite index for agency queries
+    2. idx_news_synced_to_hf - Partial index for HF sync
+    3. idx_news_theme_l1 - Simple index on theme_l1_id
+
+    Note: FTS index not created - searches are done in Typesense
 
     Args:
         dry_run: If True, only show what would be done
@@ -43,21 +44,17 @@ def recreate_indexes(dry_run: bool = False) -> None:
 
     with PostgresManager() as manager:
         conn = manager.get_connection()
+        # CONCURRENTLY requires autocommit mode
+        conn.autocommit = True
         cursor = conn.cursor()
 
         try:
-            # 1. Full-text search index (with content truncation to avoid tsvector limit)
-            logger.info("Creating idx_news_fts (Full-text search)...")
-            if not dry_run:
-                cursor.execute("""
-                    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_news_fts ON news
-                    USING GIN (to_tsvector('portuguese',
-                        title || ' ' || COALESCE(LEFT(content, 100000), '')
-                    ))
-                """)
-            logger.success("✓ idx_news_fts created (GIN, content truncated to 100KB)")
+            # NOTE: FTS index not needed - searches are done in Typesense
+            # If FTS is ever needed, use:
+            # CREATE INDEX idx_news_fts ON news
+            # USING GIN (to_tsvector('portuguese', title || ' ' || COALESCE(LEFT(content, 100000), '')))
 
-            # 2. Composite index for agency + date queries
+            # 1. Composite index for agency + date queries
             logger.info("Creating idx_news_agency_date...")
             if not dry_run:
                 cursor.execute("""
@@ -93,9 +90,6 @@ def recreate_indexes(dry_run: bool = False) -> None:
                 """)
             logger.success("✓ denormalize_news_agency trigger enabled")
 
-            if not dry_run:
-                conn.commit()
-
             logger.info("")
             logger.info("=" * 60)
             logger.success("✓ All indexes recreated successfully!")
@@ -118,8 +112,6 @@ def recreate_indexes(dry_run: bool = False) -> None:
                     logger.info(f"  {row[0]}: {row[1]}")
 
         except Exception as e:
-            if not dry_run:
-                conn.rollback()
             logger.error(f"Error recreating indexes: {e}")
             raise
 
