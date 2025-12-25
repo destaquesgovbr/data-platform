@@ -91,14 +91,6 @@ class TestPostgresManager:
             manager.update("unique123", {})
 
     @patch("data_platform.managers.postgres_manager.pool")
-    def test_mark_as_synced_empty_list_raises_error(self, mock_pool):
-        """Test that mark_as_synced_to_hf raises ValueError on empty list."""
-        manager = PostgresManager(connection_string="postgresql://test")
-
-        with pytest.raises(ValueError, match="unique_ids list cannot be empty"):
-            manager.mark_as_synced_to_hf([])
-
-    @patch("data_platform.managers.postgres_manager.pool")
     def test_context_manager(self, mock_pool):
         """Test PostgresManager as context manager."""
         mock_pool_instance = MagicMock()

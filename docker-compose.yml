@@ -7,9 +7,9 @@ services:
     restart: unless-stopped
 
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-govbrnews_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-destaquesgovbr_dev}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_password}
-      POSTGRES_DB: ${POSTGRES_DB:-govbrnews_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-destaquesgovbr_dev}
       # Performance tuning
       POSTGRES_SHARED_BUFFERS: 256MB
       POSTGRES_MAX_CONNECTIONS: 100
@@ -17,14 +17,14 @@ services:
       POSTGRES_MAINTENANCE_WORK_MEM: 64MB
 
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
 
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-govbrnews_dev}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-destaquesgovbr_dev}"]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -106,11 +106,11 @@ def map_hf_to_postgres(
         logger.warning(f"Unknown agency: {agency_key} for {unique_id}")
         return None
 
-    # Get theme IDs
-    theme_l1 = row.get("theme_l1")
-    theme_l2 = row.get("theme_l2")
-    theme_l3 = row.get("theme_l3")
-    most_specific_theme = row.get("most_specific_theme")
+    # Get theme IDs (HuggingFace uses theme_1_level_X_code field names)
+    theme_l1 = row.get("theme_1_level_1_code")
+    theme_l2 = row.get("theme_1_level_2_code")
+    theme_l3 = row.get("theme_1_level_3_code")
+    most_specific_theme = row.get("most_specific_theme_code")
 
     theme_l1_id = theme_map.get(theme_l1) if theme_l1 else None
     theme_l2_id = theme_map.get(theme_l2) if theme_l2 else None
@@ -141,7 +141,8 @@ def map_hf_to_postgres(
         most_specific_theme_id=most_specific_theme_id,
         title=title,
         url=row.get("url"),
-        image_url=row.get("image_url"),
+        image_url=row.get("image"),  # HF field is "image", not "image_url"
+        video_url=row.get("video_url"),
         category=row.get("category"),
         tags=tags,
         content=row.get("content"),

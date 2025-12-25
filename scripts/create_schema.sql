@@ -1,6 +1,6 @@
--- GovBRNews PostgreSQL Schema
--- Version: 1.0
--- Database: govbrnews
+-- DestaquesGovBR PostgreSQL Schema
+-- Version: 1.1
+-- Database: destaquesgovbr
 -- Encoding: UTF-8
 -- Timezone: UTC
 --
@@ -86,6 +86,7 @@ CREATE TABLE news (
     title TEXT NOT NULL,
     url TEXT,
     image_url TEXT,
+    video_url TEXT,
     category VARCHAR(500),
     tags TEXT[],
     content TEXT,
@@ -103,7 +104,6 @@ CREATE TABLE news (
     -- Metadata
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    synced_to_hf_at TIMESTAMP WITH TIME ZONE,
 
     -- Denormalized fields (for query performance)
     agency_key VARCHAR(100),
@@ -114,7 +114,7 @@ COMMENT ON TABLE news IS 'Main news storage (migrated from HuggingFace Dataset)'
 COMMENT ON COLUMN news.unique_id IS 'MD5(agency + published_at + title)';
 COMMENT ON COLUMN news.most_specific_theme_id IS 'Most granular theme (L3 > L2 > L1)';
 COMMENT ON COLUMN news.summary IS 'AI-generated summary from Cogfy';
-COMMENT ON COLUMN news.synced_to_hf_at IS 'Last sync to HuggingFace Dataset';
+COMMENT ON COLUMN news.video_url IS 'Video URL if available';
 COMMENT ON COLUMN news.agency_key IS 'Denormalized agency.key for performance';
 COMMENT ON COLUMN news.agency_name IS 'Denormalized agency.name for performance';
 
@@ -132,10 +132,6 @@ CREATE INDEX idx_news_agency_key ON news(agency_key);
 -- Theme filtering
 CREATE INDEX idx_news_theme_l1 ON news(theme_l1_id);
 CREATE INDEX idx_news_most_specific_theme ON news(most_specific_theme_id);
-
--- Sync tracking (partial index for unsync'd records)
-CREATE INDEX idx_news_synced_to_hf ON news(synced_to_hf_at)
-    WHERE synced_to_hf_at IS NULL;
 
 -- Composite indexes for common query patterns
 CREATE INDEX idx_news_agency_date ON news(agency_id, published_at DESC);
@@ -295,7 +291,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 INSERT INTO schema_version (version, description)
-VALUES ('1.0', 'Initial schema for GovBRNews data platform migration');
+VALUES ('1.1', 'Schema for DestaquesGovBR data platform - added video_url, removed synced_to_hf_at');
 
 -- =============================================================================
 -- COMPLETION MESSAGE
@@ -305,7 +301,7 @@ DO $$
 BEGIN
     RAISE NOTICE '';
     RAISE NOTICE '========================================';
-    RAISE NOTICE 'GovBRNews Schema v1.0 - READY';
+    RAISE NOTICE 'DestaquesGovBR Schema v1.1 - READY';
     RAISE NOTICE '========================================';
     RAISE NOTICE '';
     RAISE NOTICE 'Next steps:';

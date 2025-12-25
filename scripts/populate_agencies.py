@@ -37,7 +37,7 @@ def get_db_connection_string() -> str:
                 "versions",
                 "access",
                 "latest",
-                "--secret=govbrnews-postgres-connection-string",
+                "--secret=destaquesgovbr-postgres-connection-string",
             ],
             capture_output=True,
             text=True,
@@ -74,7 +74,7 @@ def get_db_connection_string() -> str:
         logger.info("Cloud SQL Proxy detected, using localhost connection")
         # URL-encode the password to handle special characters
         encoded_password = quote_plus(password)
-        return f"postgresql://govbrnews_app:{encoded_password}@127.0.0.1:5432/govbrnews"
+        return f"postgresql://destaquesgovbr_app:{encoded_password}@127.0.0.1:5432/destaquesgovbr"
 
     # Return original secret for direct connection
     return secret_conn_str

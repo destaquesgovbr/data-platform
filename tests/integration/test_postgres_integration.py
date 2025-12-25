@@ -118,43 +118,6 @@ class TestPostgresIntegration:
         # Clean up
         postgres_manager.update(unique_id, {"title": "DELETED - Integration Test"})
 
-    def test_get_records_for_hf_sync(self, postgres_manager):
-        """Test getting records that need HF sync."""
-        # Get an agency for testing
-        agency = postgres_manager.get_agency_by_key("mec")
-        assert agency is not None
-
-        # Create test news that needs syncing
-        unique_id = f"test_sync_{datetime.now().timestamp()}"
-        test_news = NewsInsert(
-            unique_id=unique_id,
-            agency_id=agency.id,
-            title="Test Sync News",
-            published_at=datetime.now(timezone.utc),
-            agency_key="mec",
-            agency_name=agency.name,
-        )
-
-        postgres_manager.insert([test_news])
-
-        # Get records for sync
-        records = postgres_manager.get_records_for_hf_sync(limit=1000)
-
-        # Should include our test record
-        found = any(r.unique_id == unique_id for r in records)
-        assert found
-
-        # Mark as synced
-        synced = postgres_manager.mark_as_synced_to_hf([unique_id])
-        assert synced == 1
-
-        # Verify it's marked
-        news = postgres_manager.get_by_unique_id(unique_id)
-        assert news.synced_to_hf_at is not None
-
-        # Clean up
-        postgres_manager.update(unique_id, {"title": "DELETED - Integration Test"})
-
     def test_count_with_filters(self, postgres_manager):
         """Test counting with filters."""
         # Get count of all news
