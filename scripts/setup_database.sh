@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup GovBRNews PostgreSQL Database
+# Setup DestaquesGovBR PostgreSQL Database
 # Connects via Cloud SQL Proxy and creates the schema
 
 set -e  # Exit on any error
@@ -8,8 +8,8 @@ set -e  # Exit on any error
 PROJECT_ID="inspire-7-finep"
 REGION="southamerica-east1"
 INSTANCE_NAME="destaquesgovbr-postgres"
-DATABASE="govbrnews"
-USER="govbrnews_app"
+DATABASE="destaquesgovbr"
+USER="destaquesgovbr_app"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -19,7 +19,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}GovBRNews Database Setup${NC}"
+echo -e "${BLUE}DestaquesGovBR Database Setup${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
@@ -42,7 +42,7 @@ if ! command -v psql &> /dev/null; then
 fi
 
 echo -e "${YELLOW}Step 1: Fetching database credentials...${NC}"
-PASSWORD=$(gcloud secrets versions access latest --secret="govbrnews-postgres-password" 2>/dev/null)
+PASSWORD=$(gcloud secrets versions access latest --secret="destaquesgovbr-postgres-password" 2>/dev/null)
 if [ -z "$PASSWORD" ]; then
     echo -e "${RED}Error: Could not fetch password from Secret Manager${NC}"
     echo "Make sure you're authenticated with gcloud and have access to the secret"
@@ -155,7 +155,7 @@ echo "  Database: $DATABASE"
 echo "  User: $USER"
 echo ""
 echo -e "${YELLOW}To connect manually:${NC}"
-echo "  PGPASSWORD=\$(gcloud secrets versions access latest --secret=\"govbrnews-postgres-password\")"
+echo "  PGPASSWORD=\$(gcloud secrets versions access latest --secret=\"destaquesgovbr-postgres-password\")"
 echo "  cloud-sql-proxy $CONNECTION_NAME &"
 echo "  psql -h 127.0.0.1 -U $USER -d $DATABASE"
 echo ""

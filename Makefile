@@ -35,7 +35,7 @@ docker-up:
 	docker-compose up -d
 	@echo "Waiting for PostgreSQL to be ready..."
 	@sleep 3
-	@docker exec destaquesgovbr-postgres pg_isready -U govbrnews_dev || (echo "PostgreSQL not ready yet, waiting more..." && sleep 5)
+	@docker exec destaquesgovbr-postgres pg_isready -U destaquesgovbr_dev || (echo "PostgreSQL not ready yet, waiting more..." && sleep 5)
 	@echo "PostgreSQL is ready!"
 
 docker-down:
@@ -60,12 +60,12 @@ setup-db: docker-up
 populate-master:
 	@echo "Populating master tables..."
 	@source /Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate && \
-		export DATABASE_URL="postgresql://govbrnews_dev:dev_password@localhost:5432/govbrnews_dev" && \
+		export DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" && \
 		python scripts/populate_agencies.py && \
 		python scripts/populate_themes.py
 
 psql:
-	docker exec -it destaquesgovbr-postgres psql -U govbrnews_dev -d govbrnews_dev
+	docker exec -it destaquesgovbr-postgres psql -U destaquesgovbr_dev -d destaquesgovbr_dev
 
 # Testing commands
 test:
@@ -78,14 +78,14 @@ test-unit:
 
 test-integration:
 	@source /Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate && \
-		export DATABASE_URL="postgresql://govbrnews_dev:dev_password@localhost:5432/govbrnews_dev" && \
+		export DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" && \
 		PYTHONPATH=src pytest tests/integration/ -v
 
 # Migration commands
 migrate:
 	@echo "Running test migration (1000 records)..."
 	@source /Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate && \
-		export DATABASE_URL="postgresql://govbrnews_dev:dev_password@localhost:5432/govbrnews_dev" && \
+		export DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" && \
 		python scripts/migrate_hf_to_postgres.py --max-records 1000
 
 migrate-full:
@@ -94,14 +94,14 @@ migrate-full:
 	echo; \
 	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
 		source /Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate && \
-		export DATABASE_URL="postgresql://govbrnews_dev:dev_password@localhost:5432/govbrnews_dev" && \
+		export DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" && \
 		python scripts/migrate_hf_to_postgres.py; \
 	fi
 
 validate:
 	@echo "Validating migration..."
 	@source /Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate && \
-		export DATABASE_URL="postgresql://govbrnews_dev:dev_password@localhost:5432/govbrnews_dev" && \
+		export DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" && \
 		python scripts/validate_migration.py
 
 # Cleanup commands
