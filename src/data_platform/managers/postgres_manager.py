@@ -26,8 +26,6 @@ class PostgresManager:
     - Connection pooling for performance
     - In-memory cache for agencies and themes
     - Batch insert/update operations
-    - Full-text search support
-    - HuggingFace sync tracking
     """
 
     def __init__(
@@ -80,7 +78,7 @@ class PostgresManager:
                     "versions",
                     "access",
                     "latest",
-                    "--secret=govbrnews-postgres-connection-string",
+                    "--secret=destaquesgovbr-postgres-connection-string",
                 ],
                 capture_output=True,
                 text=True,
@@ -112,7 +110,7 @@ class PostgresManager:
         if proxy_check.returncode == 0:
             logger.info("Cloud SQL Proxy detected, using localhost connection")
             encoded_password = quote_plus(password)
-            return f"postgresql://govbrnews_app:{encoded_password}@127.0.0.1:5432/govbrnews"
+            return f"postgresql://destaquesgovbr_app:{encoded_password}@127.0.0.1:5432/destaquesgovbr"
 
         # Return original secret for direct connection
         return secret_conn_str
@@ -261,6 +259,7 @@ class PostgresManager:
                 "title",
                 "url",
                 "image_url",
+                "video_url",
                 "category",
                 "tags",
                 "content",
@@ -288,6 +287,7 @@ class PostgresManager:
                         n.title,
                         n.url,
                         n.image_url,
+                        n.video_url,
                         n.category,
                         n.tags,
                         n.content,
@@ -461,85 +461,6 @@ class PostgresManager:
         """
         results = self.get(filters={"unique_id": unique_id}, limit=1)
         return results[0] if results else None
-
-    def get_records_for_hf_sync(self, limit: int = 1000) -> List[News]:
-        """
-        Get news records that need to be synced to HuggingFace.
-
-        Args:
-            limit: Maximum number of records
-
-        Returns:
-            List of News objects that haven't been synced
-        """
-        logger.debug(f"Fetching up to {limit} records for HF sync")
-
-        conn = self.get_connection()
-
-        try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-
-            query = """
-                SELECT * FROM news
-                WHERE synced_to_hf_at IS NULL
-                ORDER BY published_at DESC
-                LIMIT %s
-            """
-
-            cursor.execute(query, (limit,))
-            rows = cursor.fetchall()
-
-            logger.info(f"Found {len(rows)} records needing HF sync")
-            return [News(**row) for row in rows]
-
-        finally:
-            cursor.close()
-            self.put_connection(conn)
-
-    def mark_as_synced_to_hf(self, unique_ids: List[str]) -> int:
-        """
-        Mark news records as synced to HuggingFace.
-
-        Args:
-            unique_ids: List of unique_id values to mark as synced
-
-        Returns:
-            Number of records updated
-
-        Raises:
-            ValueError: If unique_ids is empty
-        """
-        if not unique_ids:
-            raise ValueError("unique_ids list cannot be empty")
-
-        logger.info(f"Marking {len(unique_ids)} records as synced to HF")
-
-        conn = self.get_connection()
-
-        try:
-            cursor = conn.cursor()
-
-            query = """
-                UPDATE news
-                SET synced_to_hf_at = NOW()
-                WHERE unique_id = ANY(%s)
-            """
-
-            cursor.execute(query, (unique_ids,))
-            updated = cursor.rowcount
-            conn.commit()
-
-            logger.success(f"Marked {updated} records as synced to HF")
-            return updated
-
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"Error marking records as synced: {e}")
-            raise
-
-        finally:
-            cursor.close()
-            self.put_connection(conn)
 
     def count(self, filters: Optional[Dict[str, Any]] = None) -> int:
         """
