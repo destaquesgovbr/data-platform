@@ -48,9 +48,7 @@ jobs:
             -e STORAGE_READ_FROM=huggingface \
             -e DATABASE_URL="${{ steps.secrets.outputs.DATABASE_URL }}" \
             ghcr.io/destaquesgovbr/data-platform:latest \
-            data-platform scrape \
-              --start-date ${{ inputs.start_date }} \
-              --end-date ${{ inputs.end_date }}
+            data-platform scrape --start-date "${{ inputs.start_date }}" --end-date "${{ inputs.end_date }}"
           echo "News scraper completed successfully"
 
   ebc-scraper:
@@ -89,10 +87,7 @@ jobs:
             -e STORAGE_READ_FROM=huggingface \
             -e DATABASE_URL="${{ steps.secrets.outputs.DATABASE_URL }}" \
             ghcr.io/destaquesgovbr/data-platform:latest \
-            data-platform scrape-ebc \
-              --start-date ${{ inputs.start_date }} \
-              --end-date ${{ inputs.end_date }} \
-              --allow-update
+            data-platform scrape-ebc --start-date "${{ inputs.start_date }}" --end-date "${{ inputs.end_date }}" --allow-update
           echo "EBC news scraper completed successfully"
 
   upload-to-cogfy:
@@ -129,9 +124,7 @@ jobs:
             -e HF_TOKEN="${{ steps.secrets.outputs.HF_TOKEN }}" \
             -e COGFY_API_KEY="${{ steps.secrets.outputs.COGFY_API_KEY }}" \
             ghcr.io/destaquesgovbr/data-platform:latest \
-            data-platform upload-cogfy \
-              --start-date ${{ inputs.start_date }} \
-              --end-date ${{ inputs.end_date }}
+            data-platform upload-cogfy --start-date "${{ inputs.start_date }}" --end-date "${{ inputs.end_date }}"
           echo "Upload to Cogfy completed successfully"
 
   enrich-themes:
@@ -178,9 +171,7 @@ jobs:
             -e STORAGE_READ_FROM=huggingface \
             -e DATABASE_URL="${{ steps.secrets.outputs.DATABASE_URL }}" \
             ghcr.io/destaquesgovbr/data-platform:latest \
-            data-platform enrich \
-              --start-date ${{ inputs.start_date }} \
-              --end-date ${{ inputs.end_date }}
+            data-platform enrich --start-date "${{ inputs.start_date }}" --end-date "${{ inputs.end_date }}"
           echo "Dataset enrichment completed successfully"
 
   pipeline-summary:
