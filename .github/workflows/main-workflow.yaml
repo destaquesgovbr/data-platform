@@ -18,6 +18,11 @@ on:
         description: 'Filter agencies (comma-separated, e.g. mec,mds,agu)'
         required: false
         type: string
+      cogfy_wait_minutes:
+        description: 'Minutes to wait for Cogfy processing (default: 20)'
+        required: false
+        type: number
+        default: 20
 
 permissions:
   contents: read
@@ -55,3 +60,4 @@ jobs:
       start_date: ${{ needs.setup-dates.outputs.start_date }}
       end_date: ${{ needs.setup-dates.outputs.end_date }}
       agencies: ${{ inputs.agencies }}
+      cogfy_wait_minutes: ${{ inputs.cogfy_wait_minutes || 20 }}

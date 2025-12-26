@@ -15,6 +15,11 @@ on:
         description: 'Filter agencies (comma-separated)'
         required: false
         type: string
+      cogfy_wait_minutes:
+        description: 'Minutes to wait for Cogfy processing'
+        required: false
+        type: number
+        default: 20
 
 jobs:
   scraper:
@@ -140,9 +145,11 @@ jobs:
     steps:
       - name: Wait for Cogfy processing
         run: |
-          echo "Waiting 20 minutes for Cogfy to process uploaded data..."
+          WAIT_MINUTES=${{ inputs.cogfy_wait_minutes || 20 }}
+          WAIT_SECONDS=$((WAIT_MINUTES * 60))
+          echo "Waiting ${WAIT_MINUTES} minutes for Cogfy to process uploaded data..."
           echo "This allows time for Cogfy to complete vector embeddings and indexing"
-          sleep 1200
+          sleep ${WAIT_SECONDS}
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
