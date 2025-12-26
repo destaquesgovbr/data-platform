@@ -11,6 +11,10 @@ on:
         description: 'End date (YYYY-MM-DD)'
         required: true
         type: string
+      agencies:
+        description: 'Filter agencies (comma-separated)'
+        required: false
+        type: string
 
 jobs:
   scraper:
@@ -41,11 +45,15 @@ jobs:
 
       - name: Run news scraper
         run: |
+          AGENCIES_ARG=""
+          if [ -n "${{ inputs.agencies }}" ]; then
+            AGENCIES_ARG="--agencies ${{ inputs.agencies }}"
+          fi
           docker run --rm \
             -e STORAGE_BACKEND=postgres \
             -e DATABASE_URL="${{ steps.secrets.outputs.DATABASE_URL }}" \
             ghcr.io/destaquesgovbr/data-platform:latest \
-            data-platform scrape --start-date "${{ inputs.start_date }}" --end-date "${{ inputs.end_date }}"
+            data-platform scrape --start-date "${{ inputs.start_date }}" --end-date "${{ inputs.end_date }}" $AGENCIES_ARG
           echo "News scraper completed successfully"
 
   ebc-scraper:

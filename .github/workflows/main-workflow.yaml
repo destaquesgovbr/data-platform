@@ -14,6 +14,10 @@ on:
         description: 'End date (YYYY-MM-DD)'
         required: false
         type: string
+      agencies:
+        description: 'Filter agencies (comma-separated, e.g. mec,mds,agu)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -50,3 +54,4 @@ jobs:
     with:
       start_date: ${{ needs.setup-dates.outputs.start_date }}
       end_date: ${{ needs.setup-dates.outputs.end_date }}
+      agencies: ${{ inputs.agencies }}
