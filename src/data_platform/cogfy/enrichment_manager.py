@@ -12,6 +12,7 @@ import requests
 
 from data_platform.cogfy.cogfy_manager import CogfyClient, CollectionManager
 from data_platform.managers.dataset_manager import DatasetManager
+from data_platform.managers import StorageAdapter
 
 # Set up logging
 logging.basicConfig(
@@ -46,6 +47,11 @@ class EnrichmentManager:
         self.server_url = server_url
         self.collection_name = collection_name
         self.dataset_manager = DatasetManager()
+
+        # Initialize StorageAdapter for dual-write support
+        # Uses STORAGE_BACKEND env var (postgres, huggingface, dual_write)
+        self.storage_adapter = StorageAdapter()
+
         self.cogfy_client = None
         self.collection_manager = None
         self._field_map = None
@@ -786,17 +792,48 @@ class EnrichmentManager:
 
     def _upload_enriched_dataset(self, df: pd.DataFrame) -> None:
         """
-        Convert DataFrame back to dataset and upload to HuggingFace.
+        Upload enriched dataset to storage backends.
+
+        Uses StorageAdapter to support dual-write mode:
+        - STORAGE_BACKEND=huggingface: HuggingFace only (legacy)
+        - STORAGE_BACKEND=postgres: PostgreSQL only
+        - STORAGE_BACKEND=dual_write: Both HF and PostgreSQL
 
         Args:
             df: Final enriched DataFrame
         """
-        logging.info("Updating HuggingFace dataset...")
-        from datasets import Dataset
-        updated_dataset = Dataset.from_pandas(df, preserve_index=False)
+        backend = self.storage_adapter.backend.value
+        logging.info(f"Uploading enriched dataset (backend={backend})...")
 
-        # Use the dataset manager's update method
-        self.dataset_manager._push_dataset_and_csvs(updated_dataset)
+        # For HuggingFace, we need to push the full dataset
+        # The storage_adapter.update() handles both backends
+        if backend in ("huggingface", "dual_write"):
+            logging.info("Updating HuggingFace dataset...")
+            from datasets import Dataset
+            updated_dataset = Dataset.from_pandas(df, preserve_index=False)
+            self.dataset_manager._push_dataset_and_csvs(updated_dataset)
+            logging.info("HuggingFace dataset updated successfully")
+
+        if backend in ("postgres", "dual_write"):
+            logging.info("Updating PostgreSQL database...")
+            # Filter to only enriched records for PostgreSQL update
+            enriched_df = df[df['theme_1_level_1'].notna()].copy()
+
+            # Select only enrichment-related columns for update
+            update_columns = [
+                'unique_id',
+                'theme_1_level_1_code',
+                'theme_1_level_2_code',
+                'theme_1_level_3_code',
+                'most_specific_theme_code',
+                'summary'
+            ]
+            # Only include columns that exist in the DataFrame
+            update_columns = [col for col in update_columns if col in enriched_df.columns]
+            update_df = enriched_df[update_columns]
+
+            updated = self.storage_adapter._update_postgres(update_df)
+            logging.info(f"PostgreSQL: updated {updated} records with enrichment data")
 
     def enrich_dataset_with_themes(
         self,

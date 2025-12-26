@@ -336,25 +336,58 @@ class StorageAdapter:
         return None
 
     def _update_postgres(self, updated_df: pd.DataFrame) -> int:
-        """Update records in PostgreSQL from DataFrame."""
+        """Update records in PostgreSQL from DataFrame.
+
+        Handles mapping between HuggingFace column names and PostgreSQL column names,
+        particularly for theme fields (code → id).
+        """
         updated = 0
+
+        # Column mapping: HF column → PG column (with special handling)
+        THEME_COLUMNS = {
+            "theme_1_level_1_code": "theme_l1_id",
+            "theme_1_level_2_code": "theme_l2_id",
+            "theme_1_level_3_code": "theme_l3_id",
+            "most_specific_theme_code": "most_specific_theme_id",
+        }
+
+        # Columns to skip (HF-only or derived)
+        SKIP_COLUMNS = {
+            "unique_id",
+            "theme_1_level_1",
+            "theme_1_level_1_label",
+            "theme_1_level_2_label",
+            "theme_1_level_3_label",
+            "most_specific_theme_label",
+        }
 
         for _, row in updated_df.iterrows():
             unique_id = row.get("unique_id")
             if not unique_id:
                 continue
 
-            # Build updates dict from row, excluding unique_id
+            # Build updates dict from row
             updates = {}
             for col, value in row.items():
-                if col == "unique_id":
+                if col in SKIP_COLUMNS:
                     continue
-                if pd.notna(value):
+                if pd.isna(value):
+                    continue
+
+                # Handle theme columns (code → id)
+                if col in THEME_COLUMNS:
+                    theme_id = self._resolve_theme_id(value)
+                    if theme_id is not None:
+                        updates[THEME_COLUMNS[col]] = theme_id
+                else:
                     updates[col] = value
 
             if updates:
-                if self.postgres.update(unique_id, updates):
-                    updated += 1
+                try:
+                    if self.postgres.update(unique_id, updates):
+                        updated += 1
+                except Exception as e:
+                    logger.warning(f"Error updating {unique_id}: {e}")
 
         return updated
 
