@@ -402,16 +402,33 @@ class StorageAdapter:
         max_date: str,
         agency: Optional[str] = None,
     ) -> pd.DataFrame:
-        """Get records from PostgreSQL."""
-        filters = {
-            "published_at__gte": min_date,
-            "published_at__lte": max_date,
-        }
+        """Get records from PostgreSQL with date range filtering."""
+        from psycopg2.extras import RealDictCursor
+        from data_platform.models.news import News
 
-        if agency:
-            filters["agency_key"] = agency
+        conn = self.postgres.get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        records = self.postgres.get(filters=filters)
+            # Build query with date range
+            query = """
+                SELECT * FROM news
+                WHERE published_at >= %s::date AND published_at < (%s::date + INTERVAL '1 day')
+            """
+            params = [min_date, max_date]
+
+            if agency:
+                query += " AND agency_key = %s"
+                params.append(agency)
+
+            query += " ORDER BY published_at DESC"
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            records = [News(**row) for row in rows]
+        finally:
+            cursor.close()
+            self.postgres.put_connection(conn)
 
         # Convert to DataFrame matching HuggingFace format
         if not records:
