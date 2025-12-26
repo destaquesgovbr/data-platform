@@ -63,14 +63,19 @@ class StorageAdapter:
         backend_str = os.getenv("STORAGE_BACKEND", "huggingface")
         self.backend = backend or StorageBackend(backend_str.lower())
 
-        # Determine read backend (defaults to write backend for non-dual modes)
-        read_str = os.getenv("STORAGE_READ_FROM", backend_str)
+        # Determine read backend
+        # STORAGE_READ_FROM can be explicitly set to override read source
+        read_str_env = os.getenv("STORAGE_READ_FROM")
         if read_from:
             self.read_from = read_from
+        elif read_str_env:
+            # Explicit STORAGE_READ_FROM takes precedence
+            self.read_from = StorageBackend(read_str_env.lower())
         elif self.backend == StorageBackend.DUAL_WRITE:
-            # During dual-write, default to reading from HF (legacy)
-            self.read_from = StorageBackend(read_str.lower())
+            # During dual-write without explicit read source, default to HF (legacy)
+            self.read_from = StorageBackend.HUGGINGFACE
         else:
+            # Default: read from same backend as write
             self.read_from = self.backend
 
         logger.info(f"StorageAdapter initialized: write={self.backend.value}, read={self.read_from.value}")
