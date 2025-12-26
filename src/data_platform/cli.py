@@ -116,7 +116,7 @@ def enrich(
     logging.info(f"Enriching news from {start_date} to {end_date or start_date}")
 
     manager = EnrichmentManager()
-    manager.enrich_date_range(start_date, end_date or start_date)
+    manager.enrich_dataset_with_themes(start_date=start_date, end_date=end_date or start_date)
 
     logging.info("Enrichment completed")
 
