@@ -63,14 +63,19 @@ class StorageAdapter:
         backend_str = os.getenv("STORAGE_BACKEND", "huggingface")
         self.backend = backend or StorageBackend(backend_str.lower())
 
-        # Determine read backend (defaults to write backend for non-dual modes)
-        read_str = os.getenv("STORAGE_READ_FROM", backend_str)
+        # Determine read backend
+        # STORAGE_READ_FROM can be explicitly set to override read source
+        read_str_env = os.getenv("STORAGE_READ_FROM")
         if read_from:
             self.read_from = read_from
+        elif read_str_env:
+            # Explicit STORAGE_READ_FROM takes precedence
+            self.read_from = StorageBackend(read_str_env.lower())
         elif self.backend == StorageBackend.DUAL_WRITE:
-            # During dual-write, default to reading from HF (legacy)
-            self.read_from = StorageBackend(read_str.lower())
+            # During dual-write without explicit read source, default to HF (legacy)
+            self.read_from = StorageBackend.HUGGINGFACE
         else:
+            # Default: read from same backend as write
             self.read_from = self.backend
 
         logger.info(f"StorageAdapter initialized: write={self.backend.value}, read={self.read_from.value}")
@@ -397,16 +402,33 @@ class StorageAdapter:
         max_date: str,
         agency: Optional[str] = None,
     ) -> pd.DataFrame:
-        """Get records from PostgreSQL."""
-        filters = {
-            "published_at__gte": min_date,
-            "published_at__lte": max_date,
-        }
+        """Get records from PostgreSQL with date range filtering."""
+        from psycopg2.extras import RealDictCursor
+        from data_platform.models.news import News
 
-        if agency:
-            filters["agency_key"] = agency
+        conn = self.postgres.get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        records = self.postgres.get(filters=filters)
+            # Build query with date range
+            query = """
+                SELECT * FROM news
+                WHERE published_at >= %s::date AND published_at < (%s::date + INTERVAL '1 day')
+            """
+            params = [min_date, max_date]
+
+            if agency:
+                query += " AND agency_key = %s"
+                params.append(agency)
+
+            query += " ORDER BY published_at DESC"
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            records = [News(**row) for row in rows]
+        finally:
+            cursor.close()
+            self.postgres.put_connection(conn)
 
         # Convert to DataFrame matching HuggingFace format
         if not records:
