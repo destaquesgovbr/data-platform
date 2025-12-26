@@ -72,10 +72,19 @@ class UploadToCogfyManager:
                 - field_id_map: Mapping of field names to their IDs
                 - cogfy_type_map: Mapping of field names to their Cogfy types
         """
-        field_mapping = {
-            field_name: self._map_hf_type_to_cogfy_type(field_type.dtype)
-            for field_name, field_type in features.items()
-        }
+        field_mapping = {}
+        for field_name, field_type in features.items():
+            # Handle different HuggingFace feature types
+            if hasattr(field_type, 'dtype'):
+                # Value type (string, int, timestamp, etc.)
+                hf_type = field_type.dtype
+            elif hasattr(field_type, 'feature'):
+                # Sequence/List type - map to text
+                hf_type = "list"
+            else:
+                # Fallback for other types
+                hf_type = str(field_type)
+            field_mapping[field_name] = self._map_hf_type_to_cogfy_type(hf_type)
 
         logging.info("Ensuring fields exist in Cogfy collection...")
         self.collection_manager.ensure_fields(field_mapping)
