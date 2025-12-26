@@ -100,7 +100,7 @@ def upload_cogfy(
     logging.info(f"Uploading news to Cogfy from {start_date} to {end_date or start_date}")
 
     manager = UploadToCogfyManager(server_url, collection_name)
-    manager.upload_date_range(start_date, end_date or start_date)
+    manager.upload(start_date=start_date, end_date=end_date or start_date)
 
     logging.info("Cogfy upload completed")
 
