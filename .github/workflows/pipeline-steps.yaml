@@ -12,11 +12,6 @@ on:
         required: true
         type: string
 
-env:
-  GCP_PROJECT_ID: inspire-7-finep
-  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
-  GCP_SERVICE_ACCOUNT: github-actions@inspire-7-finep.iam.gserviceaccount.com
-
 jobs:
   scraper:
     name: News Scraper
@@ -28,8 +23,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
 
       - name: Get secrets from Secret Manager
         id: secrets
@@ -61,8 +56,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
 
       - name: Get secrets from Secret Manager
         id: secrets
@@ -95,8 +90,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
 
       - name: Get secrets from Secret Manager
         id: secrets
@@ -132,8 +127,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
 
       - name: Get secrets from Secret Manager
         id: secrets
