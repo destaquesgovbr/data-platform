@@ -32,11 +32,11 @@ app = typer.Typer(
 
 @app.command()
 def scrape(
-    start_date: str = typer.Option(..., "--start-date", help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, "--end-date", help="End date (YYYY-MM-DD)"),
-    agencies: Optional[str] = typer.Option(None, "--agencies", help="Comma-separated agency codes"),
-    allow_update: bool = typer.Option(False, "--allow-update", help="Allow updating existing records"),
-    sequential: bool = typer.Option(True, "--sequential", help="Process agencies sequentially"),
+    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    agencies: Optional[str] = typer.Option(None, help="Comma-separated agency codes"),
+    allow_update: bool = typer.Option(False, help="Allow updating existing records"),
+    sequential: bool = typer.Option(True, help="Process agencies sequentially"),
 ) -> None:
     """Scrape gov.br news from specified agencies."""
     from data_platform.managers import StorageAdapter
@@ -61,10 +61,10 @@ def scrape(
 
 @app.command("scrape-ebc")
 def scrape_ebc(
-    start_date: str = typer.Option(..., "--start-date", help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, "--end-date", help="End date (YYYY-MM-DD)"),
-    allow_update: bool = typer.Option(False, "--allow-update", help="Allow updating existing records"),
-    sequential: bool = typer.Option(True, "--sequential", help="Process sequentially"),
+    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    allow_update: bool = typer.Option(False, help="Allow updating existing records"),
+    sequential: bool = typer.Option(True, help="Process sequentially"),
 ) -> None:
     """Scrape EBC (Agencia Brasil, TV Brasil) news."""
     from data_platform.managers import StorageAdapter
@@ -87,8 +87,8 @@ def scrape_ebc(
 
 @app.command("upload-cogfy")
 def upload_cogfy(
-    start_date: str = typer.Option(..., "--start-date", help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, "--end-date", help="End date (YYYY-MM-DD)"),
+    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
 ) -> None:
     """Upload news to Cogfy for AI enrichment."""
     import os
@@ -107,8 +107,8 @@ def upload_cogfy(
 
 @app.command()
 def enrich(
-    start_date: str = typer.Option(..., "--start-date", help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, "--end-date", help="End date (YYYY-MM-DD)"),
+    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
 ) -> None:
     """Enrich news with AI-generated themes from Cogfy."""
     from data_platform.cogfy.enrichment_manager import EnrichmentManager
@@ -134,8 +134,8 @@ def sync_hf() -> None:
 
 @app.command()
 def migrate(
-    batch_size: int = typer.Option(1000, "--batch-size", help="Batch size for migration"),
-    max_records: Optional[int] = typer.Option(None, "--max-records", help="Max records to migrate (for testing)"),
+    batch_size: int = typer.Option(1000, help="Batch size for migration"),
+    max_records: Optional[int] = typer.Option(None, help="Max records to migrate (for testing)"),
 ) -> None:
     """Migrate data from HuggingFace to PostgreSQL."""
     import sys
