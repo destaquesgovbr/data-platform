@@ -620,7 +620,11 @@ class EnrichmentManager:
         end_date: Optional[Union[str, datetime]] = None
     ) -> pd.DataFrame:
         """
-        Load dataset from HuggingFace and apply date filtering if specified.
+        Load dataset from storage backend and apply date filtering if specified.
+
+        Uses StorageAdapter.read_from to determine source:
+        - STORAGE_READ_FROM=postgres: Load from PostgreSQL
+        - STORAGE_READ_FROM=huggingface: Load from HuggingFace (legacy)
 
         Args:
             start_date: Start date for filtering records (inclusive)
@@ -629,8 +633,21 @@ class EnrichmentManager:
         Returns:
             Filtered pandas DataFrame
         """
-        df = self._load_dataset_from_huggingface()
-        return self._apply_date_filtering(df, start_date, end_date)
+        read_from = self.storage_adapter.read_from.value
+        logging.info(f"Loading dataset from {read_from}...")
+
+        if read_from == "postgres":
+            # Load from PostgreSQL - already filtered by date
+            if not start_date or not end_date:
+                raise ValueError("start_date and end_date are required when reading from PostgreSQL")
+
+            df = self.storage_adapter.get(start_date, end_date)
+            logging.info(f"Loaded {len(df)} records from PostgreSQL")
+            return df
+        else:
+            # Load from HuggingFace (legacy behavior)
+            df = self._load_dataset_from_huggingface()
+            return self._apply_date_filtering(df, start_date, end_date)
 
     def _prepare_dataset_for_enrichment(self, df: pd.DataFrame, force_update: bool = False) -> pd.DataFrame:
         """
@@ -660,8 +677,15 @@ class EnrichmentManager:
             records_to_process = df[df['unique_id'].notna()].copy()
             logging.info(f"Force update enabled: processing all {len(records_to_process)} records")
         else:
-            records_to_process = df[(df['unique_id'].notna()) & (df['theme_1_level_1'].isna())].copy()
-            logging.info(f"Processing {len(records_to_process)} records without existing themes")
+            # Check which theme column to use for filtering
+            # HuggingFace uses 'theme_1_level_1' (full string), PostgreSQL uses 'theme_1_level_1_code'
+            if 'theme_1_level_1' in df.columns and df['theme_1_level_1'].notna().any():
+                theme_column = 'theme_1_level_1'
+            else:
+                theme_column = 'theme_1_level_1_code'
+
+            records_to_process = df[(df['unique_id'].notna()) & (df[theme_column].isna())].copy()
+            logging.info(f"Processing {len(records_to_process)} records without existing themes (checked {theme_column})")
 
         return records_to_process
 
@@ -772,6 +796,9 @@ class EnrichmentManager:
         """
         Merge enriched data with the full dataset if filtering was applied.
 
+        For HuggingFace: Load full dataset and apply updates (need to push complete dataset)
+        For PostgreSQL: Return the enriched subset (updates are done individually)
+
         Args:
             df: Enriched DataFrame
             start_date: Start date used for filtering
@@ -780,6 +807,15 @@ class EnrichmentManager:
         Returns:
             Final DataFrame ready for upload
         """
+        read_from = self.storage_adapter.read_from.value
+
+        if read_from == "postgres":
+            # For PostgreSQL, we just return the enriched subset
+            # The _upload_enriched_dataset will update individual records
+            logging.info("PostgreSQL mode: returning enriched subset for individual updates")
+            return df
+
+        # HuggingFace mode: need to merge with full dataset
         if start_date or end_date:
             # We filtered the dataset, so we need to update only the filtered records
             full_df = self._load_full_dataset()
@@ -799,18 +835,33 @@ class EnrichmentManager:
         - STORAGE_BACKEND=postgres: PostgreSQL only
         - STORAGE_BACKEND=dual_write: Both HF and PostgreSQL
 
+        When reading from PostgreSQL but writing to HuggingFace (dual_write),
+        we need to load the full HF dataset and apply updates.
+
         Args:
             df: Final enriched DataFrame
         """
         backend = self.storage_adapter.backend.value
-        logging.info(f"Uploading enriched dataset (backend={backend})...")
+        read_from = self.storage_adapter.read_from.value
+        logging.info(f"Uploading enriched dataset (backend={backend}, read_from={read_from})...")
 
         # For HuggingFace, we need to push the full dataset
-        # The storage_adapter.update() handles both backends
         if backend in ("huggingface", "dual_write"):
             logging.info("Updating HuggingFace dataset...")
             from datasets import Dataset
-            updated_dataset = Dataset.from_pandas(df, preserve_index=False)
+
+            if read_from == "postgres":
+                # When reading from PostgreSQL, df is only a subset
+                # Load full HF dataset and apply updates
+                logging.info("Loading full HuggingFace dataset to apply updates...")
+                full_df = self._load_full_dataset()
+                full_df = self._ensure_theme_columns_exist(full_df)
+                self._apply_theme_updates_to_full_dataset(full_df, df)
+                updated_dataset = Dataset.from_pandas(full_df, preserve_index=False)
+            else:
+                # df is already the full dataset
+                updated_dataset = Dataset.from_pandas(df, preserve_index=False)
+
             self.dataset_manager._push_dataset_and_csvs(updated_dataset)
             logging.info("HuggingFace dataset updated successfully")
 
