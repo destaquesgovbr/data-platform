@@ -7,20 +7,38 @@ readme = "README.md"
 packages = [{include = "data_platform", from = "src"}]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.12"
+
 # Database
 psycopg2-binary = "^2.9.9"
 sqlalchemy = "^2.0.23"
-# HuggingFace (compatible with scraper's datasets version)
-datasets = ">=2.16.0"
+
+# HuggingFace
+datasets = ">=3.1.0"
 huggingface-hub = ">=0.20.0"
+
 # Data processing
 pandas = ">=2.1.4"
-pyarrow = ">=14.0.1"
+pyarrow = ">=15.0.0"
+numpy = ">=1.26.0"
+scipy = "^1.11.0"
+
+# Web scraping
+beautifulsoup4 = "^4.12.3"
+requests = "^2.32.3"
+retry = "^0.9.2"
+markdownify = "^0.14.1"
+markdown = "^3.7"
+
+# Cogfy integration
+algoliasearch = "^4.13.0"
+
 # Configuration
 pydantic = "^2.5.3"
 pydantic-settings = "^2.1.0"
 python-dotenv = "^1.0.0"
+pyyaml = "^6.0.2"
+
 # Utilities
 tqdm = "^4.66.1"
 loguru = "^0.7.2"
@@ -48,12 +66,12 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 100
-target-version = ['py311']
+target-version = ['py312']
 include = '\.pyi?$'
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
@@ -72,7 +90,7 @@ ignore = [
 "__init__.py" = ["F401"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -88,6 +106,10 @@ strict_equality = true
 module = [
     "datasets.*",
     "huggingface_hub.*",
+    "bs4.*",
+    "markdownify.*",
+    "retry.*",
+    "algoliasearch.*",
 ]
 ignore_missing_imports = true
 

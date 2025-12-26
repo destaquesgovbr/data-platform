@@ -30,7 +30,7 @@ env/
 .venv
 
 # Poetry
-poetry.lock
+# poetry.lock should be committed for reproducible builds
 
 # PyCharm
 .idea/

@@ -469,6 +469,457 @@ STORAGE_BACKEND: huggingface  # Voltar para HF-only
 
 ---
 
+## Fase 4.5: Consolidação do Scraper no Data-Platform
+
+> **Criado em**: 2024-12-26
+> **Objetivo**: Mover todo o código do repositório `scraper` para `data-platform`, eliminando dependências cross-repo e simplificando CI/CD.
+
+### Motivação
+
+1. **Problema do Docker Build**: O path `../data-platform` não existe no contexto do Docker
+2. **Complexidade de dependências**: Dois repos com versões conflitantes de bibliotecas
+3. **CI/CD fragmentado**: Workflows separados, difícil manter sincronizados
+4. **O scraper é específico**: Não é biblioteca genérica, é específico para gov.br/EBC
+
+### Arquitetura Atual vs Futura
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        ARQUITETURA ATUAL                            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────────────┐         ┌──────────────────┐                 │
+│  │     scraper      │ ──────► │   HuggingFace    │                 │
+│  │  (repo separado) │         │  (source of truth)│                 │
+│  └────────┬─────────┘         └────────┬─────────┘                 │
+│           │ dependência                │                            │
+│           ▼                            ▼                            │
+│  ┌──────────────────┐         ┌──────────────────┐                 │
+│  │  data-platform   │         │   Consumidores   │                 │
+│  │   (PostgreSQL)   │         │ Typesense/Qdrant │                 │
+│  └──────────────────┘         └──────────────────┘                 │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+                              ▼▼▼
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                        ARQUITETURA FUTURA                           │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────────────────────────────────────────────┐              │
+│  │              data-platform (monorepo)            │              │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐ │              │
+│  │  │  Scrapers  │  │  Storage   │  │  Pipelines │ │              │
+│  │  │ gov.br/EBC │  │ PostgreSQL │  │ Enrichment │ │              │
+│  │  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘ │              │
+│  │        │               │               │        │              │
+│  │        └───────────────┴───────────────┘        │              │
+│  └──────────────────────────────────────────────────┘              │
+│                          │                                          │
+│           ┌──────────────┼──────────────┐                          │
+│           ▼              ▼              ▼                          │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐                │
+│  │  PostgreSQL  │ │  HuggingFace │ │ Consumidores │                │
+│  │   (primary)  │ │  (sync/open) │ │  Typesense   │                │
+│  └──────────────┘ └──────────────┘ └──────────────┘                │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Nova Estrutura de Diretórios
+
+```
+data-platform/
+├── _plan/                          # Plano de migração
+├── src/
+│   └── data_platform/
+│       ├── __init__.py
+│       ├── cli.py                  # CLI unificada (novo entry point)
+│       ├── managers/               # Storage backends
+│       │   ├── __init__.py
+│       │   ├── postgres_manager.py
+│       │   ├── dataset_manager.py  # ◄── Movido do scraper
+│       │   └── storage_adapter.py
+│       ├── scrapers/               # ◄── Movido do scraper
+│       │   ├── __init__.py
+│       │   ├── webscraper.py
+│       │   ├── scrape_manager.py
+│       │   ├── ebc_webscraper.py
+│       │   ├── ebc_scrape_manager.py
+│       │   └── config/
+│       │       ├── site_urls.yaml
+│       │       └── agencies.yaml
+│       ├── enrichment/             # ◄── Movido do scraper
+│       │   ├── __init__.py
+│       │   ├── augmentation_manager.py
+│       │   ├── classifier_summarizer.py
+│       │   └── config/
+│       │       ├── themes_tree.yaml
+│       │       └── themes_level_1.yaml
+│       ├── cogfy/                  # ◄── Movido do scraper
+│       │   ├── __init__.py
+│       │   ├── cogfy_manager.py
+│       │   ├── upload_manager.py
+│       │   └── enrichment_manager.py
+│       ├── jobs/
+│       │   └── hf_sync/
+│       └── models/
+│           └── news.py
+├── tests/                          # Testes consolidados
+│   ├── unit/
+│   ├── integration/
+│   └── fixtures/
+├── scripts/
+│   ├── migrate_hf_to_postgres.py
+│   └── validate_migration.py
+├── docker/
+│   └── Dockerfile
+├── .github/
+│   └── workflows/                  # Workflows migrados
+│       ├── main-workflow.yaml
+│       ├── pipeline-steps.yaml
+│       └── docker-build.yaml
+├── pyproject.toml                  # Dependências consolidadas
+├── CLAUDE.md
+└── README.md
+```
+
+### Etapas de Implementação
+
+#### 4.5.1: Mover Código do Scraper
+
+| Origem (scraper) | Destino (data-platform) |
+|------------------|------------------------|
+| `src/scraper/webscraper.py` | `src/data_platform/scrapers/webscraper.py` |
+| `src/scraper/scrape_manager.py` | `src/data_platform/scrapers/scrape_manager.py` |
+| `src/scraper/ebc_webscraper.py` | `src/data_platform/scrapers/ebc_webscraper.py` |
+| `src/scraper/ebc_scrape_manager.py` | `src/data_platform/scrapers/ebc_scrape_manager.py` |
+| `src/scraper/site_urls.yaml` | `src/data_platform/scrapers/config/site_urls.yaml` |
+| `src/scraper/agencies.yaml` | `src/data_platform/scrapers/config/agencies.yaml` |
+| `src/dataset_manager.py` | `src/data_platform/managers/dataset_manager.py` |
+| `src/enrichment/` | `src/data_platform/enrichment/` |
+| `src/cogfy_manager.py` | `src/data_platform/cogfy/cogfy_manager.py` |
+| `src/upload_to_cogfy_manager.py` | `src/data_platform/cogfy/upload_manager.py` |
+| `src/enrichment_manager.py` | `src/data_platform/cogfy/enrichment_manager.py` |
+| `tests/` | `tests/` (merge) |
+
+#### 4.5.2: Atualizar pyproject.toml
+
+Adicionar dependências do scraper ao data-platform:
+
+```toml
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# Database
+psycopg2-binary = "^2.9.9"
+sqlalchemy = "^2.0.23"
+
+# HuggingFace
+datasets = ">=3.1.0"
+huggingface-hub = ">=0.20.0"
+
+# Data processing
+pandas = ">=2.1.4"
+pyarrow = ">=15.0.0"
+
+# Web scraping (do scraper)
+beautifulsoup4 = "^4.12.3"
+requests = "^2.32.3"
+retry = "^0.9.2"
+markdownify = "^0.14.1"
+markdown = "^3.7"
+
+# AI/LLM (do scraper)
+langchain = "^0.3.3"
+langchain-community = "^0.3.2"
+langchain-openai = "^0.2.3"
+openai = "^1.52.0"
+
+# Cogfy (do scraper)
+algoliasearch = "^4.13.0"
+
+# Configuration
+pydantic = "^2.5.3"
+pydantic-settings = "^2.1.0"
+python-dotenv = "^1.0.0"
+pyyaml = "^6.0.2"
+
+# Utilities
+tqdm = "^4.66.1"
+loguru = "^0.7.2"
+typer = "^0.9.0"
+```
+
+#### 4.5.3: Criar CLI Unificada
+
+**Arquivo**: `src/data_platform/cli.py`
+
+```python
+import typer
+from datetime import datetime, timedelta
+
+app = typer.Typer(name="data-platform", help="Data platform for DestaquesGovBr")
+
+@app.command()
+def scrape(
+    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    agencies: str = typer.Option(None, help="Comma-separated agency codes"),
+    allow_update: bool = typer.Option(False, help="Allow updating existing records"),
+    sequential: bool = typer.Option(True, help="Process agencies sequentially"),
+):
+    """Scrape gov.br news from specified agencies."""
+    from data_platform.scrapers.scrape_manager import ScrapeManager
+    from data_platform.managers import StorageAdapter
+
+    storage = StorageAdapter()
+    manager = ScrapeManager(storage)
+    agency_list = agencies.split(",") if agencies else None
+    manager.run_scraper(agency_list, start_date, end_date or start_date, sequential, allow_update)
+
+@app.command()
+def scrape_ebc(
+    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    allow_update: bool = typer.Option(False, help="Allow updating existing records"),
+):
+    """Scrape EBC (Agência Brasil, TV Brasil) news."""
+    from data_platform.scrapers.ebc_scrape_manager import EBCScrapeManager
+    from data_platform.managers import StorageAdapter
+
+    storage = StorageAdapter()
+    manager = EBCScrapeManager(storage)
+    manager.run_scraper(start_date, end_date or start_date, True, allow_update)
+
+@app.command()
+def upload_cogfy(
+    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(None, help="End date (YYYY-MM-DD)"),
+):
+    """Upload news to Cogfy for AI enrichment."""
+    from data_platform.cogfy.upload_manager import UploadToCogfyManager
+    manager = UploadToCogfyManager()
+    manager.upload(start_date, end_date or start_date)
+
+@app.command()
+def enrich(
+    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(None, help="End date (YYYY-MM-DD)"),
+):
+    """Enrich news with AI-generated themes from Cogfy."""
+    from data_platform.cogfy.enrichment_manager import EnrichmentManager
+    manager = EnrichmentManager()
+    manager.enrich(start_date, end_date or start_date)
+
+@app.command()
+def sync_hf():
+    """Sync PostgreSQL data to HuggingFace."""
+    from data_platform.jobs.hf_sync.sync_job import sync_to_huggingface
+    sync_to_huggingface()
+
+@app.command()
+def migrate_hf_to_pg(
+    batch_size: int = typer.Option(1000, help="Batch size for migration"),
+    max_records: int = typer.Option(None, help="Max records to migrate (for testing)"),
+):
+    """Migrate data from HuggingFace to PostgreSQL."""
+    from scripts.migrate_hf_to_postgres import main
+    main(batch_size=batch_size, max_records=max_records)
+
+if __name__ == "__main__":
+    app()
+```
+
+**Entry point em pyproject.toml**:
+
+```toml
+[tool.poetry.scripts]
+data-platform = "data_platform.cli:app"
+```
+
+**Uso**:
+
+```bash
+# Scrape gov.br
+data-platform scrape --start-date 2024-12-20 --agencies gestao
+
+# Scrape EBC
+data-platform scrape-ebc --start-date 2024-12-20
+
+# Upload para Cogfy
+data-platform upload-cogfy --start-date 2024-12-20
+
+# Enriquecer com temas AI
+data-platform enrich --start-date 2024-12-20
+
+# Sync para HuggingFace
+data-platform sync-hf
+```
+
+#### 4.5.4: Migrar GitHub Actions
+
+**Mover workflows do scraper para data-platform**:
+
+```yaml
+# .github/workflows/pipeline-steps.yaml
+name: Daily Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      start_date:
+        required: true
+        type: string
+      end_date:
+        required: true
+        type: string
+
+jobs:
+  scrape-govbr:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/destaquesgovbr/data-platform:latest
+    env:
+      STORAGE_BACKEND: dual_write
+      STORAGE_READ_FROM: huggingface
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - name: Scrape gov.br news
+        run: data-platform scrape --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }}
+
+  scrape-ebc:
+    runs-on: ubuntu-latest
+    needs: scrape-govbr
+    container:
+      image: ghcr.io/destaquesgovbr/data-platform:latest
+    env:
+      STORAGE_BACKEND: dual_write
+      STORAGE_READ_FROM: huggingface
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - name: Scrape EBC news
+        run: data-platform scrape-ebc --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }} --allow-update
+
+  upload-cogfy:
+    runs-on: ubuntu-latest
+    needs: [scrape-govbr, scrape-ebc]
+    container:
+      image: ghcr.io/destaquesgovbr/data-platform:latest
+    env:
+      COGFY_API_KEY: ${{ secrets.COGFY_API_KEY }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - name: Upload to Cogfy
+        run: data-platform upload-cogfy --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }}
+
+  enrich-themes:
+    runs-on: ubuntu-latest
+    needs: upload-cogfy
+    container:
+      image: ghcr.io/destaquesgovbr/data-platform:latest
+    env:
+      COGFY_API_KEY: ${{ secrets.COGFY_API_KEY }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      STORAGE_BACKEND: dual_write
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - name: Wait for Cogfy processing
+        run: sleep 1200  # 20 minutes
+      - name: Enrich with AI themes
+        run: data-platform enrich --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }}
+```
+
+#### 4.5.5: Atualizar Dockerfile
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# System dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    gcc g++ \
+    libffi-dev libssl-dev \
+    curl git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Poetry
+RUN pip install poetry
+
+# Copy dependency files
+COPY pyproject.toml poetry.lock ./
+
+# Install dependencies
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-root --no-interaction --no-ansi
+
+# Copy application code
+COPY src/ src/
+COPY scripts/ scripts/
+
+# Install the package
+RUN poetry install --no-interaction --no-ansi
+
+# Default command
+CMD ["data-platform", "--help"]
+```
+
+#### 4.5.6: Testar Pipeline Consolidado
+
+```bash
+# 1. Build local
+cd data-platform
+docker build -t data-platform:test .
+
+# 2. Testar CLI
+docker run --rm \
+  -e STORAGE_BACKEND=huggingface \
+  -e HF_TOKEN=$HF_TOKEN \
+  data-platform:test data-platform scrape --start-date 2024-12-20 --agencies gestao
+
+# 3. Testar dual-write
+docker run --rm \
+  -e STORAGE_BACKEND=dual_write \
+  -e DATABASE_URL=$DATABASE_URL \
+  -e HF_TOKEN=$HF_TOKEN \
+  data-platform:test data-platform scrape --start-date 2024-12-20 --agencies gestao
+```
+
+### Checklist de Execução
+
+- [ ] 4.5.1: Criar estrutura de diretórios no data-platform
+- [ ] 4.5.1: Mover arquivos do scraper
+- [ ] 4.5.1: Ajustar imports em todos os arquivos movidos
+- [ ] 4.5.2: Atualizar pyproject.toml com todas as dependências
+- [ ] 4.5.2: Rodar poetry lock e verificar conflitos
+- [ ] 4.5.3: Criar cli.py com todos os comandos
+- [ ] 4.5.3: Testar CLI localmente
+- [ ] 4.5.4: Copiar workflows do scraper
+- [ ] 4.5.4: Atualizar workflows para usar nova CLI
+- [ ] 4.5.5: Atualizar Dockerfile
+- [ ] 4.5.5: Build e push nova imagem
+- [ ] 4.5.6: Testar pipeline completo localmente
+- [ ] 4.5.6: Testar pipeline em GitHub Actions
+- [ ] 4.5.7: Arquivar repositório scraper (read-only)
+- [ ] 4.5.7: Atualizar README do scraper com redirect
+
+### Critérios de Conclusão
+
+- [ ] Todo código do scraper movido para data-platform
+- [ ] CLI unificada funciona com todos os comandos
+- [ ] Docker build funciona sem erros
+- [ ] GitHub Actions executa pipeline completo
+- [ ] Testes passam (unit + integration)
+- [ ] Repositório scraper arquivado
+- [ ] Documentação atualizada
+
+---
+
 ## Fase 5: PostgreSQL como Primary
 
 **Objetivo**: Trocar a fonte de verdade para PostgreSQL e criar sync para HuggingFace.
