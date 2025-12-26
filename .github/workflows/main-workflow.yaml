@@ -15,6 +15,10 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   setup-dates:
     name: Setup Date Variables
