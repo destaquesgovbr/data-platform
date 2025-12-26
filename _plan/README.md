@@ -295,6 +295,178 @@ env:
 - [ ] Documentação atualizada (monitoramento, validação)
 - [ ] PR criado documentando progresso da fase
 
+### Sub-plano: Adaptação do Scraper para StorageAdapter
+
+> **Criado em**: 2024-12-25
+> **Objetivo**: Integrar o StorageAdapter (PR #5) no scraper para habilitar dual-write
+
+#### Contexto: Arquivos que usam DatasetManager no Scraper
+
+| Arquivo | Uso | Métodos |
+|---------|-----|---------|
+| `src/main.py` | Cria DatasetManager | Constructor |
+| `src/scraper/scrape_manager.py` | Insere notícias | `.insert()` |
+| `src/scraper/ebc_scrape_manager.py` | Insere notícias EBC | `.insert()` |
+| `src/enrichment_manager.py` | Enriquece com temas | `._load_existing_dataset()`, `.update()`, `._push_dataset_and_csvs()` |
+| `src/upload_to_cogfy_manager.py` | Upload Cogfy | `._load_existing_dataset()` |
+| `src/augmentation_manager.py` | Augmentação | `.get()`, custom update |
+
+#### CLI do Scraper (para testes)
+
+```bash
+# Scrape com 1 órgão, período específico
+python src/main.py scrape --start-date 2024-12-20 --end-date 2024-12-20 --agencies gestao
+
+# Scrape EBC
+python src/main.py scrape-ebc --start-date 2024-12-20 --end-date 2024-12-20
+
+# Augment
+python src/main.py augment --start-date 2024-12-20 --end-date 2024-12-20
+```
+
+#### Etapa 4.1: Criar StorageWrapper no Scraper
+
+**Arquivo**: `scraper/src/storage_wrapper.py`
+
+```python
+"""
+Storage wrapper that uses StorageAdapter when available,
+falls back to DatasetManager for legacy operations.
+"""
+import os
+from typing import Optional, OrderedDict
+import pandas as pd
+
+class StorageWrapper:
+    def __init__(self):
+        self.backend = os.getenv("STORAGE_BACKEND", "huggingface")
+
+        if self.backend in ("postgres", "dual_write"):
+            from data_platform.managers.storage_adapter import StorageAdapter
+            self._storage = StorageAdapter()
+            self._use_adapter = True
+        else:
+            from dataset_manager import DatasetManager
+            self._storage = DatasetManager()
+            self._use_adapter = False
+
+    def insert(self, new_data: OrderedDict, allow_update: bool = False) -> int:
+        return self._storage.insert(new_data, allow_update=allow_update)
+
+    def update(self, updated_df: pd.DataFrame) -> int:
+        return self._storage.update(updated_df)
+
+    def get(self, min_date: str, max_date: str, agency: Optional[str] = None) -> pd.DataFrame:
+        return self._storage.get(min_date, max_date, agency=agency)
+
+    # Legacy methods for enrichment (only work with DatasetManager)
+    def _load_existing_dataset(self):
+        if self._use_adapter:
+            raise NotImplementedError("Use get() instead")
+        return self._storage._load_existing_dataset()
+
+    def _push_dataset_and_csvs(self, dataset):
+        if self._use_adapter:
+            raise NotImplementedError("Push is automatic with StorageAdapter")
+        return self._storage._push_dataset_and_csvs(dataset)
+```
+
+#### Etapa 4.2: Modificar main.py
+
+```python
+# Antes:
+from dataset_manager import DatasetManager
+dataset_manager = DatasetManager()
+
+# Depois:
+from storage_wrapper import StorageWrapper
+storage = StorageWrapper()
+```
+
+#### Etapa 4.3: Teste Local (Docker)
+
+```bash
+# 1. Subir PostgreSQL local
+cd /path/to/data-platform
+docker-compose up -d
+
+# 2. Configurar ambiente
+export DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev"
+export STORAGE_BACKEND="dual_write"
+export STORAGE_READ_FROM="huggingface"
+export HF_TOKEN="..."
+
+# 3. Testar scraper com 1 órgão, 1 dia
+cd /path/to/scraper
+python src/main.py scrape \
+  --start-date 2024-12-20 \
+  --end-date 2024-12-20 \
+  --agencies gestao \
+  --allow-update
+```
+
+#### Etapa 4.4: Validar Dados no PostgreSQL
+
+```sql
+-- Conectar ao PostgreSQL local
+psql "postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev"
+
+-- Verificar inserções recentes
+SELECT COUNT(*) FROM news WHERE extracted_at >= NOW() - INTERVAL '1 hour';
+
+-- Verificar temas preenchidos
+SELECT COUNT(*) FROM news WHERE theme_l1_id IS NOT NULL;
+
+-- Amostra de dados
+SELECT unique_id, agency_key, title, image_url, video_url, theme_l1_id
+FROM news ORDER BY created_at DESC LIMIT 5;
+```
+
+#### Etapa 4.5: Configurar GitHub Actions
+
+```yaml
+# .github/workflows/pipeline-steps.yaml
+jobs:
+  scraper:
+    env:
+      STORAGE_BACKEND: dual_write
+      STORAGE_READ_FROM: huggingface
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - name: Setup Cloud SQL Auth
+        run: |
+          export DATABASE_URL=$(gcloud secrets versions access latest --secret=destaquesgovbr-postgres-connection-string)
+```
+
+#### Etapa 4.6: Monitoramento (5 dias)
+
+**Query de validação diária:**
+```sql
+SELECT DATE(published_at) as dt, COUNT(*)
+FROM news
+WHERE published_at >= CURRENT_DATE - INTERVAL '7 days'
+GROUP BY dt ORDER BY dt DESC;
+```
+
+**Rollback se necessário:**
+```yaml
+STORAGE_BACKEND: huggingface  # Voltar para HF-only
+```
+
+#### Checklist de Execução
+
+- [ ] Criar `src/storage_wrapper.py` no scraper
+- [ ] Modificar `src/main.py` para usar StorageWrapper
+- [ ] Instalar data-platform como dependência no scraper
+- [ ] PostgreSQL local rodando (docker-compose)
+- [ ] Teste scrape com 1 órgão, 1 dia
+- [ ] Validar dados no PostgreSQL local
+- [ ] Teste scrape-ebc
+- [ ] Modificar workflow para dual_write
+- [ ] Trigger manual para teste em produção
+- [ ] Monitorar 5 dias
+- [ ] Aprovar para próxima fase
+
 ---
 
 ## Fase 5: PostgreSQL como Primary
