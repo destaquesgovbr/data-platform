@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from data_platform.cogfy.cogfy_manager import CogfyClient, CollectionManager
 from data_platform.managers.dataset_manager import DatasetManager
+from data_platform.managers import StorageAdapter
 
 # Set up logging
 logging.basicConfig(
@@ -27,6 +28,7 @@ class UploadToCogfyManager:
         Initialize the UploadToCogfyManager.
 
         Args:
+            server_url: Cogfy server URL
             collection_name: Name of the Cogfy collection to upload to
         """
         self.collection_name = collection_name
@@ -34,6 +36,10 @@ class UploadToCogfyManager:
         self.collection_manager = None
         self._initialize_cogfy_interface(server_url)
         self._unique_id_field_id = None
+
+        # Initialize StorageAdapter for flexible data source
+        # Uses STORAGE_READ_FROM env var (postgres or huggingface)
+        self.storage_adapter = StorageAdapter()
 
     def _initialize_cogfy_interface(self, server_url: str) -> None:
         """Initialize the Cogfy client and collection manager."""
@@ -44,28 +50,86 @@ class UploadToCogfyManager:
         self.client = CogfyClient(api_key, base_url=server_url)
         self.collection_manager = CollectionManager(self.client, self.collection_name)
 
-    def _load_and_prepare_dataset(self) -> tuple[pd.DataFrame, dict]:
+    # Static field type mapping for Cogfy (used when reading from PostgreSQL)
+    COGFY_FIELD_TYPES = {
+        "unique_id": "text",
+        "agency": "text",
+        "published_at": "date",
+        "updated_datetime": "date",
+        "extracted_at": "date",
+        "title": "text",
+        "subtitle": "text",
+        "editorial_lead": "text",
+        "url": "text",
+        "content": "text",
+        "image": "text",
+        "video_url": "text",
+        "category": "text",
+        "tags": "text",
+        "theme_1_level_1": "text",
+        "theme_1_level_1_code": "text",
+        "theme_1_level_1_label": "text",
+        "theme_1_level_2_code": "text",
+        "theme_1_level_2_label": "text",
+        "theme_1_level_3_code": "text",
+        "theme_1_level_3_label": "text",
+        "most_specific_theme_code": "text",
+        "most_specific_theme_label": "text",
+        "summary": "text",
+    }
+
+    def _load_and_prepare_dataset(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> tuple[pd.DataFrame, dict]:
         """
-        Loads the dataset from HuggingFace and prepares it for migration.
+        Loads the dataset from configured storage backend and prepares it for migration.
+
+        Uses STORAGE_READ_FROM env var to determine source:
+        - huggingface: Load from HuggingFace dataset (legacy)
+        - postgres: Load from PostgreSQL database
+
+        Args:
+            start_date: Start date for filtering (YYYY-MM-DD)
+            end_date: End date for filtering (YYYY-MM-DD)
 
         Returns:
-            tuple: (pd.DataFrame, dict) The prepared dataset and its features
+            tuple: (pd.DataFrame, dict) The prepared dataset and field type mapping
         """
-        dataset_manager = DatasetManager()
-        dataset = dataset_manager._load_existing_dataset()
+        read_from = self.storage_adapter.read_from.value
+        logging.info(f"Loading data from {read_from}...")
 
-        if dataset is None:
-            raise ValueError("Failed to load dataset from HuggingFace")
+        if read_from == "postgres":
+            # Read from PostgreSQL using StorageAdapter
+            if not start_date or not end_date:
+                raise ValueError("start_date and end_date are required when reading from PostgreSQL")
 
-        df = dataset.to_pandas()
-        return df.sort_values(by="published_at", ascending=True), dataset.features
+            df = self.storage_adapter.get(min_date=start_date, max_date=end_date)
+
+            if df.empty:
+                raise ValueError(f"No records found in PostgreSQL for date range {start_date} to {end_date}")
+
+            logging.info(f"Loaded {len(df)} records from PostgreSQL")
+
+            # Use static field type mapping
+            return df.sort_values(by="published_at", ascending=True), self.COGFY_FIELD_TYPES
+
+        else:
+            # Read from HuggingFace (legacy behavior)
+            dataset_manager = DatasetManager()
+            dataset = dataset_manager._load_existing_dataset()
+
+            if dataset is None:
+                raise ValueError("Failed to load dataset from HuggingFace")
+
+            df = dataset.to_pandas()
+            logging.info(f"Loaded {len(df)} records from HuggingFace")
+
+            return df.sort_values(by="published_at", ascending=True), dataset.features
 
     def _setup_collection_fields(self, features: dict) -> tuple:
         """
         Sets up the collection fields and returns the field ID and type mappings.
 
         Args:
-            features: The dataset features dictionary
+            features: The dataset features dictionary (HuggingFace features or COGFY_FIELD_TYPES)
 
         Returns:
             tuple: (field_id_map, cogfy_type_map) where:
@@ -73,18 +137,26 @@ class UploadToCogfyManager:
                 - cogfy_type_map: Mapping of field names to their Cogfy types
         """
         field_mapping = {}
+
+        # Check if features is COGFY_FIELD_TYPES (static dict with string values)
+        # vs HuggingFace features (dict with Value/Sequence objects)
+        is_cogfy_types = features is self.COGFY_FIELD_TYPES
+
         for field_name, field_type in features.items():
-            # Handle different HuggingFace feature types
-            if hasattr(field_type, 'dtype'):
-                # Value type (string, int, timestamp, etc.)
+            if is_cogfy_types:
+                # Already Cogfy types, use directly
+                field_mapping[field_name] = field_type
+            elif hasattr(field_type, 'dtype'):
+                # HuggingFace Value type (string, int, timestamp, etc.)
                 hf_type = field_type.dtype
+                field_mapping[field_name] = self._map_hf_type_to_cogfy_type(hf_type)
             elif hasattr(field_type, 'feature'):
-                # Sequence/List type - map to text
-                hf_type = "list"
+                # HuggingFace Sequence/List type - map to text
+                field_mapping[field_name] = self._map_hf_type_to_cogfy_type("list")
             else:
                 # Fallback for other types
                 hf_type = str(field_type)
-            field_mapping[field_name] = self._map_hf_type_to_cogfy_type(hf_type)
+                field_mapping[field_name] = self._map_hf_type_to_cogfy_type(hf_type)
 
         logging.info("Ensuring fields exist in Cogfy collection...")
         self.collection_manager.ensure_fields(field_mapping)
@@ -413,10 +485,18 @@ class UploadToCogfyManager:
             start_date: Filter by start date (inclusive)
             end_date: Filter by end date (inclusive)
         """
-        # Load and prepare dataset
-        df, features = self._load_and_prepare_dataset()
+        # Convert dates to string format for StorageAdapter
+        start_date_str = None
+        end_date_str = None
+        if start_date:
+            start_date_str = start_date if isinstance(start_date, str) else start_date.strftime("%Y-%m-%d")
+        if end_date:
+            end_date_str = end_date if isinstance(end_date, str) else end_date.strftime("%Y-%m-%d")
 
-        # Apply filters
+        # Load and prepare dataset (passes dates for PostgreSQL filtering)
+        df, features = self._load_and_prepare_dataset(start_date=start_date_str, end_date=end_date_str)
+
+        # Apply agency filter if specified
         if agency:
             df = df[df['agency'] == agency]
 
@@ -429,21 +509,23 @@ class UploadToCogfyManager:
         # Brasília timezone (UTC-3)
         brasilia_tz = timezone(timedelta(hours=-3))
 
-        if start_date:
-            if isinstance(start_date, str):
-                start_date = pd.to_datetime(start_date)
-            # Make start_date timezone-aware if it's naive
-            if start_date.tzinfo is None:
-                start_date = start_date.replace(tzinfo=brasilia_tz)
-            df = df[df['published_at'] >= start_date]
+        # Apply date filtering for HuggingFace (PostgreSQL already filtered)
+        if self.storage_adapter.read_from.value != "postgres":
+            if start_date:
+                if isinstance(start_date, str):
+                    start_date = pd.to_datetime(start_date)
+                # Make start_date timezone-aware if it's naive
+                if start_date.tzinfo is None:
+                    start_date = start_date.replace(tzinfo=brasilia_tz)
+                df = df[df['published_at'] >= start_date]
 
-        if end_date:
-            if isinstance(end_date, str):
-                end_date = pd.to_datetime(end_date)
-            # Make end_date timezone-aware if it's naive
-            if end_date.tzinfo is None:
-                end_date = end_date.replace(tzinfo=brasilia_tz)
-            df = df[df['published_at'] <= end_date]
+            if end_date:
+                if isinstance(end_date, str):
+                    end_date = pd.to_datetime(end_date)
+                # Make end_date timezone-aware if it's naive
+                if end_date.tzinfo is None:
+                    end_date = end_date.replace(tzinfo=brasilia_tz)
+                df = df[df['published_at'] <= end_date]
 
         if df.empty:
             logging.warning("No records found matching the specified filters")
