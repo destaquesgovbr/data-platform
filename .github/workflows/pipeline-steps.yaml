@@ -184,6 +184,7 @@ jobs:
             -e COGFY_API_KEY="${{ steps.secrets.outputs.COGFY_API_KEY }}" \
             -e HF_TOKEN="${{ steps.secrets.outputs.HF_TOKEN }}" \
             -e STORAGE_BACKEND=dual_write \
+            -e STORAGE_READ_FROM=postgres \
             -e DATABASE_URL="${{ steps.secrets.outputs.DATABASE_URL }}" \
             ghcr.io/destaquesgovbr/data-platform:latest \
             data-platform enrich --start-date "${{ inputs.start_date }}" --end-date "${{ inputs.end_date }}"
