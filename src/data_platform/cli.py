@@ -94,8 +94,8 @@ def upload_cogfy(
     import os
     from data_platform.cogfy.upload_manager import UploadToCogfyManager
 
-    server_url = os.getenv("COGFY_SERVER_URL", "https://api.cogfy.com")
-    collection_name = os.getenv("COGFY_COLLECTION_NAME", "govbrnews")
+    server_url = os.getenv("COGFY_SERVER_URL", "https://api.cogfy.com/")
+    collection_name = os.getenv("COGFY_COLLECTION_NAME", "noticiasgovbr-all-news")
 
     logging.info(f"Uploading news to Cogfy from {start_date} to {end_date or start_date}")
 
