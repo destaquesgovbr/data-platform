@@ -127,6 +127,7 @@ jobs:
         id: secrets
         run: |
           echo "DATABASE_URL=$(gcloud secrets versions access latest --secret=govbrnews-postgres-connection-string)" >> $GITHUB_OUTPUT
+          echo "HF_TOKEN=$(gcloud secrets versions access latest --secret=hf-token)" >> $GITHUB_OUTPUT
           echo "COGFY_API_KEY=$(gcloud secrets versions access latest --secret=cogfy-api-key)" >> $GITHUB_OUTPUT
 
       - name: Upload news to Cogfy
@@ -134,6 +135,7 @@ jobs:
           docker run --rm \
             -e STORAGE_READ_FROM=postgres \
             -e DATABASE_URL="${{ steps.secrets.outputs.DATABASE_URL }}" \
+            -e HF_TOKEN="${{ steps.secrets.outputs.HF_TOKEN }}" \
             -e COGFY_API_KEY="${{ steps.secrets.outputs.COGFY_API_KEY }}" \
             ghcr.io/destaquesgovbr/data-platform:latest \
             data-platform upload-cogfy --start-date "${{ inputs.start_date }}" --end-date "${{ inputs.end_date }}"
