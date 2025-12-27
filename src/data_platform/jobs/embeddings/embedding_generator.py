@@ -1,0 +1,313 @@
+"""
+Embedding Generator for semantic search.
+
+Generates embeddings for news articles using sentence-transformers.
+Phase 4.7: Embeddings Semânticos
+
+Scope: Only 2025 news (have AI-generated summaries from Cogfy)
+Model: paraphrase-multilingual-mpnet-base-v2 (768 dimensions)
+Input: title + " " + summary (fallback to content if summary missing)
+"""
+
+import logging
+import os
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import psycopg2
+from psycopg2.extras import execute_batch
+from sentence_transformers import SentenceTransformer
+
+logger = logging.getLogger(__name__)
+
+
+class EmbeddingGenerator:
+    """Generates semantic embeddings for news articles."""
+
+    # Model configuration
+    MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+    EMBEDDING_DIM = 768
+
+    # Performance configuration
+    DEFAULT_BATCH_SIZE = 100
+    MAX_TEXT_LENGTH = 512  # Model's max sequence length
+
+    def __init__(self, database_url: Optional[str] = None):
+        """
+        Initialize the embedding generator.
+
+        Args:
+            database_url: PostgreSQL connection string. If None, reads from DATABASE_URL env var.
+        """
+        self.database_url = database_url or os.getenv("DATABASE_URL")
+        if not self.database_url:
+            raise ValueError("DATABASE_URL environment variable is required")
+
+        # Model will be loaded lazily on first use
+        self._model: Optional[SentenceTransformer] = None
+        self._device: Optional[str] = None
+
+    @property
+    def model(self) -> SentenceTransformer:
+        """Lazy load the sentence transformer model."""
+        if self._model is None:
+            logger.info(f"Loading model: {self.MODEL_NAME}")
+
+            # Auto-detect device (CUDA if available, else CPU)
+            import torch
+            self._device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"Using device: {self._device}")
+
+            self._model = SentenceTransformer(self.MODEL_NAME, device=self._device)
+            logger.info(f"Model loaded successfully (embedding_dim={self.EMBEDDING_DIM})")
+
+        return self._model
+
+    def _get_connection(self):
+        """Get a PostgreSQL connection."""
+        return psycopg2.connect(self.database_url)
+
+    def _fetch_news_without_embeddings(
+        self,
+        start_date: str,
+        end_date: Optional[str] = None,
+        limit: Optional[int] = None
+    ) -> List[Tuple[int, str, Optional[str], Optional[str]]]:
+        """
+        Fetch news records that don't have embeddings yet.
+
+        Scope: Only 2025 news (published_at >= '2025-01-01')
+
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD). If None, uses start_date.
+            limit: Maximum number of records to fetch.
+
+        Returns:
+            List of (id, title, summary, content) tuples
+        """
+        end_date = end_date or start_date
+
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                query = """
+                    SELECT id, title, summary, content
+                    FROM news
+                    WHERE published_at >= %s
+                      AND published_at < %s::date + INTERVAL '1 day'
+                      AND content_embedding IS NULL
+                      AND published_at >= '2025-01-01'  -- Phase 4.7: Only 2025 news
+                    ORDER BY published_at DESC
+                """
+
+                params = [start_date, end_date]
+
+                if limit:
+                    query += " LIMIT %s"
+                    params.append(limit)
+
+                cur.execute(query, params)
+                results = cur.fetchall()
+
+                logger.info(
+                    f"Found {len(results)} news without embeddings "
+                    f"(date range: {start_date} to {end_date})"
+                )
+
+                return results
+        finally:
+            conn.close()
+
+    def _prepare_text_for_embedding(
+        self,
+        title: str,
+        summary: Optional[str],
+        content: Optional[str]
+    ) -> str:
+        """
+        Prepare text for embedding generation.
+
+        Strategy: title + " " + summary (fallback to content if summary missing)
+
+        Args:
+            title: News title
+            summary: AI-generated summary from Cogfy (may be None for older news)
+            content: Raw news content (fallback)
+
+        Returns:
+            Prepared text string
+        """
+        # Always include title
+        text_parts = [title.strip() if title else ""]
+
+        # Prefer summary (AI-generated, cleaner), fallback to content
+        if summary and summary.strip():
+            text_parts.append(summary.strip())
+        elif content and content.strip():
+            # Use first 500 chars of content as fallback
+            text_parts.append(content.strip()[:500])
+
+        # Join with space
+        text = " ".join(part for part in text_parts if part)
+
+        # Truncate to model's max length (rough estimate, tokenizer will handle exactly)
+        if len(text) > self.MAX_TEXT_LENGTH * 4:  # ~4 chars per token estimate
+            text = text[:self.MAX_TEXT_LENGTH * 4]
+
+        return text
+
+    def _generate_embeddings_batch(self, texts: List[str]) -> np.ndarray:
+        """
+        Generate embeddings for a batch of texts.
+
+        Args:
+            texts: List of text strings
+
+        Returns:
+            numpy array of shape (len(texts), 768)
+        """
+        # Generate embeddings
+        embeddings = self.model.encode(
+            texts,
+            batch_size=self.DEFAULT_BATCH_SIZE,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True  # L2 normalization for cosine similarity
+        )
+
+        return embeddings
+
+    def _update_embeddings_batch(
+        self,
+        news_ids: List[int],
+        embeddings: np.ndarray
+    ) -> int:
+        """
+        Update news records with generated embeddings.
+
+        Args:
+            news_ids: List of news IDs
+            embeddings: numpy array of embeddings (shape: (len(news_ids), 768))
+
+        Returns:
+            Number of records updated
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                # Prepare data for batch update
+                # Convert numpy array to list for PostgreSQL
+                update_data = [
+                    (
+                        embeddings[i].tolist(),  # Convert numpy array to Python list
+                        datetime.utcnow(),
+                        news_ids[i]
+                    )
+                    for i in range(len(news_ids))
+                ]
+
+                # Batch update
+                execute_batch(
+                    cur,
+                    """
+                        UPDATE news
+                        SET content_embedding = %s::vector,
+                            embedding_generated_at = %s
+                        WHERE id = %s
+                    """,
+                    update_data,
+                    page_size=100
+                )
+
+                conn.commit()
+                return len(news_ids)
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error updating embeddings: {e}")
+            raise
+        finally:
+            conn.close()
+
+    def generate_embeddings(
+        self,
+        start_date: str,
+        end_date: Optional[str] = None,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        max_records: Optional[int] = None
+    ) -> Dict[str, int]:
+        """
+        Generate embeddings for news articles.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD). If None, uses start_date.
+            batch_size: Number of records to process per batch
+            max_records: Maximum number of records to process (for testing)
+
+        Returns:
+            Dictionary with statistics:
+                - processed: Total records processed
+                - successful: Records successfully updated
+                - failed: Records that failed
+        """
+        logger.info(
+            f"Starting embedding generation for date range: {start_date} to {end_date or start_date}"
+        )
+
+        # Fetch news without embeddings
+        news_records = self._fetch_news_without_embeddings(
+            start_date, end_date, max_records
+        )
+
+        if not news_records:
+            logger.info("No records found without embeddings")
+            return {"processed": 0, "successful": 0, "failed": 0}
+
+        # Process in batches
+        total_processed = 0
+        total_successful = 0
+        total_failed = 0
+
+        for i in range(0, len(news_records), batch_size):
+            batch = news_records[i:i + batch_size]
+            batch_ids = [rec[0] for rec in batch]
+
+            try:
+                # Prepare texts
+                texts = [
+                    self._prepare_text_for_embedding(
+                        title=rec[1],
+                        summary=rec[2],
+                        content=rec[3]
+                    )
+                    for rec in batch
+                ]
+
+                # Generate embeddings
+                logger.info(f"Generating embeddings for batch {i // batch_size + 1} ({len(batch)} records)")
+                embeddings = self._generate_embeddings_batch(texts)
+
+                # Update database
+                updated = self._update_embeddings_batch(batch_ids, embeddings)
+
+                total_successful += updated
+                logger.info(f"Batch {i // batch_size + 1}: {updated} records updated successfully")
+
+            except Exception as e:
+                logger.error(f"Error processing batch {i // batch_size + 1}: {e}")
+                total_failed += len(batch)
+
+            total_processed += len(batch)
+
+        logger.info(
+            f"Embedding generation complete: {total_successful} successful, "
+            f"{total_failed} failed, {total_processed} total"
+        )
+
+        return {
+            "processed": total_processed,
+            "successful": total_successful,
+            "failed": total_failed
+        }

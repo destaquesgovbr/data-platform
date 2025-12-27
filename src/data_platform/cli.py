@@ -150,5 +150,73 @@ def migrate(
     logging.info("Migration completed")
 
 
+@app.command("generate-embeddings")
+def generate_embeddings(
+    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    batch_size: int = typer.Option(100, help="Batch size for processing"),
+    max_records: Optional[int] = typer.Option(None, help="Max records to process (for testing)"),
+) -> None:
+    """
+    Generate semantic embeddings for news articles.
+
+    Phase 4.7: Only processes 2025 news (have AI-generated summaries from Cogfy).
+    Uses paraphrase-multilingual-mpnet-base-v2 model (768 dimensions).
+    """
+    from data_platform.jobs.embeddings import EmbeddingGenerator
+
+    logging.info(f"Generating embeddings from {start_date} to {end_date or start_date}")
+    logging.info(f"Batch size: {batch_size}, Max records: {max_records or 'unlimited'}")
+
+    generator = EmbeddingGenerator()
+    stats = generator.generate_embeddings(
+        start_date=start_date,
+        end_date=end_date,
+        batch_size=batch_size,
+        max_records=max_records
+    )
+
+    logging.info(
+        f"Embedding generation completed: {stats['successful']} successful, "
+        f"{stats['failed']} failed, {stats['processed']} total"
+    )
+
+
+@app.command("sync-embeddings-to-typesense")
+def sync_embeddings_to_typesense(
+    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    full_sync: bool = typer.Option(False, help="Full sync (ignore last sync timestamp)"),
+    batch_size: int = typer.Option(1000, help="Batch size for Typesense upsert"),
+    max_records: Optional[int] = typer.Option(None, help="Max records to sync (for testing)"),
+) -> None:
+    """
+    Sync embeddings from PostgreSQL to Typesense.
+
+    Phase 4.7: Enables semantic search in Typesense MCP Server.
+    By default, only syncs embeddings updated since last successful sync (incremental).
+    Use --full-sync to sync all embeddings.
+    """
+    from data_platform.jobs.embeddings import TypesenseSyncManager
+
+    logging.info(f"Syncing embeddings to Typesense from {start_date} to {end_date or start_date}")
+    logging.info(f"Mode: {'Full sync' if full_sync else 'Incremental sync'}")
+    logging.info(f"Batch size: {batch_size}, Max records: {max_records or 'unlimited'}")
+
+    sync_manager = TypesenseSyncManager()
+    stats = sync_manager.sync_embeddings(
+        start_date=start_date,
+        end_date=end_date,
+        full_sync=full_sync,
+        batch_size=batch_size,
+        max_records=max_records
+    )
+
+    logging.info(
+        f"Typesense sync completed: {stats['successful']} successful, "
+        f"{stats['failed']} failed, {stats['processed']} total"
+    )
+
+
 if __name__ == "__main__":
     app()
