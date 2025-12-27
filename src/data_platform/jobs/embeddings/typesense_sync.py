@@ -171,7 +171,6 @@ class TypesenseSyncManager:
                     WHERE n.published_at >= %s
                       AND n.published_at < %s::date + INTERVAL '1 day'
                       AND n.content_embedding IS NOT NULL
-                      AND n.published_at >= '2025-01-01'  -- Phase 4.7: Only 2025 news
                 """
 
                 params = [start_date, end_date]
