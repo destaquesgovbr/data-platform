@@ -98,6 +98,94 @@ data-platform/
 └── [pyproject.toml, README.md, CLAUDE.md, .gitignore]
 ```
 
+**Comandos validados**:
+```bash
+poetry install
+pytest tests/
+```
+
+**Próximos passos**:
+- [ ] Iniciar Fase 1: Infraestrutura
+- [ ] Criar cloud_sql.tf no repo infra
+- [ ] Provisionar Cloud SQL
+
+**Artefatos**:
+- Repositório: `/destaquesgovbr/data-platform`
+- Documentação: `_plan/`
+- Código: `src/`, `tests/`, `scripts/`
+
+### 2024-12-26 - [Fase 4.7] Planejamento de Embeddings Semânticos
+
+**Status**: ⚠️ Em planejamento
+
+**O que foi feito**:
+- Criado plano completo para Fase 4.7 (Embeddings Semânticos)
+- Documentado em `/Users/nitai/.claude/plans/stateful-wobbling-taco.md`
+- Integrado ao plano principal em `_plan/README.md`
+- Adicionado à `_plan/CHECKLIST.md`
+- Criado ADR-007 em `_plan/DECISIONS.md`
+
+**Decisões tomadas**:
+- ADR-007: Estratégia de embeddings semânticos
+  - Modelo: paraphrase-multilingual-mpnet-base-v2 (768 dims)
+  - Input: `title + " " + summary` (summary do Cogfy)
+  - **Escopo: Apenas notícias de 2025** (têm summary do Cogfy)
+  - Storage: PostgreSQL (pgvector) + Typesense
+  - 2 novos jobs no workflow: generate-embeddings, sync-embeddings-to-typesense
+
+**Arquitetura**:
+```
+Pipeline Diário:
+  scraper → PostgreSQL
+      ↓
+  upload-cogfy → Cogfy API (gera summary)
+      ↓
+  [wait 20 min]
+      ↓
+  enrich-themes → PostgreSQL (themes + summary)
+      ↓
+  [NOVO] generate-embeddings → PostgreSQL (embeddings)
+      ↓
+  [NOVO] sync-embeddings-to-typesense → Typesense
+```
+
+**Escopo definido**:
+- **Apenas notícias de 2025** (~30k registros)
+- Notícias anteriores não têm summary do Cogfy, portanto não serão processadas
+- Embeddings gerados de `title + " " + summary`
+- Fallback para `content` se summary ausente
+
+**Implementação planejada**:
+- Database: Habilitar pgvector, adicionar colunas, criar índices HNSW
+- Python: EmbeddingGenerator + TypesenseSyncManager
+- CLI: 2 novos comandos
+- Testes: unit + integration (com Docker local)
+- Workflow: 2 novos jobs após enrich-themes
+- Docker: Pre-download modelo (confirmado)
+- Secrets: Usar existentes do Typesense (confirmado em infra)
+
+**Estimativas**:
+- Desenvolvimento: ~53 horas (~7 dias)
+- Deployment: ~30 horas (~4 dias)
+- Backfill 2025: ~25 minutos runtime
+- Total: ~4 semanas
+
+**Próximos passos**:
+- [ ] Revisar e aprovar Fase 4.7
+- [ ] Criar PR Terraform (habilitar pgvector)
+- [ ] Implementar EmbeddingGenerator class
+- [ ] Implementar TypesenseSyncManager class
+- [ ] Escrever testes automatizados
+- [ ] Testar localmente (Docker PostgreSQL + Typesense)
+
+**Artefatos**:
+- Plano detalhado: `/Users/nitai/.claude/plans/stateful-wobbling-taco.md`
+- Integração: `_plan/README.md` (Fase 4.7)
+- Checklist: `_plan/CHECKLIST.md` (Fase 4.7)
+- ADR: `_plan/DECISIONS.md` (ADR-007)
+
+
+
 **Problemas encontrados**:
 - Nenhum
 
@@ -527,6 +615,40 @@ data-platform/
   - scripts/populate_agencies.py (--db-url support)
   - scripts/populate_themes.py (--db-url support)
 
+### 2024-12-26 - [Fase 4] Dual-Write Completo - Todas as Etapas Lendo de PostgreSQL
+
+**Status**: ✅ Completo
+
+**O que foi feito**:
+- **PR #10 mergeado**: EnrichmentManager com suporte completo a leitura de PostgreSQL
+  - `_load_and_filter_dataset()` agora usa StorageAdapter.get() quando STORAGE_READ_FROM=postgres
+  - `_prepare_dataset_for_enrichment()` adaptado para mapear colunas PG (theme_1_level_1_code vs theme_1_level_1)
+  - `_merge_with_full_dataset()` skip merge quando lendo de PostgreSQL (desnecessário)
+  - `_upload_enriched_dataset()` suporta dual-write quando lendo de PostgreSQL
+- **Workflow atualizado** (pipeline-steps.yaml):
+  - Scraper: STORAGE_BACKEND=dual_write (lê HF, escreve em ambos)
+  - EBC Scraper: STORAGE_BACKEND=dual_write (lê HF, escreve em ambos)
+  - Upload to Cogfy: STORAGE_READ_FROM=postgres (lê PG)
+  - Enrich: STORAGE_BACKEND=dual_write, STORAGE_READ_FROM=postgres (lê PG, escreve em ambos)
+- **Testado localmente**:
+  - 4 registros enriquecidos com sucesso lendo de PostgreSQL
+  - Temas L1/L2/L3 e summaries atualizados corretamente
+
+**Problemas encontrados**:
+- **PR merge não incluiu mudança do workflow**: Squash merge incluiu apenas código Python
+  - Solução: Commit adicional direto no main após merge
+
+**Próximos passos**:
+- [ ] Validar resultado do pipeline run 20529210748
+- [ ] Considerar arquivar scraper repo após validação
+- [ ] Iniciar Fase 5: PostgreSQL como primary (eliminar HuggingFace dos writes)
+
+**Artefatos**:
+- PR #10: feat: add PostgreSQL read support to EnrichmentManager
+- Commits diretos no main:
+  - workflow: add STORAGE_READ_FROM=postgres to enrich step
+- Pipeline run: 20529210748 (em validação)
+
 ---
 
 ## Template para Novas Entradas
@@ -570,10 +692,13 @@ Copie e cole este template ao adicionar novas entradas:
 | 2024-12-25 | 4 | StorageAdapter implementado (PR #5) | ✅ |
 | 2024-12-25 | 4 | StorageWrapper no scraper criado | ✅ |
 | 2024-12-25 | 4 | Dual-write testado localmente (13 records) | ✅ |
-| ____-__-__ | 4 | GitHub Actions configurado dual_write | ⏳ |
+| 2024-12-26 | 4 | GitHub Actions configurado dual_write | ✅ |
+| 2024-12-26 | 4 | Enrich step lendo de PostgreSQL (PR #10) | ✅ |
+| 2024-12-26 | 4 | Upload-to-Cogfy lendo de PostgreSQL | ✅ |
+| 2024-12-26 | 4 | Pipeline completo validado em produção | ⏳ |
 | ____-__-__ | 5 | PostgreSQL como primary | ⏳ |
 | ____-__-__ | 6 | Todos consumidores migrados | ⏳ |
 
 ---
 
-*Última atualização: 2024-12-25 16:15*
+*Última atualização: 2024-12-26 18:00*

@@ -45,6 +45,11 @@ Migrar o banco de dados principal do projeto DestaquesGovBr de HuggingFace Datas
 │ - Pipeline escreve em ambos                                     │
 │ - Monitoramento e validação                                     │
 ├─────────────────────────────────────────────────────────────────┤
+│ Fase 4.7: Embeddings Semânticos                                 │
+│ - Gerar embeddings para notícias de 2025                        │
+│ - Armazenar no PostgreSQL (pgvector)                            │
+│ - Sincronizar para Typesense                                    │
+├─────────────────────────────────────────────────────────────────┤
 │ Fase 5: PostgreSQL como Primary                                 │
 │ - Switch para PG como fonte                                     │
 │ - Sync job PG → HF                                              │
@@ -916,6 +921,415 @@ docker run --rm \
 - [ ] GitHub Actions executa pipeline completo
 - [ ] Testes passam (unit + integration)
 - [ ] Repositório scraper arquivado
+- [ ] Documentação atualizada
+
+---
+
+## Fase 4.7: Embeddings Semânticos
+
+**Objetivo**: Adicionar geração de embeddings semânticos para notícias de 2025 e sincronização com Typesense para busca semântica.
+
+> **IMPORTANTE**: Esta fase processa **apenas notícias de 2025** pois somente elas possuem resumos AI-gerados pelo Cogfy. Notícias anteriores não serão processadas nesta fase.
+
+### Tarefas
+
+- [ ] 4.7.1 Habilitar pgvector extension no Cloud SQL
+- [ ] 4.7.2 Adicionar colunas de embedding à tabela news
+- [ ] 4.7.3 Criar índices HNSW para busca vetorial
+- [ ] 4.7.4 Implementar EmbeddingGenerator
+- [ ] 4.7.5 Implementar TypesenseSyncManager
+- [ ] 4.7.6 Adicionar comandos CLI (generate-embeddings, sync-embeddings-to-typesense)
+- [ ] 4.7.7 Escrever testes automatizados (unit + integration)
+- [ ] 4.7.8 Atualizar workflow GitHub Actions
+- [ ] 4.7.9 Atualizar schema do Typesense
+- [ ] 4.7.10 Testar localmente com Docker (PostgreSQL + Typesense)
+- [ ] 4.7.11 Backfill embeddings para 2025
+
+### Arquitetura
+
+```
+Pipeline Diário:
+  scraper → PostgreSQL
+      ↓
+  upload-cogfy → Cogfy API (gera summary)
+      ↓
+  [wait 20 min]
+      ↓
+  enrich-themes → PostgreSQL (themes + summary)
+      ↓
+  [NOVO] generate-embeddings → PostgreSQL (embeddings de title + summary)
+      ↓
+  [NOVO] sync-embeddings-to-typesense → Typesense (campo content_embedding)
+```
+
+### Decisões Técnicas
+
+| Decisão | Escolha | Justificativa |
+|---------|---------|---------------|
+| **Modelo** | paraphrase-multilingual-mpnet-base-v2 (768 dims) | Já usado para temas, excelente português, local (grátis), consistente |
+| **Input** | `title + " " + summary` | Summary é AI-generated (Cogfy), mais semântico que content bruto |
+| **Escopo** | **Apenas 2025** | Somente 2025 tem summaries do Cogfy |
+| **Timing** | Job separado APÓS enrich-themes | Garante que summary está disponível |
+| **Storage** | PostgreSQL (pgvector) + Typesense | PG para queries avançadas, Typesense para MCP Server |
+| **Sync** | Job separado PG → Typesense | Modular, permite re-sync sem re-gerar |
+
+### Implementação
+
+#### 4.7.1-4.7.3: Database Schema (PostgreSQL)
+
+**Migrations**:
+1. `scripts/migrations/001_add_pgvector_extension.sql` - Habilitar pgvector
+2. `scripts/migrations/002_add_embedding_column.sql` - Adicionar colunas (content_embedding, embedding_generated_at)
+3. `scripts/migrations/003_create_embedding_index.sql` - Criar índices HNSW
+
+**Terraform Update** (`infra/terraform/cloud_sql.tf`):
+```hcl
+# Phase 4.7: Enable pgvector for embeddings
+database_flags {
+  name  = "cloudsql.enable_pgvector"
+  value = "on"
+}
+```
+
+**Estimativa de Storage**:
+- Embeddings (~30k records de 2025): ~90 MB
+- HNSW index: ~200 MB
+- **Total adicional**: ~300 MB
+
+#### 4.7.4-4.7.6: Python Implementation
+
+**Novos arquivos**:
+- `src/data_platform/jobs/embeddings/__init__.py`
+- `src/data_platform/jobs/embeddings/embedding_generator.py` - Gera embeddings usando sentence-transformers
+- `src/data_platform/jobs/embeddings/typesense_sync.py` - Sync embeddings para Typesense
+
+**Funcionalidades**:
+- **EmbeddingGenerator**:
+  - Carrega modelo `paraphrase-multilingual-mpnet-base-v2`
+  - Busca notícias de 2025 sem embeddings do PostgreSQL
+  - Gera embeddings de `title + " " + summary` (fallback para content se sem summary)
+  - Atualiza PostgreSQL com embeddings + timestamp
+  - Performance: ~30-40 records/sec (CPU)
+
+- **TypesenseSyncManager**:
+  - Busca notícias com embeddings novos/atualizados
+  - Sync incremental baseado em `embedding_generated_at`
+  - Batch upsert (1000 docs por vez)
+  - Usa secrets existentes do Typesense (typesense-api-key)
+
+**CLI Commands** (adicionar em `src/data_platform/cli.py`):
+```bash
+# Gerar embeddings para notícias de 2025
+data-platform generate-embeddings --start-date 2025-01-01 --end-date 2025-12-31
+
+# Sync para Typesense
+data-platform sync-embeddings-to-typesense --start-date 2025-01-01
+```
+
+**Model Update** (`src/data_platform/models/news.py`):
+```python
+# Embedding fields (Phase 4.7)
+content_embedding: Optional[List[float]] = None  # 768-dimensional vector
+embedding_generated_at: Optional[datetime] = None
+```
+
+#### 4.7.7: Testes Automatizados
+
+**Arquivos de teste**:
+- `tests/unit/test_embedding_generator.py` - Testa geração de embeddings, preparação de texto, similaridade
+- `tests/unit/test_typesense_sync.py` - Testa preparação de documentos, validação de schema, parsing
+- `tests/integration/test_embedding_workflow.py` - Testa workflow completo com PostgreSQL local
+
+**Casos de teste**:
+- Preparação de texto para embedding (title + summary, fallback)
+- Geração de embeddings (mock do modelo)
+- Similaridade entre textos relacionados
+- Preparação de documentos Typesense
+- Validação de schema
+- Workflow completo (10 registros)
+
+**Teste local com Docker**:
+```bash
+# 1. PostgreSQL com pgvector
+docker run -d --name postgres-pgvector \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=destaquesgovbr \
+  -p 5432:5432 \
+  pgvector/pgvector:pg15
+
+# 2. Typesense local (do repo typesense)
+cd /Users/nitai/Dropbox/dev-mgi/destaquesgovbr/typesense
+./run-typesense-server.sh
+
+# 3. Run migrations
+psql -h localhost -U postgres -d destaquesgovbr -f scripts/migrations/*.sql
+
+# 4. Test embedding generation
+export DATABASE_URL="postgresql://postgres:password@localhost:5432/destaquesgovbr"
+poetry run data-platform generate-embeddings --start-date 2025-01-01 --max-records 100
+
+# 5. Test Typesense sync
+export TYPESENSE_HOST=localhost TYPESENSE_PORT=8108 TYPESENSE_API_KEY=...
+poetry run data-platform sync-embeddings-to-typesense --start-date 2025-01-01
+```
+
+#### 4.7.8: GitHub Actions Workflow
+
+**Adicionar 2 novos jobs em `.github/workflows/pipeline-steps.yaml`** (após `enrich-themes`):
+
+```yaml
+  generate-embeddings:
+    name: Generate Semantic Embeddings
+    runs-on: ubuntu-latest
+    needs: [enrich-themes]
+    steps:
+      - name: Generate embeddings for 2025 news
+        run: |
+          docker run --rm \
+            -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+            ghcr.io/destaquesgovbr/data-platform:latest \
+            data-platform generate-embeddings \
+              --start-date "${{ inputs.start_date }}" \
+              --end-date "${{ inputs.end_date }}"
+
+  sync-embeddings-to-typesense:
+    name: Sync Embeddings to Typesense
+    runs-on: ubuntu-latest
+    needs: [generate-embeddings]
+    steps:
+      - name: Sync embeddings to Typesense
+        run: |
+          docker run --rm \
+            -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+            -e TYPESENSE_API_KEY="$(gcloud secrets versions access latest --secret=typesense-api-key)" \
+            -e TYPESENSE_HOST="typesense-server.southamerica-east1-a.c.inspire-7-finep.internal" \
+            -e TYPESENSE_PORT="8108" \
+            ghcr.io/destaquesgovbr/data-platform:latest \
+            data-platform sync-embeddings-to-typesense \
+              --start-date "${{ inputs.start_date }}" \
+              --end-date "${{ inputs.end_date }}"
+```
+
+**Atualizar job `pipeline-summary`**:
+```yaml
+needs: [scraper, ebc-scraper, upload-to-cogfy, enrich-themes, generate-embeddings, sync-embeddings-to-typesense]
+```
+
+#### 4.7.9: Dependencies & Docker
+
+**pyproject.toml** (adicionar após scipy):
+```toml
+# Machine Learning (Phase 4.7 - Embeddings)
+sentence-transformers = "^2.2.2"
+torch = {version = "^2.0.0", source = "pytorch-cpu"}
+
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
+```
+
+**Dockerfile** (adicionar antes do CMD - **PRE-DOWNLOAD CONFIRMADO**):
+```dockerfile
+# Phase 4.7: Pre-download embedding model to cache in Docker layer
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')"
+```
+
+**Tamanho adicional da imagem**:
+- sentence-transformers: ~50 MB
+- torch (CPU-only): ~150 MB
+- Model weights: ~420 MB
+- **Total**: ~620 MB
+
+#### 4.7.10: Typesense Schema Update
+
+**Atualizar `typesense/src/typesense_dgb/collection.py`** (adicionar campo):
+```python
+{
+    "name": "content_embedding",
+    "type": "float[]",
+    "facet": False,
+    "optional": True,
+    "index": True,
+    "num_dim": 768  # Required for vector fields
+},
+```
+
+**⚠️ IMPORTANTE**: Typesense não suporta ALTER schema. Deve **recriar collection** (DESTRUTIVO).
+
+**Script de update** (rodar UMA VEZ):
+```python
+# 1. Backup data (export via PostgreSQL)
+# 2. Delete collection: client.collections['news'].delete()
+# 3. Create com novo schema (inclui content_embedding)
+# 4. Full sync from PostgreSQL
+```
+
+#### 4.7.11: Secrets (Já existem!)
+
+**Usar secrets existentes do infra**:
+- `typesense-api-key` (já existe em `infra/terraform/secrets.tf`, linha 62)
+- `typesense-write-conn` (já existe, linha 142)
+- GitHub Actions já tem acesso (linha 87, 161)
+
+**Sem necessidade de criar novos secrets!**
+
+### Deployment Strategy
+
+#### Fase 1: Infrastructure Setup
+1. PR Terraform: Habilitar pgvector no Cloud SQL
+2. Aplicar Terraform (via CI/CD)
+3. Rodar migrations (001, 002, 003)
+4. Build Docker image com ML dependencies
+
+#### Fase 2: Code Implementation
+1. Implementar EmbeddingGenerator e TypesenseSyncManager
+2. Adicionar CLI commands
+3. Escrever testes (unit + integration)
+4. Testar localmente (Docker PostgreSQL + Typesense)
+5. Code review e merge PR
+
+#### Fase 3: Typesense Schema Update
+1. Backup Typesense data
+2. Atualizar collection schema (adicionar content_embedding)
+3. Delete + recreate collection
+4. Full sync PG → Typesense
+
+#### Fase 4: Production Integration
+1. Adicionar jobs ao workflow GitHub Actions
+2. Trigger manual teste (1 dia de 2025)
+3. Monitorar 1 semana
+4. Sign-off
+
+### Backfill Embeddings (2025)
+
+**Escopo**: ~30.000 notícias de 2025 (apenas elas têm summary do Cogfy)
+
+**Script**: `scripts/backfill_embeddings.sh`
+```bash
+#!/bin/bash
+# Backfill embeddings para 2025
+
+START_DATE="2025-01-01"
+END_DATE="2025-12-31"
+
+poetry run data-platform generate-embeddings \
+  --start-date "$START_DATE" \
+  --end-date "$END_DATE"
+
+poetry run data-platform sync-embeddings-to-typesense \
+  --start-date "$START_DATE" \
+  --full-sync
+```
+
+**Timeline**:
+- 30k records × ~30 records/sec = ~17 minutos
+- Sync Typesense: ~5 minutos
+- **Total**: ~25 minutos
+
+### Monitoramento
+
+**Métricas PostgreSQL**:
+```sql
+-- Cobertura de embeddings para 2025
+SELECT
+  COUNT(*) FILTER (WHERE content_embedding IS NOT NULL) as with_embeddings,
+  COUNT(*) as total,
+  ROUND(COUNT(*) FILTER (WHERE content_embedding IS NOT NULL)::numeric / COUNT(*) * 100, 2) as coverage_pct
+FROM news
+WHERE published_at >= '2025-01-01' AND published_at < '2026-01-01';
+
+-- Sync lag (PG vs Typesense)
+SELECT COUNT(*) as pending_sync
+FROM news
+WHERE published_at >= '2025-01-01'
+  AND content_embedding IS NOT NULL
+  AND embedding_generated_at > (
+    SELECT completed_at FROM sync_log
+    WHERE operation = 'typesense_embeddings_sync'
+      AND status = 'completed'
+    ORDER BY completed_at DESC LIMIT 1
+  );
+```
+
+**Alertas**:
+- Embedding failure rate > 5%: WARNING
+- Typesense sync failed: ERROR
+- Embedding coverage < 90% para 2025: WARNING
+
+### Rollback Plan
+
+| Cenário | Impacto | Rollback |
+|---------|---------|----------|
+| **Embedding generation fails** | Baixo (NULL embeddings) | Re-run job após fix |
+| **Typesense sync fails** | Médio (busca sem embeddings) | Re-run sync job |
+| **Schema migration fails** | Alto (bloqueio) | Restore Cloud SQL backup |
+| **Performance degradation** | Médio (queries lentas) | DROP HNSW index |
+
+**Rollback emergencial**:
+```yaml
+# Disable jobs no workflow (comment out)
+# generate-embeddings: ...
+# sync-embeddings-to-typesense: ...
+```
+
+### Estimativas
+
+**Esforço de Desenvolvimento**: ~53 horas (~7 dias)
+- Database migrations: 4h
+- EmbeddingGenerator: 8h
+- TypesenseSyncManager: 8h
+- CLI commands: 2h
+- Testes (unit + integration): 10h
+- Docker & dependencies: 3h
+- Workflow GitHub Actions: 4h
+- Terraform: 2h
+- Documentação: 4h
+- Code review: 8h
+
+**Esforço de Deployment**: ~30 horas (~4 dias)
+- Infrastructure setup: 4h
+- Testes locais: 5h
+- Backfill (2025): 2h (runtime: ~25 min)
+- Typesense schema update: 3h
+- Workflow integration: 2h
+- Monitoring: 4h
+- Observação (1 semana): 2h
+
+**Total: ~4 semanas** (desenvolvimento + deployment + validação)
+
+### Arquivos Críticos
+
+**Novos**:
+- `scripts/migrations/001_add_pgvector_extension.sql`
+- `scripts/migrations/002_add_embedding_column.sql`
+- `scripts/migrations/003_create_embedding_index.sql`
+- `src/data_platform/jobs/embeddings/__init__.py`
+- `src/data_platform/jobs/embeddings/embedding_generator.py`
+- `src/data_platform/jobs/embeddings/typesense_sync.py`
+- `scripts/backfill_embeddings.sh`
+- `tests/unit/test_embedding_generator.py`
+- `tests/unit/test_typesense_sync.py`
+- `tests/integration/test_embedding_workflow.py`
+
+**Modificados**:
+- `.github/workflows/pipeline-steps.yaml` (adicionar 2 jobs)
+- `src/data_platform/cli.py` (2 comandos)
+- `src/data_platform/models/news.py` (campos embedding)
+- `pyproject.toml` (ML dependencies)
+- `Dockerfile` (pre-download modelo)
+- `infra/terraform/cloud_sql.tf` (pgvector flag)
+- `typesense/src/typesense_dgb/collection.py` (campo content_embedding)
+
+### Critérios de Conclusão
+
+- [ ] pgvector habilitado no Cloud SQL
+- [ ] Embeddings gerados para todas notícias de 2025
+- [ ] Cobertura de embeddings > 95% para 2025
+- [ ] Typesense sincronizado com embeddings
+- [ ] Pipeline diário funciona com 2 novos jobs
+- [ ] Testes passam (unit + integration)
+- [ ] Busca semântica funciona no Typesense MCP Server
 - [ ] Documentação atualizada
 
 ---
