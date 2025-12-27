@@ -31,6 +31,10 @@ COPY scripts/ scripts/
 # Install the package itself
 RUN poetry install --no-interaction --no-ansi
 
+# Pre-download embedding model to cache in Docker layer (Phase 4.7)
+# This saves time on first run and avoids download failures during job execution
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')"
+
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
