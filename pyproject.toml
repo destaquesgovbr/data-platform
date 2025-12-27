@@ -24,8 +24,8 @@ numpy = ">=1.26.0"
 scipy = "^1.11.0"
 
 # Machine Learning (Phase 4.7 - Embeddings)
-sentence-transformers = "^2.2.2"
-torch = {version = "^2.0.0", source = "pytorch-cpu"}
+sentence-transformers = "^3.0.0"
+torch = "^2.0.0"
 
 # Web scraping
 beautifulsoup4 = "^4.12.3"
@@ -67,11 +67,6 @@ data-platform = "data_platform.cli:app"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
-[[tool.poetry.source]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-priority = "explicit"
 
 [tool.black]
 line-length = 100
