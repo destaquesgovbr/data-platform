@@ -4,6 +4,9 @@
 -- via docker-entrypoint-initdb.d
 --
 
+-- Enable pgvector extension for semantic embeddings (Phase 4.7)
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- Agencies table
 CREATE TABLE IF NOT EXISTS agencies (
     id SERIAL PRIMARY KEY,
@@ -74,7 +77,11 @@ CREATE TABLE IF NOT EXISTS news (
 
     -- Denormalized (performance)
     agency_key VARCHAR(100),
-    agency_name VARCHAR(500)
+    agency_name VARCHAR(500),
+
+    -- Embeddings (Phase 4.7)
+    content_embedding vector(768),
+    embedding_generated_at TIMESTAMP WITH TIME ZONE
 );
 
 -- Indexes
@@ -98,3 +105,19 @@ CREATE TRIGGER update_news_updated_at
     BEFORE UPDATE ON news
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
+
+-- Embedding indexes (Phase 4.7)
+-- HNSW index for fast cosine similarity search
+CREATE INDEX IF NOT EXISTS idx_news_content_embedding_hnsw
+ON news USING hnsw (content_embedding vector_cosine_ops)
+WITH (m = 16, ef_construction = 64);
+
+-- Index for finding records without embeddings
+CREATE INDEX IF NOT EXISTS idx_news_embedding_status
+ON news (embedding_generated_at)
+WHERE content_embedding IS NULL;
+
+-- Index for 2025 news filtering
+CREATE INDEX IF NOT EXISTS idx_news_published_at_2025
+ON news (published_at)
+WHERE published_at >= '2025-01-01' AND published_at < '2026-01-01';

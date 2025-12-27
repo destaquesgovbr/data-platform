@@ -54,9 +54,14 @@ class EmbeddingGenerator:
         if self._model is None:
             logger.info(f"Loading model: {self.MODEL_NAME}")
 
-            # Auto-detect device (CUDA if available, else CPU)
+            # Auto-detect device (CUDA > MPS > CPU)
             import torch
-            self._device = "cuda" if torch.cuda.is_available() else "cpu"
+            if torch.cuda.is_available():
+                self._device = "cuda"
+            elif torch.backends.mps.is_available():
+                self._device = "mps"
+            else:
+                self._device = "cpu"
             logger.info(f"Using device: {self._device}")
 
             self._model = SentenceTransformer(self.MODEL_NAME, device=self._device)
@@ -98,7 +103,6 @@ class EmbeddingGenerator:
                     WHERE published_at >= %s
                       AND published_at < %s::date + INTERVAL '1 day'
                       AND content_embedding IS NULL
-                      AND published_at >= '2025-01-01'  -- Phase 4.7: Only 2025 news
                     ORDER BY published_at DESC
                 """
 

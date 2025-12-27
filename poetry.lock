@@ -3866,6 +3866,22 @@ shellingham = ">=1.3.0"
 typing-extensions = ">=3.7.4.3"
 
 [[package]]
+name = "typesense"
+version = "1.3.0"
+description = "Python client for Typesense, an open source and typo tolerant search engine."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "typesense-1.3.0-py3-none-any.whl", hash = "sha256:d05ab55634d249ee1a8a82cc8d01cef8fa995c9ae98665ca4aad1e2d7055321f"},
+    {file = "typesense-1.3.0.tar.gz", hash = "sha256:96b9fd600b903e252601e6680fc25285f5ee0eb49153fb6758e97d2467aa5f52"},
+]
+
+[package.dependencies]
+requests = "*"
+typing-extensions = "*"
+
+[[package]]
 name = "typing-extensions"
 version = "4.15.0"
 description = "Backported and Experimental Type Hints for Python 3.9+"
@@ -4237,4 +4253,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "71607e8aa7f5bba87c0c1fa80ad1f07ef5a464a6c14fdaf6320004a693224ea9"
+content-hash = "e76cd9c9effd41ab4bd7d17e297b3551658c9cf5198813e17f676906eff8c323"
