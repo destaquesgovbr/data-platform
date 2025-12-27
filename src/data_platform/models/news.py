@@ -76,6 +76,10 @@ class News(BaseModel):
     agency_key: Optional[str] = None
     agency_name: Optional[str] = None
 
+    # Embeddings (Phase 4.7)
+    content_embedding: Optional[List[float]] = None  # 768-dimensional vector
+    embedding_generated_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 
@@ -104,3 +108,5 @@ class NewsInsert(BaseModel):
     extracted_at: Optional[datetime] = None
     agency_key: Optional[str] = None
     agency_name: Optional[str] = None
+    content_embedding: Optional[List[float]] = None  # 768-dimensional vector (Phase 4.7)
+    embedding_generated_at: Optional[datetime] = None  # Phase 4.7
