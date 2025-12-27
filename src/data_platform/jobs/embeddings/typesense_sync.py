@@ -137,46 +137,51 @@ class TypesenseSyncManager:
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
-                # Build query
+                # Build query - with JOINs to get theme labels
                 query = """
                     SELECT
-                        unique_id,
-                        agency_key,
-                        title,
-                        url,
-                        image_url,
-                        category,
-                        content,
-                        summary,
-                        subtitle,
-                        editorial_lead,
-                        published_at,
-                        extracted_at,
-                        theme_l1_code,
-                        theme_l1_label,
-                        theme_l2_code,
-                        theme_l2_label,
-                        theme_l3_code,
-                        theme_l3_label,
-                        most_specific_theme_code,
-                        most_specific_theme_label,
-                        content_embedding,
-                        embedding_generated_at
-                    FROM news
-                    WHERE published_at >= %s
-                      AND published_at < %s::date + INTERVAL '1 day'
-                      AND content_embedding IS NOT NULL
-                      AND published_at >= '2025-01-01'  -- Phase 4.7: Only 2025 news
+                        n.unique_id,
+                        n.agency_key,
+                        n.agency_name,
+                        n.title,
+                        n.url,
+                        n.image_url,
+                        n.category,
+                        n.content,
+                        n.summary,
+                        n.subtitle,
+                        n.editorial_lead,
+                        n.published_at,
+                        n.extracted_at,
+                        t1.code as theme_l1_code,
+                        t1.label as theme_l1_label,
+                        t2.code as theme_l2_code,
+                        t2.label as theme_l2_label,
+                        t3.code as theme_l3_code,
+                        t3.label as theme_l3_label,
+                        tm.code as most_specific_theme_code,
+                        tm.label as most_specific_theme_label,
+                        n.content_embedding,
+                        n.embedding_generated_at
+                    FROM news n
+                    LEFT JOIN themes t1 ON n.theme_l1_id = t1.id
+                    LEFT JOIN themes t2 ON n.theme_l2_id = t2.id
+                    LEFT JOIN themes t3 ON n.theme_l3_id = t3.id
+                    LEFT JOIN themes tm ON n.most_specific_theme_id = tm.id
+                    WHERE n.published_at >= %s
+                      AND n.published_at < %s::date + INTERVAL '1 day'
+                      AND n.content_embedding IS NOT NULL
+                      AND n.published_at >= '2025-01-01'  -- Phase 4.7: Only 2025 news
                 """
 
                 params = [start_date, end_date]
 
                 # Incremental sync: only fetch recently updated embeddings
                 if last_sync_timestamp:
-                    query += " AND embedding_generated_at > %s"
+                    query += " AND n.embedding_generated_at > %s"
                     params.append(last_sync_timestamp)
 
-                query += " ORDER BY published_at DESC"
+                query += " ORDER BY n.published_at DESC"
 
                 if limit:
                     query += " LIMIT %s"
