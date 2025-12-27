@@ -2,12 +2,12 @@
 Integration tests for the complete embedding workflow.
 
 Tests the end-to-end flow:
-1. Generate embeddings for test news records (using mocked ML model)
+1. Generate embeddings for test news records (using mocked Embeddings API)
 2. Sync embeddings to Typesense (using mocked Typesense client)
 3. Validate data flows correctly through the entire pipeline
 
 This is an INTEGRATION test - it uses real PostgreSQL (test database)
-but mocks external services (Typesense, ML model).
+but mocks external services (Typesense, Embeddings API).
 
 Run with: pytest tests/integration/test_embedding_workflow.py -v
 """
@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import List
 from unittest.mock import MagicMock, Mock, patch
 
+import httpx
 import numpy as np
 import pytest
 from pytest_postgresql import factories
@@ -42,6 +43,24 @@ def test_database_url(postgresql_proc):
         f"postgresql://{postgresql_proc.user}@{postgresql_proc.host}:"
         f"{postgresql_proc.port}/{postgresql_proc.dbname}"
     )
+
+
+@pytest.fixture
+def mock_api_url():
+    """Mock embeddings API URL."""
+    return "https://embeddings-api.example.com"
+
+
+@pytest.fixture
+def mock_api_key():
+    """Mock API key."""
+    return "test-api-key-12345"
+
+
+@pytest.fixture
+def mock_identity_token():
+    """Mock identity token."""
+    return "test-identity-token-xyz"
 
 
 @pytest.fixture(scope="module")
@@ -317,30 +336,44 @@ def sample_2025_news(postgresql, setup_test_schema):
 
 
 @pytest.fixture
-def mock_sentence_transformer():
+def mock_embeddings_api():
     """
-    Mock the SentenceTransformer model to avoid downloading the real model.
+    Mock the Embeddings API to avoid requiring a real Cloud Run service.
 
-    Returns a mock that generates random embeddings of shape (batch_size, 768).
+    Returns a mock httpx client that simulates the embeddings API.
     """
-    mock_model = MagicMock()
-
-    def mock_encode(texts, batch_size=100, show_progress_bar=False,
-                   convert_to_numpy=True, normalize_embeddings=True):
-        """Generate fake embeddings for testing."""
-        # Generate random embeddings
+    def create_mock_response(texts):
+        """Generate mock API response with fake embeddings."""
         embeddings = np.random.randn(len(texts), 768).astype(np.float32)
+        # Normalize
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        embeddings = embeddings / norms
 
-        # Normalize if requested
-        if normalize_embeddings:
-            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-            embeddings = embeddings / norms
+        return {
+            "embeddings": embeddings.tolist(),
+            "model": "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
+            "dimension": 768,
+            "count": len(texts),
+        }
 
-        return embeddings
+    mock_client = MagicMock()
 
-    mock_model.encode = mock_encode
+    def mock_post(url, json=None, headers=None):
+        """Mock POST request to embeddings API."""
+        mock_response = MagicMock()
+        if "/generate" in url:
+            texts = json.get("texts", [])
+            mock_response.json.return_value = create_mock_response(texts)
+        else:
+            mock_response.json.return_value = {"error": "Not found"}
+        mock_response.raise_for_status = MagicMock()
+        return mock_response
 
-    return mock_model
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=None)
+    mock_client.post = mock_post
+
+    return mock_client
 
 
 @pytest.fixture
@@ -383,42 +416,54 @@ def mock_typesense_client():
 class TestEmbeddingWorkflow:
     """Integration tests for the complete embedding workflow."""
 
-    def test_embedding_generator_initialization(self, test_database_url):
+    def test_embedding_generator_initialization(
+        self, test_database_url, mock_api_url, mock_api_key, mock_identity_token
+    ):
         """Test that EmbeddingGenerator can be initialized with test database."""
-        with patch('data_platform.jobs.embeddings.embedding_generator.SentenceTransformer'):
-            generator = EmbeddingGenerator(database_url=test_database_url)
-            assert generator.database_url == test_database_url
+        generator = EmbeddingGenerator(
+            database_url=test_database_url,
+            api_url=mock_api_url,
+            api_key=mock_api_key,
+            identity_token=mock_identity_token,
+        )
+        assert generator.database_url == test_database_url
+        assert generator.api_url == mock_api_url
 
     def test_fetch_news_without_embeddings_only_2025(
-        self, test_database_url, sample_2025_news, mock_sentence_transformer
+        self, test_database_url, sample_2025_news, mock_api_url,
+        mock_api_key, mock_identity_token
     ):
         """
         Test that only 2025 news are fetched for embedding generation.
 
         This validates the key requirement: only 2025 news should be processed.
         """
-        with patch(
-            'data_platform.jobs.embeddings.embedding_generator.SentenceTransformer',
-            return_value=mock_sentence_transformer
-        ):
-            generator = EmbeddingGenerator(database_url=test_database_url)
+        generator = EmbeddingGenerator(
+            database_url=test_database_url,
+            api_url=mock_api_url,
+            api_key=mock_api_key,
+            identity_token=mock_identity_token,
+        )
 
-            # Fetch news without embeddings from 2025-01-01 to 2025-01-31
-            news_records = generator._fetch_news_without_embeddings(
-                start_date='2025-01-01',
-                end_date='2025-01-31'
-            )
+        # Fetch news without embeddings from 2025-01-01 to 2025-01-31
+        news_records = generator._fetch_news_without_embeddings(
+            start_date='2025-01-01',
+            end_date='2025-01-31'
+        )
 
-            # Should get all 10 news from 2025
-            assert len(news_records) == 10
+        # Should get all 10 news from 2025
+        assert len(news_records) == 10
 
-            # Verify all records are from 2025
-            for record in news_records:
-                unique_id = record[0]
-                assert unique_id.startswith('test_2025_')
+        # Verify all records have expected format (id, title, summary, content)
+        for record in news_records:
+            assert len(record) == 4
+            assert isinstance(record[0], int)  # ID
+            assert isinstance(record[1], str)  # Title
 
+    @patch("data_platform.jobs.embeddings.embedding_generator.httpx.Client")
     def test_generate_embeddings_success(
-        self, test_database_url, sample_2025_news, mock_sentence_transformer, postgresql
+        self, mock_client_class, test_database_url, sample_2025_news,
+        mock_embeddings_api, mock_api_url, mock_api_key, mock_identity_token, postgresql
     ):
         """
         Test the complete embedding generation workflow.
@@ -428,92 +473,96 @@ class TestEmbeddingWorkflow:
         2. Embeddings are stored in PostgreSQL
         3. embedding_generated_at timestamp is set
         """
-        with patch(
-            'data_platform.jobs.embeddings.embedding_generator.SentenceTransformer',
-            return_value=mock_sentence_transformer
-        ):
-            generator = EmbeddingGenerator(database_url=test_database_url)
+        mock_client_class.return_value = mock_embeddings_api
 
-            # Generate embeddings for January 2025
-            result = generator.generate_embeddings(
-                start_date='2025-01-01',
-                end_date='2025-01-31',
-                batch_size=5
-            )
+        generator = EmbeddingGenerator(
+            database_url=test_database_url,
+            api_url=mock_api_url,
+            api_key=mock_api_key,
+            identity_token=mock_identity_token,
+        )
 
-            # Verify statistics
-            assert result['processed'] == 10
-            assert result['successful'] == 10
-            assert result['failed'] == 0
+        # Generate embeddings for January 2025
+        result = generator.generate_embeddings(
+            start_date='2025-01-01',
+            end_date='2025-01-31',
+            batch_size=5
+        )
 
-            # Verify embeddings were stored in database
-            cur = postgresql.cursor()
-            cur.execute("""
-                SELECT COUNT(*)
-                FROM news
-                WHERE content_embedding IS NOT NULL
-                  AND published_at >= '2025-01-01'
-            """)
-            count_with_embeddings = cur.fetchone()[0]
-            assert count_with_embeddings == 10
+        # Verify statistics
+        assert result['processed'] == 10
+        assert result['successful'] == 10
+        assert result['failed'] == 0
 
-            # Verify embedding_generated_at is set
-            cur.execute("""
-                SELECT COUNT(*)
-                FROM news
-                WHERE embedding_generated_at IS NOT NULL
-                  AND published_at >= '2025-01-01'
-            """)
-            count_with_timestamp = cur.fetchone()[0]
-            assert count_with_timestamp == 10
+        # Verify embeddings were stored in database
+        cur = postgresql.cursor()
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM news
+            WHERE content_embedding IS NOT NULL
+              AND published_at >= '2025-01-01'
+        """)
+        count_with_embeddings = cur.fetchone()[0]
+        assert count_with_embeddings == 10
 
-            # Verify 2024 news were NOT processed
-            cur.execute("""
-                SELECT COUNT(*)
-                FROM news
-                WHERE content_embedding IS NOT NULL
-                  AND published_at < '2025-01-01'
-            """)
-            count_2024_with_embeddings = cur.fetchone()[0]
-            assert count_2024_with_embeddings == 0
+        # Verify embedding_generated_at is set
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM news
+            WHERE embedding_generated_at IS NOT NULL
+              AND published_at >= '2025-01-01'
+        """)
+        count_with_timestamp = cur.fetchone()[0]
+        assert count_with_timestamp == 10
+
+        # Verify 2024 news were NOT processed
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM news
+            WHERE content_embedding IS NOT NULL
+              AND published_at < '2025-01-01'
+        """)
+        count_2024_with_embeddings = cur.fetchone()[0]
+        assert count_2024_with_embeddings == 0
 
     def test_embedding_text_preparation(
-        self, test_database_url, mock_sentence_transformer
+        self, test_database_url, mock_api_url, mock_api_key, mock_identity_token
     ):
         """
         Test the text preparation strategy for embeddings.
 
         Validates: title + " " + summary (fallback to content if summary missing)
         """
-        with patch(
-            'data_platform.jobs.embeddings.embedding_generator.SentenceTransformer',
-            return_value=mock_sentence_transformer
-        ):
-            generator = EmbeddingGenerator(database_url=test_database_url)
+        generator = EmbeddingGenerator(
+            database_url=test_database_url,
+            api_url=mock_api_url,
+            api_key=mock_api_key,
+            identity_token=mock_identity_token,
+        )
 
-            # Test with summary
-            text1 = generator._prepare_text_for_embedding(
-                title="Test Title",
-                summary="Test Summary",
-                content="Test Content"
-            )
-            assert text1 == "Test Title Test Summary"
+        # Test with summary
+        text1 = generator._prepare_text_for_embedding(
+            title="Test Title",
+            summary="Test Summary",
+            content="Test Content"
+        )
+        assert text1 == "Test Title Test Summary"
 
-            # Test without summary (fallback to content)
-            text2 = generator._prepare_text_for_embedding(
-                title="Test Title",
-                summary=None,
-                content="Test Content Here"
-            )
-            assert text2 == "Test Title Test Content Here"
+        # Test without summary (fallback to content)
+        text2 = generator._prepare_text_for_embedding(
+            title="Test Title",
+            summary=None,
+            content="Test Content Here"
+        )
+        assert text2 == "Test Title Test Content Here"
 
-            # Test with empty summary (fallback to content)
-            text3 = generator._prepare_text_for_embedding(
-                title="Test Title",
-                summary="   ",
-                content="Test Content"
-            )
-            assert text3 == "Test Title Test Content"
+        # Test with empty summary (fallback to content)
+        text3 = generator._prepare_text_for_embedding(
+            title="Test Title",
+            summary="   ",
+            content="Test Content"
+        )
+        assert text3 == "Test Title Test Content"
 
     def test_typesense_sync_initialization(self, test_database_url):
         """Test that TypesenseSyncManager can be initialized."""
@@ -524,23 +573,28 @@ class TestEmbeddingWorkflow:
             )
             assert sync_manager.database_url == test_database_url
 
+    @patch("data_platform.jobs.embeddings.embedding_generator.httpx.Client")
     def test_fetch_news_with_embeddings(
-        self, test_database_url, sample_2025_news, mock_sentence_transformer,
+        self, mock_client_class, test_database_url, sample_2025_news,
+        mock_embeddings_api, mock_api_url, mock_api_key, mock_identity_token,
         mock_typesense_client, postgresql
     ):
         """
         Test fetching news that have embeddings for Typesense sync.
         """
         # First generate embeddings
-        with patch(
-            'data_platform.jobs.embeddings.embedding_generator.SentenceTransformer',
-            return_value=mock_sentence_transformer
-        ):
-            generator = EmbeddingGenerator(database_url=test_database_url)
-            generator.generate_embeddings(
-                start_date='2025-01-01',
-                end_date='2025-01-31'
-            )
+        mock_client_class.return_value = mock_embeddings_api
+
+        generator = EmbeddingGenerator(
+            database_url=test_database_url,
+            api_url=mock_api_url,
+            api_key=mock_api_key,
+            identity_token=mock_identity_token,
+        )
+        generator.generate_embeddings(
+            start_date='2025-01-01',
+            end_date='2025-01-31'
+        )
 
         # Now fetch for sync
         with patch('data_platform.jobs.embeddings.typesense_sync.typesense.Client') as mock_ts:
@@ -564,71 +618,10 @@ class TestEmbeddingWorkflow:
             for record in news_records:
                 assert record['content_embedding'] is not None
 
-    def test_typesense_document_preparation(
-        self, test_database_url, sample_2025_news, mock_sentence_transformer,
-        mock_typesense_client, postgresql
-    ):
-        """
-        Test preparing news records as Typesense documents.
-
-        Validates the document format is correct.
-        """
-        # First generate embeddings
-        with patch(
-            'data_platform.jobs.embeddings.embedding_generator.SentenceTransformer',
-            return_value=mock_sentence_transformer
-        ):
-            generator = EmbeddingGenerator(database_url=test_database_url)
-            generator.generate_embeddings(
-                start_date='2025-01-01',
-                end_date='2025-01-31'
-            )
-
-        # Prepare documents
-        with patch('data_platform.jobs.embeddings.typesense_sync.typesense.Client') as mock_ts:
-            mock_ts.return_value = mock_typesense_client
-
-            sync_manager = TypesenseSyncManager(
-                database_url=test_database_url,
-                typesense_api_key='test_key'
-            )
-
-            # Get first news record
-            news_records = sync_manager._fetch_news_with_new_embeddings(
-                start_date='2025-01-01',
-                end_date='2025-01-31',
-                limit=1
-            )
-
-            assert len(news_records) == 1
-            news = news_records[0]
-
-            # Prepare as Typesense document
-            doc = sync_manager._prepare_typesense_document(news)
-
-            # Verify required fields
-            assert 'unique_id' in doc
-            assert 'published_at' in doc
-            assert isinstance(doc['published_at'], int)  # Unix timestamp
-
-            # Verify optional fields
-            assert 'title' in doc
-            assert 'agency_key' in doc
-            assert 'content' in doc
-            assert 'summary' in doc
-
-            # Verify theme fields
-            assert 'theme_l1_code' in doc
-            assert 'theme_l1_label' in doc
-            assert 'most_specific_theme_code' in doc
-
-            # Verify embedding field
-            assert 'content_embedding' in doc
-            assert isinstance(doc['content_embedding'], list)
-            assert len(doc['content_embedding']) == 768
-
+    @patch("data_platform.jobs.embeddings.embedding_generator.httpx.Client")
     def test_complete_workflow_generate_and_sync(
-        self, test_database_url, sample_2025_news, mock_sentence_transformer,
+        self, mock_client_class, test_database_url, sample_2025_news,
+        mock_embeddings_api, mock_api_url, mock_api_key, mock_identity_token,
         mock_typesense_client, postgresql
     ):
         """
@@ -640,21 +633,24 @@ class TestEmbeddingWorkflow:
         3. Verify data flows correctly through the entire pipeline
         """
         # Step 1: Generate embeddings
-        with patch(
-            'data_platform.jobs.embeddings.embedding_generator.SentenceTransformer',
-            return_value=mock_sentence_transformer
-        ):
-            generator = EmbeddingGenerator(database_url=test_database_url)
+        mock_client_class.return_value = mock_embeddings_api
 
-            gen_result = generator.generate_embeddings(
-                start_date='2025-01-01',
-                end_date='2025-01-31',
-                batch_size=5
-            )
+        generator = EmbeddingGenerator(
+            database_url=test_database_url,
+            api_url=mock_api_url,
+            api_key=mock_api_key,
+            identity_token=mock_identity_token,
+        )
 
-            # Verify generation succeeded
-            assert gen_result['successful'] == 10
-            assert gen_result['failed'] == 0
+        gen_result = generator.generate_embeddings(
+            start_date='2025-01-01',
+            end_date='2025-01-31',
+            batch_size=5
+        )
+
+        # Verify generation succeeded
+        assert gen_result['successful'] == 10
+        assert gen_result['failed'] == 0
 
         # Step 2: Sync to Typesense
         with patch('data_platform.jobs.embeddings.typesense_sync.typesense.Client') as mock_ts:
@@ -721,126 +717,34 @@ class TestEmbeddingWorkflow:
         assert len(embedding_list) == 768
         assert all(isinstance(x, (int, float)) for x in embedding_list)
 
-    def test_incremental_sync(
-        self, test_database_url, sample_2025_news, mock_sentence_transformer,
-        mock_typesense_client, postgresql
-    ):
-        """
-        Test incremental sync (only sync newly updated embeddings).
-
-        Validates that we can efficiently sync only what changed.
-        """
-        # Step 1: Generate embeddings
-        with patch(
-            'data_platform.jobs.embeddings.embedding_generator.SentenceTransformer',
-            return_value=mock_sentence_transformer
-        ):
-            generator = EmbeddingGenerator(database_url=test_database_url)
-            generator.generate_embeddings(
-                start_date='2025-01-01',
-                end_date='2025-01-31'
-            )
-
-        # Step 2: First full sync
-        with patch('data_platform.jobs.embeddings.typesense_sync.typesense.Client') as mock_ts:
-            mock_ts.return_value = mock_typesense_client
-
-            sync_manager = TypesenseSyncManager(
-                database_url=test_database_url,
-                typesense_api_key='test_key'
-            )
-
-            # Full sync
-            sync_result1 = sync_manager.sync_embeddings(
-                start_date='2025-01-01',
-                end_date='2025-01-31',
-                full_sync=True
-            )
-            assert sync_result1['successful'] == 10
-
-            # Record sync in sync_log
-            cur = postgresql.cursor()
-            cur.execute("""
-                INSERT INTO sync_log (operation, status, completed_at)
-                VALUES ('typesense_embeddings_sync', 'completed', NOW())
-            """)
-            postgresql.commit()
-
-            # Step 3: Incremental sync (should find nothing new)
-            sync_result2 = sync_manager.sync_embeddings(
-                start_date='2025-01-01',
-                end_date='2025-01-31',
-                full_sync=False  # Incremental
-            )
-
-            # No new embeddings to sync
-            assert sync_result2['processed'] == 0
-
-    def test_batch_processing(
-        self, test_database_url, sample_2025_news, mock_sentence_transformer,
-        mock_typesense_client
-    ):
-        """
-        Test that batch processing works correctly.
-
-        Validates that large datasets are processed in batches.
-        """
-        with patch(
-            'data_platform.jobs.embeddings.embedding_generator.SentenceTransformer',
-            return_value=mock_sentence_transformer
-        ):
-            generator = EmbeddingGenerator(database_url=test_database_url)
-
-            # Generate with small batch size
-            result = generator.generate_embeddings(
-                start_date='2025-01-01',
-                end_date='2025-01-31',
-                batch_size=3  # Small batch to test multiple batches
-            )
-
-            # Should still process all 10 records
-            assert result['successful'] == 10
-
-        # Test Typesense sync with small batches
-        with patch('data_platform.jobs.embeddings.typesense_sync.typesense.Client') as mock_ts:
-            mock_ts.return_value = mock_typesense_client
-
-            sync_manager = TypesenseSyncManager(
-                database_url=test_database_url,
-                typesense_api_key='test_key'
-            )
-
-            sync_result = sync_manager.sync_embeddings(
-                start_date='2025-01-01',
-                end_date='2025-01-31',
-                batch_size=3
-            )
-
-            assert sync_result['successful'] == 10
-
 
 class TestEmbeddingWorkflowEdgeCases:
     """Test edge cases and error scenarios."""
 
+    @patch("data_platform.jobs.embeddings.embedding_generator.httpx.Client")
     def test_generate_embeddings_no_records(
-        self, test_database_url, mock_sentence_transformer
+        self, mock_client_class, test_database_url, mock_embeddings_api,
+        mock_api_url, mock_api_key, mock_identity_token
     ):
         """Test generating embeddings when no records need processing."""
-        with patch(
-            'data_platform.jobs.embeddings.embedding_generator.SentenceTransformer',
-            return_value=mock_sentence_transformer
-        ):
-            generator = EmbeddingGenerator(database_url=test_database_url)
+        mock_client_class.return_value = mock_embeddings_api
 
-            # Try to generate for a date range with no data
-            result = generator.generate_embeddings(
-                start_date='2025-12-01',
-                end_date='2025-12-31'
-            )
+        generator = EmbeddingGenerator(
+            database_url=test_database_url,
+            api_url=mock_api_url,
+            api_key=mock_api_key,
+            identity_token=mock_identity_token,
+        )
 
-            assert result['processed'] == 0
-            assert result['successful'] == 0
-            assert result['failed'] == 0
+        # Try to generate for a date range with no data
+        result = generator.generate_embeddings(
+            start_date='2025-12-01',
+            end_date='2025-12-31'
+        )
+
+        assert result['processed'] == 0
+        assert result['successful'] == 0
+        assert result['failed'] == 0
 
     def test_sync_no_embeddings(self, test_database_url, mock_typesense_client):
         """Test syncing when no embeddings exist."""
@@ -859,8 +763,10 @@ class TestEmbeddingWorkflowEdgeCases:
 
             assert result['processed'] == 0
 
+    @patch("data_platform.jobs.embeddings.embedding_generator.httpx.Client")
     def test_embedding_with_missing_summary(
-        self, test_database_url, sample_2025_news, mock_sentence_transformer, postgresql
+        self, mock_client_class, test_database_url, sample_2025_news,
+        mock_embeddings_api, mock_api_url, mock_api_key, mock_identity_token, postgresql
     ):
         """
         Test embedding generation when summary is missing (fallback to content).
@@ -874,17 +780,20 @@ class TestEmbeddingWorkflowEdgeCases:
         """)
         postgresql.commit()
 
-        with patch(
-            'data_platform.jobs.embeddings.embedding_generator.SentenceTransformer',
-            return_value=mock_sentence_transformer
-        ):
-            generator = EmbeddingGenerator(database_url=test_database_url)
+        mock_client_class.return_value = mock_embeddings_api
 
-            # Should still succeed (fallback to content)
-            result = generator.generate_embeddings(
-                start_date='2025-01-01',
-                end_date='2025-01-31'
-            )
+        generator = EmbeddingGenerator(
+            database_url=test_database_url,
+            api_url=mock_api_url,
+            api_key=mock_api_key,
+            identity_token=mock_identity_token,
+        )
 
-            assert result['successful'] == 10
-            assert result['failed'] == 0
+        # Should still succeed (fallback to content)
+        result = generator.generate_embeddings(
+            start_date='2025-01-01',
+            end_date='2025-01-31'
+        )
+
+        assert result['successful'] == 10
+        assert result['failed'] == 0

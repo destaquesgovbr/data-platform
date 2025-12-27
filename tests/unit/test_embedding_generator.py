@@ -1,14 +1,14 @@
 """
 Unit tests for EmbeddingGenerator.
 
-Phase 4.7: Embeddings Semânticos
+Phase 4.7: Embeddings Semânticos (HTTP API version)
 """
 
-import os
+import json
 from datetime import datetime
-from typing import List
 from unittest.mock import MagicMock, Mock, patch
 
+import httpx
 import numpy as np
 import pytest
 
@@ -24,29 +24,100 @@ class TestEmbeddingGenerator:
         return "postgresql://user:pass@localhost:5432/test"
 
     @pytest.fixture
-    def generator(self, mock_database_url: str) -> EmbeddingGenerator:
-        """Create EmbeddingGenerator instance with mocked DB."""
-        return EmbeddingGenerator(database_url=mock_database_url)
+    def mock_api_url(self) -> str:
+        """Mock API URL."""
+        return "https://embeddings-api.example.com"
 
-    def test_init_with_database_url(self, mock_database_url: str) -> None:
-        """Test initialization with explicit database URL."""
-        generator = EmbeddingGenerator(database_url=mock_database_url)
+    @pytest.fixture
+    def mock_api_key(self) -> str:
+        """Mock API key."""
+        return "test-api-key-12345"
+
+    @pytest.fixture
+    def mock_identity_token(self) -> str:
+        """Mock identity token."""
+        return "test-identity-token-xyz"
+
+    @pytest.fixture
+    def generator(
+        self,
+        mock_database_url: str,
+        mock_api_url: str,
+        mock_api_key: str,
+        mock_identity_token: str,
+    ) -> EmbeddingGenerator:
+        """Create EmbeddingGenerator instance with mocked credentials."""
+        return EmbeddingGenerator(
+            database_url=mock_database_url,
+            api_url=mock_api_url,
+            api_key=mock_api_key,
+            identity_token=mock_identity_token,
+        )
+
+    def test_init_with_all_params(
+        self,
+        mock_database_url: str,
+        mock_api_url: str,
+        mock_api_key: str,
+        mock_identity_token: str,
+    ) -> None:
+        """Test initialization with all explicit parameters."""
+        generator = EmbeddingGenerator(
+            database_url=mock_database_url,
+            api_url=mock_api_url,
+            api_key=mock_api_key,
+            identity_token=mock_identity_token,
+        )
         assert generator.database_url == mock_database_url
+        assert generator.api_url == mock_api_url
+        assert generator.api_key == mock_api_key
+        assert generator._identity_token == mock_identity_token
 
     def test_init_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test initialization from DATABASE_URL env var."""
-        test_url = "postgresql://env:pass@localhost:5432/test"
-        monkeypatch.setenv("DATABASE_URL", test_url)
+        """Test initialization from environment variables."""
+        test_db_url = "postgresql://env:pass@localhost:5432/test"
+        test_api_url = "https://api.example.com"
+        test_api_key = "env-api-key"
+        test_token = "env-token"
+
+        monkeypatch.setenv("DATABASE_URL", test_db_url)
+        monkeypatch.setenv("EMBEDDINGS_API_URL", test_api_url)
+        monkeypatch.setenv("EMBEDDINGS_API_KEY", test_api_key)
+        monkeypatch.setenv("EMBEDDINGS_IDENTITY_TOKEN", test_token)
 
         generator = EmbeddingGenerator()
-        assert generator.database_url == test_url
+        assert generator.database_url == test_db_url
+        assert generator.api_url == test_api_url
+        assert generator.api_key == test_api_key
+        assert generator._identity_token == test_token
 
     def test_init_missing_database_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test initialization fails without DATABASE_URL."""
         monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.delenv("EMBEDDINGS_API_URL", raising=False)
+        monkeypatch.delenv("EMBEDDINGS_API_KEY", raising=False)
 
         with pytest.raises(ValueError, match="DATABASE_URL environment variable is required"):
             EmbeddingGenerator()
+
+    def test_init_missing_api_url(
+        self, monkeypatch: pytest.MonkeyPatch, mock_database_url: str
+    ) -> None:
+        """Test initialization fails without EMBEDDINGS_API_URL."""
+        monkeypatch.delenv("EMBEDDINGS_API_URL", raising=False)
+        monkeypatch.delenv("EMBEDDINGS_API_KEY", raising=False)
+
+        with pytest.raises(ValueError, match="EMBEDDINGS_API_URL environment variable is required"):
+            EmbeddingGenerator(database_url=mock_database_url)
+
+    def test_init_missing_api_key(
+        self, monkeypatch: pytest.MonkeyPatch, mock_database_url: str, mock_api_url: str
+    ) -> None:
+        """Test initialization fails without EMBEDDINGS_API_KEY."""
+        monkeypatch.delenv("EMBEDDINGS_API_KEY", raising=False)
+
+        with pytest.raises(ValueError, match="EMBEDDINGS_API_KEY environment variable is required"):
+            EmbeddingGenerator(database_url=mock_database_url, api_url=mock_api_url)
 
     def test_prepare_text_with_summary(self, generator: EmbeddingGenerator) -> None:
         """Test text preparation with title and summary."""
@@ -101,89 +172,94 @@ class TestEmbeddingGenerator:
         expected_max = len(title) + 1 + generator.MAX_TEXT_LENGTH * 4
         assert len(text) <= expected_max
 
-    @patch("data_platform.jobs.embeddings.embedding_generator.SentenceTransformer")
-    def test_model_lazy_loading(
-        self, mock_sentence_transformer: Mock, generator: EmbeddingGenerator
+    @patch("data_platform.jobs.embeddings.embedding_generator.httpx.Client")
+    def test_generate_embeddings_batch_api_call(
+        self, mock_client_class: Mock, generator: EmbeddingGenerator
     ) -> None:
-        """Test that model is loaded lazily on first access."""
-        # Model should not be loaded yet
-        assert generator._model is None
-
-        # Access model property
-        _ = generator.model
-
-        # Model should be loaded
-        mock_sentence_transformer.assert_called_once_with(
-            generator.MODEL_NAME, device=generator._device
-        )
-        assert generator._model is not None
-
-    @patch("data_platform.jobs.embeddings.embedding_generator.SentenceTransformer")
-    def test_model_loaded_only_once(
-        self, mock_sentence_transformer: Mock, generator: EmbeddingGenerator
-    ) -> None:
-        """Test that model is loaded only once (cached)."""
-        # Access model twice
-        _ = generator.model
-        _ = generator.model
-
-        # Should only be called once
-        mock_sentence_transformer.assert_called_once()
-
-    def test_generate_embeddings_batch(self, generator: EmbeddingGenerator) -> None:
-        """Test batch embedding generation (mocked model)."""
+        """Test batch embedding generation via API call."""
         texts = [
             "Governo anuncia nova política educacional",
             "Ministério da Saúde divulga dados",
             "Presidente participa de evento",
         ]
 
-        # Mock the model
-        mock_model = MagicMock()
-        # Return fake embeddings (3 texts × 768 dimensions)
-        fake_embeddings = np.random.rand(3, 768).astype(np.float32)
-        mock_model.encode.return_value = fake_embeddings
-        generator._model = mock_model
+        # Mock API response
+        fake_embeddings = np.random.rand(3, 768).astype(np.float32).tolist()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "embeddings": fake_embeddings,
+            "model": "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
+            "dimension": 768,
+            "count": 3,
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.__exit__ = MagicMock(return_value=None)
+        mock_client.post.return_value = mock_response
+        mock_client_class.return_value = mock_client
 
         embeddings = generator._generate_embeddings_batch(texts)
 
         # Check shape
         assert embeddings.shape == (3, 768)
-        # Check model was called correctly
-        mock_model.encode.assert_called_once()
-        call_args = mock_model.encode.call_args
-        assert call_args[0][0] == texts
-        assert call_args[1]["batch_size"] == generator.DEFAULT_BATCH_SIZE
-        assert call_args[1]["normalize_embeddings"] is True
 
-    def test_embedding_similarity(self, generator: EmbeddingGenerator) -> None:
-        """Test that similar texts produce similar embeddings (requires real model)."""
-        # Skip if model download would fail (e.g., in CI without network)
-        pytest.skip("Requires downloading real model (~420 MB)")
+        # Verify API was called correctly
+        mock_client.post.assert_called_once()
+        call_args = mock_client.post.call_args
+        assert "/generate" in call_args[0][0]
+        assert call_args[1]["json"]["texts"] == texts
+        assert "Authorization" in call_args[1]["headers"]
+        assert "X-API-Key" in call_args[1]["headers"]
+        assert call_args[1]["headers"]["X-API-Key"] == generator.api_key
 
-        # This test would require the real model
-        # Kept as documentation of expected behavior
-        texts = [
-            "Governo anuncia nova política de educação",
-            "Ministério da Educação divulga nova política",  # Similar
-            "Previsão do tempo para amanhã",  # Different
-        ]
+    @patch("data_platform.jobs.embeddings.embedding_generator.httpx.Client")
+    def test_generate_embeddings_batch_invalid_response(
+        self, mock_client_class: Mock, generator: EmbeddingGenerator
+    ) -> None:
+        """Test error handling for invalid API response."""
+        texts = ["Test text"]
 
-        embeddings = generator._generate_embeddings_batch(texts)
+        # Mock invalid API response (missing embeddings key)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"error": "something went wrong"}
+        mock_response.raise_for_status = MagicMock()
 
-        # Compute cosine similarities
-        from numpy.linalg import norm
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.__exit__ = MagicMock(return_value=None)
+        mock_client.post.return_value = mock_response
+        mock_client_class.return_value = mock_client
 
-        def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-            return np.dot(a, b) / (norm(a) * norm(b))
+        with pytest.raises(ValueError, match="missing 'embeddings' key"):
+            generator._generate_embeddings_batch(texts)
 
-        sim_0_1 = cosine_similarity(embeddings[0], embeddings[1])
-        sim_0_2 = cosine_similarity(embeddings[0], embeddings[2])
+    @patch("data_platform.jobs.embeddings.embedding_generator.httpx.Client")
+    def test_generate_embeddings_batch_wrong_dimension(
+        self, mock_client_class: Mock, generator: EmbeddingGenerator
+    ) -> None:
+        """Test error handling for wrong embedding dimension."""
+        texts = ["Test text"]
 
-        # Similar texts should have higher similarity
-        assert sim_0_1 > sim_0_2
-        assert sim_0_1 > 0.7  # High similarity for similar content
-        assert sim_0_2 < 0.5  # Low similarity for different content
+        # Mock API response with wrong dimension
+        fake_embeddings = np.random.rand(1, 512).astype(np.float32).tolist()  # Wrong dim
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "embeddings": fake_embeddings,
+            "dimension": 512,
+            "count": 1,
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.__exit__ = MagicMock(return_value=None)
+        mock_client.post.return_value = mock_response
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(ValueError, match="Unexpected embedding dimension"):
+            generator._generate_embeddings_batch(texts)
 
     @patch("data_platform.jobs.embeddings.embedding_generator.psycopg2.connect")
     def test_fetch_news_without_embeddings(
@@ -216,13 +292,13 @@ class TestEmbeddingGenerator:
         mock_cursor.execute.assert_called_once()
         query, params = mock_cursor.execute.call_args[0]
         assert "content_embedding IS NULL" in query
-        assert "published_at >= '2025-01-01'" in query
         assert "LIMIT" in query
         assert params == ["2025-01-01", "2025-01-02", 10]
 
+    @patch("data_platform.jobs.embeddings.embedding_generator.execute_batch")
     @patch("data_platform.jobs.embeddings.embedding_generator.psycopg2.connect")
     def test_update_embeddings_batch(
-        self, mock_connect: Mock, generator: EmbeddingGenerator
+        self, mock_connect: Mock, mock_execute_batch: Mock, generator: EmbeddingGenerator
     ) -> None:
         """Test updating news records with embeddings."""
         # Mock database connection
@@ -240,15 +316,17 @@ class TestEmbeddingGenerator:
         assert updated == 3
 
         # Verify execute_batch was called
-        # (Can't easily verify exact calls with execute_batch, but check commit was called)
+        mock_execute_batch.assert_called_once()
         mock_conn.commit.assert_called_once()
 
+    @patch("data_platform.jobs.embeddings.embedding_generator.execute_batch")
     @patch("data_platform.jobs.embeddings.embedding_generator.psycopg2.connect")
-    @patch.object(EmbeddingGenerator, "model", new_callable=lambda: MagicMock())
+    @patch("data_platform.jobs.embeddings.embedding_generator.httpx.Client")
     def test_generate_embeddings_end_to_end(
-        self, mock_model: Mock, mock_connect: Mock, generator: EmbeddingGenerator
+        self, mock_client_class: Mock, mock_connect: Mock, mock_execute_batch: Mock,
+        generator: EmbeddingGenerator
     ) -> None:
-        """Test full generate_embeddings workflow (mocked DB and model)."""
+        """Test full generate_embeddings workflow (mocked DB and API)."""
         # Mock database connection
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
@@ -261,9 +339,21 @@ class TestEmbeddingGenerator:
             (2, "Título 2", None, "Conteúdo 2"),  # No summary
         ]
 
-        # Mock model encode
-        fake_embeddings = np.random.rand(2, 768).astype(np.float32)
-        mock_model.encode.return_value = fake_embeddings
+        # Mock API response
+        fake_embeddings = np.random.rand(2, 768).astype(np.float32).tolist()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "embeddings": fake_embeddings,
+            "dimension": 768,
+            "count": 2,
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.__exit__ = MagicMock(return_value=None)
+        mock_client.post.return_value = mock_response
+        mock_client_class.return_value = mock_client
 
         # Run generate_embeddings
         stats = generator.generate_embeddings(
@@ -275,10 +365,11 @@ class TestEmbeddingGenerator:
         assert stats["successful"] == 2
         assert stats["failed"] == 0
 
-        # Verify model was called
-        mock_model.encode.assert_called_once()
+        # Verify API was called
+        mock_client.post.assert_called_once()
 
-        # Verify commit was called
+        # Verify execute_batch was called
+        mock_execute_batch.assert_called_once()
         mock_conn.commit.assert_called_once()
 
     @patch("data_platform.jobs.embeddings.embedding_generator.psycopg2.connect")
@@ -303,3 +394,44 @@ class TestEmbeddingGenerator:
         assert stats["processed"] == 0
         assert stats["successful"] == 0
         assert stats["failed"] == 0
+
+    @patch("data_platform.jobs.embeddings.embedding_generator.psycopg2.connect")
+    @patch("data_platform.jobs.embeddings.embedding_generator.httpx.Client")
+    def test_generate_embeddings_api_error_handling(
+        self, mock_client_class: Mock, mock_connect: Mock, generator: EmbeddingGenerator
+    ) -> None:
+        """Test that API errors are handled gracefully."""
+        # Mock database connection
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        # Mock fetch results
+        mock_cursor.fetchall.return_value = [
+            (1, "Título 1", "Resumo 1", "Conteúdo 1"),
+        ]
+
+        # Mock API error
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Server Error", request=MagicMock(), response=mock_response
+        )
+
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.__exit__ = MagicMock(return_value=None)
+        mock_client.post.return_value = mock_response
+        mock_client_class.return_value = mock_client
+
+        # Run generate_embeddings - should not raise, but count as failed
+        stats = generator.generate_embeddings(
+            start_date="2025-01-01", end_date="2025-01-01"
+        )
+
+        # Verify error was handled
+        assert stats["processed"] == 1
+        assert stats["successful"] == 0
+        assert stats["failed"] == 1

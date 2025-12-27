@@ -21,10 +21,6 @@ COPY pyproject.toml poetry.lock README.md ./
 # Configure Poetry to not create virtual environments (install globally)
 RUN poetry config virtualenvs.create false
 
-# Install PyTorch CPU-only version first (smaller image, ~150MB vs ~800MB GPU)
-# This must be done before poetry install to override the default torch version
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
 # Install dependencies (without the package itself)
 RUN poetry install --no-root --no-interaction --no-ansi
 
@@ -34,10 +30,6 @@ COPY scripts/ scripts/
 
 # Install the package itself
 RUN poetry install --no-interaction --no-ansi
-
-# Pre-download embedding model to cache in Docker layer (Phase 4.7)
-# This saves time on first run and avoids download failures during job execution
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')"
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1

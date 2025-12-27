@@ -45,11 +45,17 @@ jobs:
         id: secrets
         run: |
           echo "DATABASE_URL=$(gcloud secrets versions access latest --secret=govbrnews-postgres-connection-string)" >> $GITHUB_OUTPUT
+          echo "EMBEDDINGS_API_KEY=$(gcloud secrets versions access latest --secret=embeddings-api-key)" >> $GITHUB_OUTPUT
+          # Get identity token for Cloud Run authentication
+          echo "IDENTITY_TOKEN=$(gcloud auth print-identity-token --audiences=https://destaquesgovbr-embeddings-api-990583792367.southamerica-east1.run.app)" >> $GITHUB_OUTPUT
 
       - name: Generate embeddings for news articles
         run: |
           docker run --rm \
             -e DATABASE_URL="${{ steps.secrets.outputs.DATABASE_URL }}" \
+            -e EMBEDDINGS_API_URL="https://destaquesgovbr-embeddings-api-990583792367.southamerica-east1.run.app" \
+            -e EMBEDDINGS_API_KEY="${{ steps.secrets.outputs.EMBEDDINGS_API_KEY }}" \
+            -e EMBEDDINGS_IDENTITY_TOKEN="${{ steps.secrets.outputs.IDENTITY_TOKEN }}" \
             ghcr.io/destaquesgovbr/data-platform:latest \
             data-platform generate-embeddings --start-date "${{ inputs.start_date }}" --end-date "${{ inputs.end_date }}"
           echo "Embedding generation completed successfully"

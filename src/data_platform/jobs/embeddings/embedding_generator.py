@@ -1,7 +1,7 @@
 """
 Embedding Generator for semantic search.
 
-Generates embeddings for news articles using sentence-transformers.
+Generates embeddings for news articles using the Embeddings API (Cloud Run service).
 Phase 4.7: Embeddings Semânticos
 
 Scope: Only 2025 news (have AI-generated summaries from Cogfy)
@@ -11,63 +11,106 @@ Input: title + " " + summary (fallback to content if summary missing)
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+import httpx
 import numpy as np
 import psycopg2
 from psycopg2.extras import execute_batch
-from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingGenerator:
-    """Generates semantic embeddings for news articles."""
+    """Generates semantic embeddings for news articles via HTTP API."""
 
-    # Model configuration
+    # Model configuration (must match the API)
     MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
     EMBEDDING_DIM = 768
 
     # Performance configuration
     DEFAULT_BATCH_SIZE = 100
     MAX_TEXT_LENGTH = 512  # Model's max sequence length
+    API_TIMEOUT = 120  # seconds
 
-    def __init__(self, database_url: Optional[str] = None):
+    def __init__(
+        self,
+        database_url: Optional[str] = None,
+        api_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        identity_token: Optional[str] = None,
+    ):
         """
         Initialize the embedding generator.
 
         Args:
             database_url: PostgreSQL connection string. If None, reads from DATABASE_URL env var.
+            api_url: Embeddings API URL. If None, reads from EMBEDDINGS_API_URL env var.
+            api_key: API key for authentication. If None, reads from EMBEDDINGS_API_KEY env var.
+            identity_token: Pre-fetched identity token for Cloud Run auth. If None, reads from
+                           EMBEDDINGS_IDENTITY_TOKEN env var or fetches dynamically via ADC.
         """
         self.database_url = database_url or os.getenv("DATABASE_URL")
         if not self.database_url:
             raise ValueError("DATABASE_URL environment variable is required")
 
-        # Model will be loaded lazily on first use
-        self._model: Optional[SentenceTransformer] = None
-        self._device: Optional[str] = None
+        self.api_url = api_url or os.getenv("EMBEDDINGS_API_URL")
+        if not self.api_url:
+            raise ValueError("EMBEDDINGS_API_URL environment variable is required")
 
-    @property
-    def model(self) -> SentenceTransformer:
-        """Lazy load the sentence transformer model."""
-        if self._model is None:
-            logger.info(f"Loading model: {self.MODEL_NAME}")
+        self.api_key = api_key or os.getenv("EMBEDDINGS_API_KEY")
+        if not self.api_key:
+            raise ValueError("EMBEDDINGS_API_KEY environment variable is required")
 
-            # Auto-detect device (CUDA > MPS > CPU)
-            import torch
-            if torch.cuda.is_available():
-                self._device = "cuda"
-            elif torch.backends.mps.is_available():
-                self._device = "mps"
-            else:
-                self._device = "cpu"
-            logger.info(f"Using device: {self._device}")
+        # Identity token for Cloud Run IAM auth (can be pre-fetched or fetched dynamically)
+        self._identity_token: Optional[str] = identity_token or os.getenv("EMBEDDINGS_IDENTITY_TOKEN")
 
-            self._model = SentenceTransformer(self.MODEL_NAME, device=self._device)
-            logger.info(f"Model loaded successfully (embedding_dim={self.EMBEDDING_DIM})")
+    def _get_identity_token(self) -> str:
+        """
+        Get Google Cloud identity token for Cloud Run authentication.
 
-        return self._model
+        Uses Application Default Credentials (ADC) to get an identity token.
+        In GitHub Actions, this uses Workload Identity Federation.
+        Locally, uses gcloud credentials.
+        """
+        if self._identity_token:
+            return self._identity_token
+
+        try:
+            import google.auth
+            import google.auth.transport.requests
+            from google.oauth2 import id_token
+
+            # Get credentials and make a request to get identity token
+            request = google.auth.transport.requests.Request()
+
+            # Get ID token for the target audience (the API URL)
+            self._identity_token = id_token.fetch_id_token(request, self.api_url)
+            logger.debug("Successfully obtained identity token for Cloud Run auth")
+
+            return self._identity_token
+
+        except Exception as e:
+            logger.warning(f"Failed to get identity token via ADC: {e}")
+            logger.info("Trying to get identity token from metadata server...")
+
+            # Fallback: try metadata server (for Cloud Run, GCE, etc.)
+            try:
+                with httpx.Client(timeout=5) as client:
+                    response = client.get(
+                        "http://metadata.google.internal/computeMetadata/v1/instance/"
+                        f"service-accounts/default/identity?audience={self.api_url}",
+                        headers={"Metadata-Flavor": "Google"}
+                    )
+                    response.raise_for_status()
+                    self._identity_token = response.text
+                    return self._identity_token
+            except Exception as e2:
+                logger.error(f"Failed to get identity token from metadata server: {e2}")
+                raise RuntimeError(
+                    "Could not obtain identity token. Ensure you have valid Google Cloud credentials."
+                ) from e2
 
     def _get_connection(self):
         """Get a PostgreSQL connection."""
@@ -164,7 +207,7 @@ class EmbeddingGenerator:
 
     def _generate_embeddings_batch(self, texts: List[str]) -> np.ndarray:
         """
-        Generate embeddings for a batch of texts.
+        Generate embeddings for a batch of texts via HTTP API.
 
         Args:
             texts: List of text strings
@@ -172,13 +215,38 @@ class EmbeddingGenerator:
         Returns:
             numpy array of shape (len(texts), 768)
         """
-        # Generate embeddings
-        embeddings = self.model.encode(
-            texts,
-            batch_size=self.DEFAULT_BATCH_SIZE,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-            normalize_embeddings=True  # L2 normalization for cosine similarity
+        # Get identity token for Cloud Run IAM authentication
+        identity_token = self._get_identity_token()
+
+        # Call the embeddings API
+        with httpx.Client(timeout=self.API_TIMEOUT) as client:
+            response = client.post(
+                f"{self.api_url.rstrip('/')}/generate",
+                json={"texts": texts},
+                headers={
+                    "Authorization": f"Bearer {identity_token}",
+                    "X-API-Key": self.api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+            response.raise_for_status()
+
+        result = response.json()
+
+        # Validate response
+        if "embeddings" not in result:
+            raise ValueError(f"Invalid API response: missing 'embeddings' key")
+
+        embeddings = np.array(result["embeddings"], dtype=np.float32)
+
+        if embeddings.shape[1] != self.EMBEDDING_DIM:
+            raise ValueError(
+                f"Unexpected embedding dimension: {embeddings.shape[1]} (expected {self.EMBEDDING_DIM})"
+            )
+
+        logger.debug(
+            f"Generated {result.get('count', len(texts))} embeddings "
+            f"(model: {result.get('model', 'unknown')}, dim: {result.get('dimension', 'unknown')})"
         )
 
         return embeddings
@@ -259,6 +327,7 @@ class EmbeddingGenerator:
         logger.info(
             f"Starting embedding generation for date range: {start_date} to {end_date or start_date}"
         )
+        logger.info(f"Using Embeddings API at: {self.api_url}")
 
         # Fetch news without embeddings
         news_records = self._fetch_news_without_embeddings(
@@ -289,7 +358,7 @@ class EmbeddingGenerator:
                     for rec in batch
                 ]
 
-                # Generate embeddings
+                # Generate embeddings via API
                 logger.info(f"Generating embeddings for batch {i // batch_size + 1} ({len(batch)} records)")
                 embeddings = self._generate_embeddings_batch(texts)
 
@@ -298,6 +367,15 @@ class EmbeddingGenerator:
 
                 total_successful += updated
                 logger.info(f"Batch {i // batch_size + 1}: {updated} records updated successfully")
+
+            except httpx.HTTPStatusError as e:
+                logger.error(
+                    f"API error processing batch {i // batch_size + 1}: "
+                    f"{e.response.status_code} - {e.response.text}"
+                )
+                total_failed += len(batch)
+                # Clear identity token in case it expired
+                self._identity_token = None
 
             except Exception as e:
                 logger.error(f"Error processing batch {i // batch_size + 1}: {e}")
