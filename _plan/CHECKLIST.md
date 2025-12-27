@@ -189,15 +189,16 @@ python scripts/validate_migration.py
 
 ### Configuração
 
-- [ ] * `STORAGE_BACKEND=dual_write` configurado
-- [ ] * `STORAGE_READ_FROM=huggingface` configurado
-- [ ] * Workflow atualizado para usar StorageAdapter
+- [x] * `STORAGE_BACKEND=dual_write` configurado
+- [x] * `STORAGE_READ_FROM=postgres` configurado (Upload to Cogfy + Enrich)
+- [x] * Workflow atualizado para usar StorageAdapter
+- [x] EnrichmentManager com suporte a leitura de PostgreSQL (PR #10)
 
 ### Execução do Pipeline
 
 | Dia | Data | Scraper OK | Enrichment OK | PG OK | HF OK |
 |-----|------|------------|---------------|-------|-------|
-| 1 | ____-__-__ | [ ] | [ ] | [ ] | [ ] |
+| 1 | 2024-12-26 | [x] | [x] | [x] | [x] |
 | 2 | ____-__-__ | [ ] | [ ] | [ ] | [ ] |
 | 3 | ____-__-__ | [ ] | [ ] | [ ] | [ ] |
 | 4 | ____-__-__ | [ ] | [ ] | [ ] | [ ] |
@@ -212,6 +213,156 @@ python scripts/validate_consistency.py
 - [ ] Contagens coincidem todos os dias
 - [ ] Nenhum erro de escrita
 - [ ] Logs sem warnings críticos
+
+---
+
+## Fase 4.7: Embeddings Semânticos
+
+### Infrastructure
+
+- [ ] * Terraform PR: Habilitar pgvector no Cloud SQL
+- [ ] * Aplicar Terraform via CI/CD
+- [ ] * Rodar migration 001 (pgvector extension)
+- [ ] * Rodar migration 002 (embedding columns)
+- [ ] * Rodar migration 003 (HNSW index)
+- [ ] Validar pgvector habilitado: `SELECT * FROM pg_extension WHERE extname = 'vector';`
+- [ ] Validar colunas criadas: `SELECT column_name FROM information_schema.columns WHERE table_name = 'news' AND column_name LIKE '%embedding%';`
+
+### Development
+
+- [ ] * Criar package `src/data_platform/jobs/embeddings/`
+- [ ] * Implementar `EmbeddingGenerator` class
+- [ ] * Implementar `TypesenseSyncManager` class
+- [ ] * Adicionar CLI commands (generate-embeddings, sync-embeddings-to-typesense)
+- [ ] * Atualizar `News` model (campos content_embedding, embedding_generated_at)
+- [ ] * Atualizar `pyproject.toml` (sentence-transformers, torch)
+- [ ] * Atualizar `Dockerfile` (pre-download modelo)
+- [ ] Build Docker image sem erros
+- [ ] Poetry lock sem conflitos
+
+### Testes Automatizados
+
+- [ ] * `tests/unit/test_embedding_generator.py` criado
+- [ ] * Teste de preparação de texto (title + summary, fallback)
+- [ ] * Teste de geração de embeddings (mock)
+- [ ] * Teste de similaridade entre textos relacionados
+- [ ] * `tests/unit/test_typesense_sync.py` criado
+- [ ] * Teste de preparação de documentos Typesense
+- [ ] * Teste de validação de schema
+- [ ] * Teste de parsing de embeddings
+- [ ] * `tests/integration/test_embedding_workflow.py` criado
+- [ ] * Teste de workflow completo (10 registros)
+- [ ] Testes passam localmente (pytest)
+- [ ] Cobertura > 80%
+
+### Teste Local (Docker)
+
+```bash
+# PostgreSQL com pgvector
+docker run -d --name postgres-pgvector \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=destaquesgovbr \
+  -p 5432:5432 \
+  pgvector/pgvector:pg15
+
+# Typesense local
+cd /Users/nitai/Dropbox/dev-mgi/destaquesgovbr/typesense
+./run-typesense-server.sh
+
+# Run migrations
+psql -h localhost -U postgres -d destaquesgovbr -f scripts/migrations/*.sql
+
+# Test embedding generation
+export DATABASE_URL="postgresql://postgres:password@localhost:5432/destaquesgovbr"
+poetry run data-platform generate-embeddings --start-date 2025-01-01 --max-records 100
+
+# Test Typesense sync
+export TYPESENSE_HOST=localhost TYPESENSE_PORT=8108 TYPESENSE_API_KEY=...
+poetry run data-platform sync-embeddings-to-typesense --start-date 2025-01-01
+```
+
+- [ ] * PostgreSQL local rodando com pgvector
+- [ ] * Typesense local rodando
+- [ ] * Migrations aplicadas sem erros
+- [ ] * Teste embedding generation (100 records)
+- [ ] * Verificar dados no PostgreSQL
+- [ ] * Teste Typesense sync
+- [ ] * Verificar dados no Typesense
+
+### Backfill (2025 apenas)
+
+> **IMPORTANTE**: Processar apenas notícias de 2025 (têm summary do Cogfy)
+
+```bash
+# Backfill embeddings para 2025
+poetry run data-platform generate-embeddings \
+  --start-date 2025-01-01 \
+  --end-date 2025-12-31
+
+# Sync para Typesense
+poetry run data-platform sync-embeddings-to-typesense \
+  --start-date 2025-01-01 \
+  --full-sync
+```
+
+- [ ] * Backfill 2025 executado (~30k records)
+- [ ] * Cobertura > 95% para 2025
+- [ ] * Validação: `SELECT COUNT(*) FROM news WHERE published_at >= '2025-01-01' AND content_embedding IS NOT NULL;`
+
+### Typesense Schema Update
+
+**⚠️ OPERAÇÃO DESTRUTIVA**
+
+- [ ] Backup Typesense data (export via PostgreSQL)
+- [ ] * Atualizar `typesense/src/typesense_dgb/collection.py` (adicionar campo content_embedding)
+- [ ] * Delete collection: `client.collections['news'].delete()`
+- [ ] * Create com novo schema (inclui content_embedding)
+- [ ] * Full sync PG → Typesense (~30k docs de 2025)
+- [ ] Validar search funciona
+
+### Production Integration
+
+- [ ] * Atualizar `.github/workflows/pipeline-steps.yaml` (2 novos jobs)
+- [ ] * Atualizar job `pipeline-summary` (adicionar needs)
+- [ ] * Trigger manual (1 dia de 2025)
+- [ ] * Monitor logs (nenhum erro)
+- [ ] Monitor 7 dias
+- [ ] Setup alertas
+- [ ] Validar sync diário funciona
+- [ ] Sign-off
+
+### Validação Diária (2025)
+
+```sql
+-- Cobertura de embeddings para 2025
+SELECT
+  DATE(published_at) as date,
+  COUNT(*) as total,
+  COUNT(content_embedding) as with_embeddings,
+  ROUND(COUNT(content_embedding)::numeric / COUNT(*) * 100, 2) as coverage_pct
+FROM news
+WHERE published_at >= '2025-01-01' AND published_at < '2026-01-01'
+GROUP BY DATE(published_at)
+ORDER BY date DESC
+LIMIT 7;
+
+-- Sync lag
+SELECT COUNT(*) as pending_sync
+FROM news
+WHERE published_at >= '2025-01-01'
+  AND content_embedding IS NOT NULL
+  AND embedding_generated_at > (
+    SELECT completed_at FROM sync_log
+    WHERE operation = 'typesense_embeddings_sync'
+      AND status = 'completed'
+    ORDER BY completed_at DESC LIMIT 1
+  );
+```
+
+- [ ] Cobertura > 95% todos os dias
+- [ ] Sync lag < 24h
+- [ ] Nenhum erro de geração
+- [ ] Nenhum erro de sync
 
 ---
 
@@ -298,4 +449,4 @@ python scripts/validate_consistency.py
 
 ---
 
-*Última atualização: 2024-12-24*
+*Última atualização: 2024-12-26*
