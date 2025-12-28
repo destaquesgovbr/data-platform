@@ -39,8 +39,8 @@ Consolidar o repositório `typesense` no repositório `data-platform`, unificand
 | 5 | ✅ Concluído | Docker |
 | 6 | ✅ Concluído | Workflows GitHub Actions |
 | 7 | ⬜ Pendente | Documentação |
-| 8 | 🟡 Em Progresso | Limpeza |
-| 9 | ⬜ Pendente | Teste End-to-End |
+| 8 | ✅ Concluído | Limpeza |
+| 9 | 🟡 Parcial | Teste End-to-End |
 | 10 | ⬜ Pendente | Commit e Push |
 
 ## Estrutura Final
