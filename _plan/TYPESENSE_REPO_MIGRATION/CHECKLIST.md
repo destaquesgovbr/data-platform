@@ -54,11 +54,11 @@
 
 ## Fase 6: Workflows
 
-- [ ] Copiar workflow `docker-build-push.yml` → `typesense-docker-build.yaml`
-- [ ] Copiar workflow `typesense-daily-load.yml` → `typesense-daily-load.yaml`
-- [ ] Copiar workflow `typesense-full-reload.yml` → `typesense-full-reload.yaml`
-- [ ] Atualizar paths nos workflows
-- [ ] Atualizar comandos para usar CLI
+- [x] Copiar workflow `docker-build-push.yml` → `typesense-docker-build.yaml`
+- [x] Copiar workflow `typesense-daily-load.yml` → `typesense-daily-load.yaml`
+- [x] Copiar workflow `typesense-full-reload.yml` → `typesense-full-reload.yaml`
+- [x] Atualizar paths nos workflows
+- [x] Atualizar comandos para usar CLI
 - [ ] Verificar: Syntax válida com `gh workflow view`
 
 ## Fase 7: Documentação
@@ -103,7 +103,7 @@
 | 3 - Jobs | ✅ Concluído | 2025-12-28 |
 | 4 - CLI | ✅ Concluído | 2025-12-28 |
 | 5 - Docker | ✅ Concluído | 2025-12-28 |
-| 6 - Workflows | ⬜ Pendente | |
+| 6 - Workflows | ✅ Concluído | 2025-12-28 |
 | 7 - Documentação | ⬜ Pendente | |
 | 8 - Limpeza | 🟡 Em Progresso | |
 | 9 - Teste E2E | ⬜ Pendente | |
