@@ -138,7 +138,8 @@ CREATE UNIQUE INDEX idx_news_unique_id ON news(unique_id);
 
 -- Date queries (most common access pattern)
 CREATE INDEX idx_news_published_at ON news(published_at DESC);
-CREATE INDEX idx_news_published_date ON news(DATE(published_at));
+-- Note: DATE(published_at) index removed due to IMMUTABLE function requirement
+-- The idx_news_published_at index covers date-based queries adequately
 
 -- Agency filtering
 CREATE INDEX idx_news_agency_id ON news(agency_id);
