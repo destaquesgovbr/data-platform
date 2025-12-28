@@ -1,6 +1,6 @@
 # Migração: typesense → data-platform
 
-> **Status**: 🟡 Em Execução (Fases 1-3 concluídas)
+> **Status**: 🟡 Em Execução (Fases 1-5 concluídas)
 > **Criado**: 2025-12-28
 > **Última Atualização**: 2025-12-28
 > **PR**: https://github.com/destaquesgovbr/data-platform/pull/16
@@ -35,8 +35,8 @@ Consolidar o repositório `typesense` no repositório `data-platform`, unificand
 | 1 | ✅ Concluído | Preparação e Estrutura |
 | 2 | ✅ Concluído | Migração do Módulo Core |
 | 3 | ✅ Concluído | Jobs de Sincronização |
-| 4 | ⬜ Pendente | Scripts CLI |
-| 5 | ⬜ Pendente | Docker |
+| 4 | ✅ Concluído | Scripts CLI |
+| 5 | ✅ Concluído | Docker |
 | 6 | ⬜ Pendente | Workflows GitHub Actions |
 | 7 | ⬜ Pendente | Documentação |
 | 8 | 🟡 Em Progresso | Limpeza |
