@@ -13,7 +13,7 @@
 - [x] Mover `Dockerfile` para `docker/postgres/Dockerfile`
 - [x] Renomear `docker-build.yaml` → `postgres-docker-build.yaml`
 - [x] Atualizar path do Dockerfile no workflow
-- [ ] Verificar: `docker build -f docker/postgres/Dockerfile .` funciona
+- [x] Verificar: `docker build -f docker/postgres/Dockerfile .` funciona
 
 ## Fase 2: Módulo Core (typesense/)
 
@@ -25,7 +25,7 @@
 - [x] Copiar `utils.py`
 - [x] Criar `__init__.py` com exports
 - [x] Atualizar imports para `data_platform.typesense`
-- [ ] Verificar: `python -c "from data_platform.typesense import get_client"`
+- [x] Verificar: `python -c "from data_platform.typesense import get_client"`
 
 ## Fase 3: Jobs de Sincronização
 
@@ -41,15 +41,15 @@
 - [x] Adicionar comando `sync-typesense` ao cli.py
 - [x] Adicionar comando `typesense-delete` ao cli.py
 - [x] Adicionar comando `typesense-list` ao cli.py
-- [ ] Verificar: `data-platform sync-typesense --help`
+- [x] Verificar: `data-platform sync-typesense --help`
 - [ ] Teste: CLI indexa dados
 
 ## Fase 5: Docker
 
 - [x] Copiar `Dockerfile` para `docker/typesense/`
 - [x] Copiar `entrypoint.sh` para `docker/typesense/`
-- [x] Adaptar Dockerfile para nova estrutura
-- [ ] Verificar: `docker build -f docker/typesense/Dockerfile .`
+- [x] Adaptar Dockerfile para nova estrutura (Python 3.12-slim)
+- [x] Verificar: `docker build -f docker/typesense/Dockerfile .`
 - [ ] Teste: Container executa sync
 
 ## Fase 6: Workflows
@@ -59,7 +59,7 @@
 - [x] Copiar workflow `typesense-full-reload.yml` → `typesense-full-reload.yaml`
 - [x] Atualizar paths nos workflows
 - [x] Atualizar comandos para usar CLI
-- [ ] Verificar: Syntax válida com `gh workflow view`
+- [x] Verificar: Syntax válida (YAML parsing OK)
 
 ## Fase 7: Documentação
 
@@ -73,17 +73,17 @@
 ## Fase 8: Limpeza
 
 - [x] Deletar `src/data_platform/jobs/embeddings/typesense_sync.py`
-- [ ] Verificar: Nenhum import quebrado
-- [ ] Confirmar: Nenhum arquivo descartado foi copiado
+- [x] Verificar: Nenhum import quebrado
+- [x] Confirmar: Nenhum arquivo descartado foi copiado
 
 ## Fase 9: Teste End-to-End
 
-- [ ] Teste: Importação de módulos
-- [ ] Teste: CLI sync-typesense
-- [ ] Teste: Verificar dados no Typesense
-- [ ] Teste: Docker postgres build
-- [ ] Teste: Docker typesense build
-- [ ] Teste: Workflow via `gh workflow run`
+- [x] Teste: Importação de módulos
+- [x] Teste: CLI sync-typesense --help
+- [ ] Teste: Verificar dados no Typesense (precisa DB e Typesense)
+- [x] Teste: Docker postgres build
+- [x] Teste: Docker typesense build
+- [ ] Teste: Workflow via `gh workflow run` (após merge)
 
 ## Fase 10: Commit e Push
 
@@ -105,8 +105,8 @@
 | 5 - Docker | ✅ Concluído | 2025-12-28 |
 | 6 - Workflows | ✅ Concluído | 2025-12-28 |
 | 7 - Documentação | ⬜ Pendente | |
-| 8 - Limpeza | 🟡 Em Progresso | |
-| 9 - Teste E2E | ⬜ Pendente | |
+| 8 - Limpeza | ✅ Concluído | 2025-12-28 |
+| 9 - Teste E2E | 🟡 Parcial | 2025-12-28 |
 | 10 - Commit | ⬜ Pendente | |
 
 **Legenda:**
