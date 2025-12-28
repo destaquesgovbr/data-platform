@@ -151,8 +151,8 @@ CREATE INDEX idx_news_most_specific_theme ON news(most_specific_theme_id);
 
 -- Composite indexes for common query patterns
 CREATE INDEX idx_news_agency_date ON news(agency_id, published_at DESC);
-CREATE INDEX idx_news_date_range ON news(published_at)
-    WHERE published_at >= NOW() - INTERVAL '1 year';
+-- Note: idx_news_date_range removed due to NOW() not being IMMUTABLE in WHERE clause
+-- A regular index on published_at already exists for date range queries
 
 -- Full-text search (PostgreSQL Portuguese support)
 CREATE INDEX idx_news_fts ON news
