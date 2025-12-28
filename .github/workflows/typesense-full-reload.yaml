@@ -9,9 +9,9 @@ on:
         required: true
         type: string
       start_date:
-        description: 'Start date for data load (YYYY-MM-DD, default: 2025-01-01)'
+        description: 'Start date for data load (YYYY-MM-DD, default: 1900-01-01)'
         required: false
-        default: '2025-01-01'
+        default: '1900-01-01'
         type: string
       skip_portal_refresh:
         description: 'Skip portal cache refresh after reload'
