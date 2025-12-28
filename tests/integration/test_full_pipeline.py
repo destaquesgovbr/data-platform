@@ -236,7 +236,14 @@ def test_01_populate_master_data(docker_services, env_vars):
     # Popular agencies
     print("\n📊 Populando agencies...")
     result = subprocess.run(
-        ["poetry", "run", "python", "scripts/populate_agencies.py"],
+        [
+            "poetry",
+            "run",
+            "python",
+            "scripts/populate_agencies.py",
+            "--source",
+            "test-data/agencies.yaml",
+        ],
         capture_output=True,
         text=True,
         timeout=60,
@@ -247,7 +254,14 @@ def test_01_populate_master_data(docker_services, env_vars):
     # Popular themes
     print("\n📊 Populando themes...")
     result = subprocess.run(
-        ["poetry", "run", "python", "scripts/populate_themes.py"],
+        [
+            "poetry",
+            "run",
+            "python",
+            "scripts/populate_themes.py",
+            "--source",
+            "test-data/themes_tree_enriched_full.yaml",
+        ],
         capture_output=True,
         text=True,
         timeout=60,
