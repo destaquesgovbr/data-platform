@@ -1,0 +1,135 @@
+name: Integration Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  integration-test:
+    name: Full Pipeline Integration Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: destaquesgovbr_dev
+          POSTGRES_PASSWORD: dev_password
+          POSTGRES_DB: destaquesgovbr_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U destaquesgovbr_dev"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      typesense:
+        image: typesense/typesense:27.1
+        env:
+          TYPESENSE_DATA_DIR: /data
+          TYPESENSE_API_KEY: local_dev_key_12345
+          TYPESENSE_ENABLE_CORS: "true"
+        ports:
+          - 8108:8108
+        options: >-
+          --health-cmd "curl -f http://localhost:8108/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.8.2
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            venv-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
+
+      - name: Get secrets from Secret Manager
+        id: secrets
+        run: |
+          echo "COGFY_API_KEY=$(gcloud secrets versions access latest --secret=cogfy-api-key)" >> $GITHUB_OUTPUT
+          echo "EMBEDDINGS_API_KEY=$(gcloud secrets versions access latest --secret=embeddings-api-key)" >> $GITHUB_OUTPUT
+          echo "EMBEDDINGS_API_URL=https://destaquesgovbr-embeddings-api-990583792367.southamerica-east1.run.app" >> $GITHUB_OUTPUT
+
+      - name: Wait for PostgreSQL
+        run: |
+          echo "Waiting for PostgreSQL to be ready..."
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U destaquesgovbr_dev; then
+              echo "PostgreSQL is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 1
+          done
+
+      - name: Wait for Typesense
+        run: |
+          echo "Waiting for Typesense to be ready..."
+          for i in {1..30}; do
+            if curl -f http://localhost:8108/health > /dev/null 2>&1; then
+              echo "Typesense is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 1
+          done
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://destaquesgovbr_dev:dev_password@localhost:5432/destaquesgovbr_dev
+          TYPESENSE_HOST: localhost
+          TYPESENSE_PORT: "8108"
+          TYPESENSE_API_KEY: local_dev_key_12345
+          TYPESENSE_PROTOCOL: http
+          STORAGE_BACKEND: postgres
+          STORAGE_READ_FROM: postgres
+          COGFY_API_KEY: ${{ steps.secrets.outputs.COGFY_API_KEY }}
+          EMBEDDINGS_API_URL: ${{ steps.secrets.outputs.EMBEDDINGS_API_URL }}
+          EMBEDDINGS_API_KEY: ${{ steps.secrets.outputs.EMBEDDINGS_API_KEY }}
+        run: |
+          export PYTHONPATH=src
+          poetry run pytest tests/integration/test_full_pipeline.py -v -s --tb=short
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            .pytest_cache/
+            *.log
+          retention-days: 7
