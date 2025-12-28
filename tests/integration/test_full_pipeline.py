@@ -79,6 +79,7 @@ def docker_services():
 
     # Aguardar PostgreSQL
     print("⏳ Aguardando PostgreSQL ficar pronto...")
+    print(f"   DATABASE_URL: {DATABASE_URL}")
     for i in range(30):  # Máximo 30 segundos
         try:
             if is_ci:
@@ -105,8 +106,9 @@ def docker_services():
                 if result.returncode == 0:
                     print("✅ PostgreSQL pronto!")
                     break
-        except (subprocess.TimeoutExpired, Exception):
-            pass
+        except (subprocess.TimeoutExpired, Exception) as e:
+            if i == 0:  # Print error only once
+                print(f"   Tentando conectar... (erro: {e})")
         time.sleep(1)
     else:
         raise RuntimeError("PostgreSQL não ficou pronto em 30 segundos")
