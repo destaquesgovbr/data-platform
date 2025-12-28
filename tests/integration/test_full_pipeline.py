@@ -233,6 +233,19 @@ def test_01_populate_master_data(docker_services, env_vars):
     print("FASE 1: Populando dados mestre")
     print("=" * 70)
 
+    # Criar schema do banco de dados
+    print("\n🗄️  Criando schema do banco de dados...")
+    with open("scripts/create_schema.sql", "r") as f:
+        schema_sql = f.read()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(schema_sql)
+    conn.commit()
+    cur.close()
+    conn.close()
+    print("✅ Schema criado")
+
     # Popular agencies
     print("\n📊 Populando agencies...")
     result = subprocess.run(
