@@ -62,7 +62,7 @@ jobs:
       - name: Fetch Database URL
         id: database
         run: |
-          DATABASE_URL=$(gcloud secrets versions access latest --secret=destaquesgovbr-postgres-connection-string)
+          DATABASE_URL=$(gcloud secrets versions access latest --secret=govbrnews-postgres-connection-string)
           echo "::add-mask::$DATABASE_URL"
           echo "url=$DATABASE_URL" >> $GITHUB_OUTPUT
 
