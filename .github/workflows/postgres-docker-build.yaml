@@ -1,14 +1,14 @@
-name: Build and Publish Docker Image
+name: Build and Publish PostgreSQL Docker Image
 
 on:
   push:
     branches: [ "main" ]
     paths:
       - 'src/**'
-      - 'Dockerfile'
+      - 'docker/postgres/**'
       - 'pyproject.toml'
       - 'poetry.lock'
-      - '.github/workflows/docker-build.yaml'
+      - '.github/workflows/postgres-docker-build.yaml'
 
 jobs:
   build-and-push:
@@ -33,7 +33,8 @@ jobs:
       - name: Build and push the image
         run: |
           # 1) Build the Docker image (tag with "latest" + a short SHA)
-          docker build -t ghcr.io/destaquesgovbr/data-platform:latest \
+          docker build -f docker/postgres/Dockerfile \
+                       -t ghcr.io/destaquesgovbr/data-platform:latest \
                        -t ghcr.io/destaquesgovbr/data-platform:${{ github.sha }} .
 
           # 2) Push both tags
