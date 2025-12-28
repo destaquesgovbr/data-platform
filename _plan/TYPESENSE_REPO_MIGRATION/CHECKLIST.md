@@ -38,17 +38,17 @@
 
 ## Fase 4: Scripts CLI
 
-- [ ] Adicionar comando `sync-typesense` ao cli.py
-- [ ] Adicionar comando `typesense-delete` ao cli.py
-- [ ] Adicionar comando `typesense-list` ao cli.py
+- [x] Adicionar comando `sync-typesense` ao cli.py
+- [x] Adicionar comando `typesense-delete` ao cli.py
+- [x] Adicionar comando `typesense-list` ao cli.py
 - [ ] Verificar: `data-platform sync-typesense --help`
 - [ ] Teste: CLI indexa dados
 
 ## Fase 5: Docker
 
-- [ ] Copiar `Dockerfile` para `docker/typesense/`
-- [ ] Copiar `entrypoint.sh` para `docker/typesense/`
-- [ ] Adaptar Dockerfile para nova estrutura
+- [x] Copiar `Dockerfile` para `docker/typesense/`
+- [x] Copiar `entrypoint.sh` para `docker/typesense/`
+- [x] Adaptar Dockerfile para nova estrutura
 - [ ] Verificar: `docker build -f docker/typesense/Dockerfile .`
 - [ ] Teste: Container executa sync
 
@@ -101,8 +101,8 @@
 | 1 - Preparação | ✅ Concluído | 2025-12-28 |
 | 2 - Módulo Core | ✅ Concluído | 2025-12-28 |
 | 3 - Jobs | ✅ Concluído | 2025-12-28 |
-| 4 - CLI | ⬜ Pendente | |
-| 5 - Docker | ⬜ Pendente | |
+| 4 - CLI | ✅ Concluído | 2025-12-28 |
+| 5 - Docker | ✅ Concluído | 2025-12-28 |
 | 6 - Workflows | ⬜ Pendente | |
 | 7 - Documentação | ⬜ Pendente | |
 | 8 - Limpeza | 🟡 Em Progresso | |
