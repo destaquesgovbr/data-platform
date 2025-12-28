@@ -56,39 +56,56 @@ def docker_services():
     - Limpa containers existentes
     - Inicia PostgreSQL e Typesense frescos
     - Aguarda serviços ficarem prontos
+
+    Em CI (GitHub Actions), assume que os containers já estão rodando como services.
     """
     print("\n" + "=" * 70)
     print("FASE 0: Preparando ambiente Docker")
     print("=" * 70)
 
-    # Limpar containers existentes
-    print("🔧 Parando e removendo containers existentes...")
-    subprocess.run(["docker-compose", "down", "-v"], check=True, cwd=os.getcwd())
+    # Detectar se está em CI
+    is_ci = os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true"
 
-    # Iniciar containers limpos
-    print("🚀 Iniciando PostgreSQL e Typesense...")
-    subprocess.run(["docker-compose", "up", "-d"], check=True, cwd=os.getcwd())
+    if not is_ci:
+        # Limpar containers existentes
+        print("🔧 Parando e removendo containers existentes...")
+        subprocess.run(["docker-compose", "down", "-v"], check=True, cwd=os.getcwd())
+
+        # Iniciar containers limpos
+        print("🚀 Iniciando PostgreSQL e Typesense...")
+        subprocess.run(["docker-compose", "up", "-d"], check=True, cwd=os.getcwd())
+    else:
+        print("ℹ️  Running in CI - using existing service containers...")
 
     # Aguardar PostgreSQL
     print("⏳ Aguardando PostgreSQL ficar pronto...")
     for i in range(30):  # Máximo 30 segundos
         try:
-            result = subprocess.run(
-                [
-                    "docker",
-                    "exec",
-                    "destaquesgovbr-postgres",
-                    "pg_isready",
-                    "-U",
-                    "destaquesgovbr_dev",
-                ],
-                capture_output=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
+            if is_ci:
+                # Em CI, testar conexão direta ao PostgreSQL
+                import psycopg2
+                conn = psycopg2.connect(DATABASE_URL)
+                conn.close()
                 print("✅ PostgreSQL pronto!")
                 break
-        except subprocess.TimeoutExpired:
+            else:
+                # Local, usar docker exec
+                result = subprocess.run(
+                    [
+                        "docker",
+                        "exec",
+                        "destaquesgovbr-postgres",
+                        "pg_isready",
+                        "-U",
+                        "destaquesgovbr_dev",
+                    ],
+                    capture_output=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    print("✅ PostgreSQL pronto!")
+                    break
+        except (subprocess.TimeoutExpired, Exception):
             pass
         time.sleep(1)
     else:
