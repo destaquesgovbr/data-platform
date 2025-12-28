@@ -44,20 +44,24 @@ jobs:
       - name: Get identity token for Cloud Run
         id: identity
         run: |
-          # Try to get identity token directly (works with WIF when service account has token creator permission)
-          IDENTITY_TOKEN=$(gcloud auth print-identity-token --audiences=https://destaquesgovbr-embeddings-api-990583792367.southamerica-east1.run.app 2>&1) || true
-          if [[ "$IDENTITY_TOKEN" == *"ERROR"* ]] || [ -z "$IDENTITY_TOKEN" ]; then
-            echo "Direct token failed, trying with impersonation..."
-            IDENTITY_TOKEN=$(gcloud auth print-identity-token \
-              --impersonate-service-account=github-actions@inspire-7-finep.iam.gserviceaccount.com \
-              --audiences=https://destaquesgovbr-embeddings-api-990583792367.southamerica-east1.run.app 2>&1) || true
-          fi
-          if [[ "$IDENTITY_TOKEN" == *"ERROR"* ]] || [ -z "$IDENTITY_TOKEN" ]; then
-            echo "::warning::Could not get identity token. May need to grant serviceAccountTokenCreator role."
+          # Debug: show current auth
+          echo "Current account:"
+          gcloud auth list --filter=status:ACTIVE --format="value(account)" || echo "Could not list accounts"
+
+          # Try to get identity token with impersonation (required for WIF)
+          echo "Attempting to get identity token via impersonation..."
+          RESULT=$(gcloud auth print-identity-token \
+            --impersonate-service-account=github-actions@inspire-7-finep.iam.gserviceaccount.com \
+            --audiences=https://destaquesgovbr-embeddings-api-990583792367.southamerica-east1.run.app 2>&1) || true
+
+          if [[ "$RESULT" == *"ERROR"* ]] || [ -z "$RESULT" ]; then
+            echo "Impersonation failed with: $RESULT"
+            echo "::warning::Could not get identity token via impersonation."
             echo "IDENTITY_TOKEN=" >> $GITHUB_OUTPUT
           else
-            echo "Successfully obtained identity token"
-            echo "IDENTITY_TOKEN=$IDENTITY_TOKEN" >> $GITHUB_OUTPUT
+            echo "Successfully obtained identity token via impersonation"
+            echo "Token length: ${#RESULT}"
+            echo "IDENTITY_TOKEN=$RESULT" >> $GITHUB_OUTPUT
           fi
 
       - name: Generate embeddings for news articles
