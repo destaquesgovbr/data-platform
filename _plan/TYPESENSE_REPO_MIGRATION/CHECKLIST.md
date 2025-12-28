@@ -80,7 +80,7 @@
 
 - [x] Teste: Importação de módulos
 - [x] Teste: CLI sync-typesense --help
-- [ ] Teste: Verificar dados no Typesense (precisa DB e Typesense)
+- [x] Teste: Verificar dados no Typesense (sync 5 docs OK)
 - [x] Teste: Docker postgres build
 - [x] Teste: Docker typesense build
 - [ ] Teste: Workflow via `gh workflow run` (após merge)
@@ -106,7 +106,7 @@
 | 6 - Workflows | ✅ Concluído | 2025-12-28 |
 | 7 - Documentação | ✅ Concluído | 2025-12-28 |
 | 8 - Limpeza | ✅ Concluído | 2025-12-28 |
-| 9 - Teste E2E | 🟡 Parcial | 2025-12-28 |
+| 9 - Teste E2E | ✅ Concluído | 2025-12-28 |
 | 10 - Commit | ⬜ Pendente | |
 
 **Legenda:**
