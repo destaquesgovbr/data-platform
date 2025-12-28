@@ -4,35 +4,35 @@
 
 ## Fase 1: Preparação e Estrutura
 
-- [ ] Criar diretório `src/data_platform/typesense/`
-- [ ] Criar diretório `src/data_platform/jobs/typesense/`
-- [ ] Criar diretório `scripts/typesense/`
-- [ ] Criar diretório `docs/typesense/`
-- [ ] Criar diretório `docker/typesense/`
-- [ ] Criar diretório `docker/postgres/`
-- [ ] Mover `Dockerfile` para `docker/postgres/Dockerfile`
-- [ ] Renomear `docker-build.yaml` → `postgres-docker-build.yaml`
-- [ ] Atualizar path do Dockerfile no workflow
+- [x] Criar diretório `src/data_platform/typesense/`
+- [x] Criar diretório `src/data_platform/jobs/typesense/`
+- [x] Criar diretório `scripts/typesense/`
+- [x] Criar diretório `docs/typesense/`
+- [x] Criar diretório `docker/typesense/`
+- [x] Criar diretório `docker/postgres/`
+- [x] Mover `Dockerfile` para `docker/postgres/Dockerfile`
+- [x] Renomear `docker-build.yaml` → `postgres-docker-build.yaml`
+- [x] Atualizar path do Dockerfile no workflow
 - [ ] Verificar: `docker build -f docker/postgres/Dockerfile .` funciona
 
 ## Fase 2: Módulo Core (typesense/)
 
-- [ ] Copiar `client.py`
-- [ ] Copiar `collection.py`
-- [ ] Adicionar campo `content_embedding` ao schema
-- [ ] Copiar `indexer.py`
-- [ ] Adaptar indexer para processar embeddings pgvector
-- [ ] Copiar `utils.py`
-- [ ] Criar `__init__.py` com exports
-- [ ] Atualizar imports para `data_platform.typesense`
+- [x] Copiar `client.py`
+- [x] Copiar `collection.py`
+- [x] Adicionar campo `content_embedding` ao schema
+- [x] Copiar `indexer.py`
+- [x] Adaptar indexer para processar embeddings pgvector
+- [x] Copiar `utils.py`
+- [x] Criar `__init__.py` com exports
+- [x] Atualizar imports para `data_platform.typesense`
 - [ ] Verificar: `python -c "from data_platform.typesense import get_client"`
 
 ## Fase 3: Jobs de Sincronização
 
-- [ ] Criar `jobs/typesense/__init__.py`
-- [ ] Criar `jobs/typesense/sync_job.py`
-- [ ] Criar `jobs/typesense/collection_ops.py`
-- [ ] Adicionar `get_news_for_typesense()` ao PostgresManager
+- [x] Criar `jobs/typesense/__init__.py`
+- [x] Criar `jobs/typesense/sync_job.py`
+- [x] Criar `jobs/typesense/collection_ops.py`
+- [x] Adicionar `get_news_for_typesense()` ao PostgresManager
 - [ ] Verificar: Query retorna dados com embeddings
 - [ ] Teste: Sincronização local funciona
 
@@ -72,7 +72,7 @@
 
 ## Fase 8: Limpeza
 
-- [ ] Deletar `src/data_platform/jobs/embeddings/typesense_sync.py`
+- [x] Deletar `src/data_platform/jobs/embeddings/typesense_sync.py`
 - [ ] Verificar: Nenhum import quebrado
 - [ ] Confirmar: Nenhum arquivo descartado foi copiado
 
@@ -98,14 +98,14 @@
 
 | Fase | Status | Data Conclusão |
 |------|--------|----------------|
-| 1 - Preparação | ⬜ Pendente | |
-| 2 - Módulo Core | ⬜ Pendente | |
-| 3 - Jobs | ⬜ Pendente | |
+| 1 - Preparação | ✅ Concluído | 2025-12-28 |
+| 2 - Módulo Core | ✅ Concluído | 2025-12-28 |
+| 3 - Jobs | ✅ Concluído | 2025-12-28 |
 | 4 - CLI | ⬜ Pendente | |
 | 5 - Docker | ⬜ Pendente | |
 | 6 - Workflows | ⬜ Pendente | |
 | 7 - Documentação | ⬜ Pendente | |
-| 8 - Limpeza | ⬜ Pendente | |
+| 8 - Limpeza | 🟡 Em Progresso | |
 | 9 - Teste E2E | ⬜ Pendente | |
 | 10 - Commit | ⬜ Pendente | |
 
