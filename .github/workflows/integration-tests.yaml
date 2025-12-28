@@ -30,21 +30,18 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      typesense:
-        image: typesense/typesense:27.1
-        env:
-          TYPESENSE_DATA_DIR: /data
-          TYPESENSE_API_KEY: local_dev_key_12345
-          TYPESENSE_ENABLE_CORS: "true"
-        ports:
-          - 8108:8108
-        options: >-
-          --health-cmd "curl -f http://localhost:8108/health"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
+      - name: Start Typesense container
+        run: |
+          docker run -d \
+            --name typesense \
+            -p 8108:8108 \
+            -e TYPESENSE_DATA_DIR=/tmp/data \
+            -e TYPESENSE_API_KEY=local_dev_key_12345 \
+            -e TYPESENSE_ENABLE_CORS=true \
+            -v /tmp/typesense-data:/tmp/data \
+            typesense/typesense:27.1
+
       - name: Checkout code
         uses: actions/checkout@v4
 
