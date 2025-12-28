@@ -1,0 +1,179 @@
+name: Typesense Full Data Reload
+
+on:
+  # Manual trigger only - this is a destructive operation
+  workflow_dispatch:
+    inputs:
+      confirm_deletion:
+        description: 'Type "DELETE" to confirm collection deletion and full reload'
+        required: true
+        type: string
+      start_date:
+        description: 'Start date for data load (YYYY-MM-DD, default: 2025-01-01)'
+        required: false
+        default: '2025-01-01'
+        type: string
+      skip_portal_refresh:
+        description: 'Skip portal cache refresh after reload'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.12'
+  COLLECTION_NAME: 'news'
+
+jobs:
+  full-reload:
+    name: Delete Collection and Reload All Data
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Validate confirmation input
+        run: |
+          if [ "${{ github.event.inputs.confirm_deletion }}" != "DELETE" ]; then
+            echo "❌ Confirmation failed. You must type 'DELETE' to proceed."
+            echo "   This operation will permanently delete the collection and reload all data."
+            exit 1
+          fi
+          echo "✅ Confirmation validated"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Fetch Typesense Config
+        id: typesense
+        uses: destaquesgovbr/reusable-workflows/actions/fetch-typesense-config@v1
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          secret_name: typesense-write-conn
+
+      - name: Fetch Database URL
+        id: database
+        run: |
+          DATABASE_URL=$(gcloud secrets versions access latest --secret=destaquesgovbr-postgres-connection-string)
+          echo "::add-mask::$DATABASE_URL"
+          echo "url=$DATABASE_URL" >> $GITHUB_OUTPUT
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction --only main
+
+      - name: Delete existing collection
+        continue-on-error: true
+        env:
+          TYPESENSE_HOST: ${{ steps.typesense.outputs.host }}
+          TYPESENSE_PORT: ${{ steps.typesense.outputs.port }}
+          TYPESENSE_API_KEY: ${{ steps.typesense.outputs.api_key }}
+        run: |
+          echo "🗑️  Deleting collection '${{ env.COLLECTION_NAME }}'..."
+
+          if poetry run data-platform typesense-delete --confirm; then
+            echo "✅ Collection deleted successfully"
+          else
+            echo "⚠️  Collection deletion reported failure"
+            echo "   This may be expected if collection doesn't exist"
+            echo "   Continuing with full load (will create new collection)..."
+          fi
+
+          # Always succeed this step to allow workflow to continue
+          exit 0
+
+      - name: Calculate date range
+        id: dates
+        run: |
+          START_DATE="${{ github.event.inputs.start_date || '2025-01-01' }}"
+          END_DATE=$(date +%Y-%m-%d)
+          echo "start_date=$START_DATE" >> $GITHUB_OUTPUT
+          echo "end_date=$END_DATE" >> $GITHUB_OUTPUT
+          echo "Loading data from $START_DATE to $END_DATE"
+
+      - name: Run full data load
+        env:
+          TYPESENSE_HOST: ${{ steps.typesense.outputs.host }}
+          TYPESENSE_PORT: ${{ steps.typesense.outputs.port }}
+          TYPESENSE_API_KEY: ${{ steps.typesense.outputs.api_key }}
+          DATABASE_URL: ${{ steps.database.outputs.url }}
+        run: |
+          echo "📥 Starting full data load from PostgreSQL..."
+          poetry run data-platform sync-typesense \
+            --start-date "${{ steps.dates.outputs.start_date }}" \
+            --end-date "${{ steps.dates.outputs.end_date }}" \
+            --full-sync
+
+          if [ $? -eq 0 ]; then
+            echo "✅ Full data load completed successfully"
+          else
+            echo "❌ Full data load failed"
+            exit 1
+          fi
+
+      - name: Verify data load
+        env:
+          TYPESENSE_HOST: ${{ steps.typesense.outputs.host }}
+          TYPESENSE_PORT: ${{ steps.typesense.outputs.port }}
+          TYPESENSE_API_KEY: ${{ steps.typesense.outputs.api_key }}
+        run: |
+          echo "🔍 Verifying collection health..."
+          poetry run data-platform typesense-list
+
+      - name: Trigger portal cache refresh
+        if: success() && github.event.inputs.skip_portal_refresh != 'true'
+        run: |
+          echo "🔄 Triggering portal deployment to refresh cache..."
+          gcloud run services update destaquesgovbr-portal \
+            --region southamerica-east1 \
+            --update-env-vars "CACHE_BUST=$(date +%s)" \
+            --quiet
+
+      - name: Report final status
+        if: always()
+        run: |
+          echo "================================"
+          if [ ${{ job.status }} == 'success' ]; then
+            echo "✅ Full reload completed successfully"
+            echo ""
+            echo "Summary:"
+            echo "  - Collection '${{ env.COLLECTION_NAME }}' deleted"
+            echo "  - All data reloaded from PostgreSQL"
+            echo "  - Date range: ${{ steps.dates.outputs.start_date }} to ${{ steps.dates.outputs.end_date }}"
+            echo "  - Collection verified"
+            if [ "${{ github.event.inputs.skip_portal_refresh }}" != "true" ]; then
+              echo "  - Portal cache refreshed"
+            fi
+          else
+            echo "❌ Full reload failed"
+            echo ""
+            echo "Check the logs above for details."
+            exit 1
+          fi
+          echo "================================"
