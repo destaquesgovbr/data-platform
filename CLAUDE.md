@@ -59,9 +59,17 @@ data-platform/
 │       │   ├── postgres_manager.py
 │       │   ├── dataset_manager.py  (migrado do scraper)
 │       │   └── storage_adapter.py
+│       ├── typesense/              # Módulo Typesense
+│       │   ├── client.py           # Conexão com Typesense
+│       │   ├── collection.py       # Schema da collection
+│       │   ├── indexer.py          # Indexação de documentos
+│       │   └── utils.py            # Utilitários
 │       ├── jobs/                   # Jobs de processamento
 │       │   ├── scraper/
 │       │   ├── enrichment/
+│       │   ├── typesense/          # Jobs de sincronização
+│       │   │   ├── sync_job.py     # PG → Typesense
+│       │   │   └── collection_ops.py
 │       │   └── hf_sync/
 │       ├── models/                 # Modelos Pydantic
 │       └── dags/                   # DAGs Airflow (futuro)
@@ -165,6 +173,48 @@ poetry run pytest
 
 ---
 
+## Typesense
+
+O Typesense é usado como motor de busca para as notícias, oferecendo busca textual e semântica.
+
+### Comandos CLI
+
+```bash
+# Sincronizar dados do PostgreSQL para Typesense
+poetry run data-platform sync-typesense --start-date 2025-01-01
+
+# Listar collections
+poetry run data-platform typesense-list
+
+# Deletar collection (com confirmação)
+poetry run data-platform typesense-delete --confirm
+```
+
+### Variáveis de Ambiente
+
+```bash
+TYPESENSE_HOST=34.39.186.38
+TYPESENSE_PORT=8108
+TYPESENSE_API_KEY=<sua-api-key>
+```
+
+### Workflows
+
+| Workflow | Descrição |
+|----------|-----------|
+| `typesense-daily-load.yaml` | Carga incremental diária (7 dias) |
+| `typesense-full-reload.yaml` | Recarga completa (manual) |
+| `typesense-docker-build.yaml` | Build da imagem Docker |
+
+### Documentação Detalhada
+
+Ver [docs/typesense/](docs/typesense/) para documentação completa:
+- [setup.md](docs/typesense/setup.md) - Configuração do servidor
+- [development.md](docs/typesense/development.md) - Desenvolvimento local
+- [data-management.md](docs/typesense/data-management.md) - Gerenciamento de dados
+
+---
+
 ## Desenvolvimento
 
 ### Padrões de Código
@@ -216,7 +266,7 @@ pytest tests/integration/
 | **infra** | `/destaquesgovbr/infra` | Terraform (privado) |
 | **scraper** | `/destaquesgovbr/scraper` | Scrapers atuais (será migrado) |
 | **portal** | `/destaquesgovbr/portal` | Frontend Next.js |
-| **typesense** | `/destaquesgovbr/typesense` | Loader do Typesense |
+| **typesense** | `/destaquesgovbr/typesense` | ~~Loader do Typesense~~ (migrado para data-platform) |
 | **agencies** | `/destaquesgovbr/agencies` | agencies.yaml |
 | **themes** | `/destaquesgovbr/themes` | themes_tree.yaml |
 
