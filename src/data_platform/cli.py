@@ -8,6 +8,10 @@ Commands:
 - enrich: Enrich news with AI-generated themes from Cogfy
 - sync-hf: Sync PostgreSQL data to HuggingFace
 - migrate: Migrate data from HuggingFace to PostgreSQL
+- generate-embeddings: Generate semantic embeddings for news
+- sync-typesense: Sync news from PostgreSQL to Typesense
+- typesense-delete: Delete a Typesense collection
+- typesense-list: List all Typesense collections
 """
 import logging
 from typing import Optional
@@ -182,40 +186,81 @@ def generate_embeddings(
     )
 
 
-@app.command("sync-embeddings-to-typesense")
-def sync_embeddings_to_typesense(
+@app.command("sync-typesense")
+def sync_typesense(
     start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
-    full_sync: bool = typer.Option(False, help="Full sync (ignore last sync timestamp)"),
+    full_sync: bool = typer.Option(False, help="Force full sync (overwrite existing)"),
     batch_size: int = typer.Option(1000, help="Batch size for Typesense upsert"),
+    include_embeddings: bool = typer.Option(True, help="Include content embeddings"),
     max_records: Optional[int] = typer.Option(None, help="Max records to sync (for testing)"),
 ) -> None:
     """
-    Sync embeddings from PostgreSQL to Typesense.
+    Sync news from PostgreSQL to Typesense.
 
-    Phase 4.7: Enables semantic search in Typesense MCP Server.
-    By default, only syncs embeddings updated since last successful sync (incremental).
-    Use --full-sync to sync all embeddings.
+    Reads news with themes and embeddings from PostgreSQL and indexes them in Typesense.
+    Supports incremental updates (upsert) and full reload.
     """
-    from data_platform.jobs.embeddings import TypesenseSyncManager
+    from data_platform.jobs.typesense import sync_to_typesense
 
-    logging.info(f"Syncing embeddings to Typesense from {start_date} to {end_date or start_date}")
-    logging.info(f"Mode: {'Full sync' if full_sync else 'Incremental sync'}")
-    logging.info(f"Batch size: {batch_size}, Max records: {max_records or 'unlimited'}")
+    logging.info(f"Syncing to Typesense from {start_date} to {end_date or start_date}")
+    logging.info(f"Mode: {'Full sync' if full_sync else 'Incremental'}, Embeddings: {include_embeddings}")
 
-    sync_manager = TypesenseSyncManager()
-    stats = sync_manager.sync_embeddings(
+    stats = sync_to_typesense(
         start_date=start_date,
         end_date=end_date,
         full_sync=full_sync,
         batch_size=batch_size,
-        max_records=max_records
+        include_embeddings=include_embeddings,
+        limit=max_records,
     )
 
     logging.info(
-        f"Typesense sync completed: {stats['successful']} successful, "
-        f"{stats['failed']} failed, {stats['processed']} total"
+        f"Typesense sync completed: {stats['total_indexed']} indexed, "
+        f"{stats['errors']} errors, {stats['total_fetched']} fetched"
     )
+
+
+@app.command("typesense-delete")
+def typesense_delete(
+    collection_name: str = typer.Option("news", help="Collection name to delete"),
+    confirm: bool = typer.Option(False, "--confirm", help="Skip confirmation prompt"),
+) -> None:
+    """
+    Delete a Typesense collection.
+
+    WARNING: This permanently deletes all documents in the collection.
+    Use --confirm to skip the interactive confirmation prompt.
+    """
+    from data_platform.jobs.typesense import delete_typesense_collection
+
+    if not confirm:
+        logging.warning(f"About to delete collection '{collection_name}'")
+        logging.warning("Use --confirm to skip this prompt")
+
+    success = delete_typesense_collection(collection_name=collection_name, confirm=confirm)
+
+    if success:
+        logging.info(f"Collection '{collection_name}' deleted successfully")
+    else:
+        logging.warning(f"Collection '{collection_name}' was not deleted")
+
+
+@app.command("typesense-list")
+def typesense_list() -> None:
+    """
+    List all Typesense collections.
+
+    Shows collection names and document counts.
+    """
+    from data_platform.jobs.typesense import list_typesense_collections
+
+    collections = list_typesense_collections()
+
+    if not collections:
+        logging.info("No collections found")
+    else:
+        logging.info(f"Found {len(collections)} collection(s)")
 
 
 if __name__ == "__main__":
