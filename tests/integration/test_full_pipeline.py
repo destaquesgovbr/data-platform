@@ -30,7 +30,7 @@ from datetime import datetime
 # ==============================================================================
 # CONFIGURAÇÃO
 # ==============================================================================
-DATABASE_URL = "postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev")
 START_DATE = "2025-12-20"
 END_DATE = "2025-12-23"
 AGENCIES = "mec,gestao,cgu"
