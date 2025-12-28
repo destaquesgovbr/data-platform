@@ -44,33 +44,36 @@ jobs:
       - name: Get identity token for Cloud Run
         id: identity
         run: |
-          # Debug: show current auth
-          echo "Current account:"
-          gcloud auth list --filter=status:ACTIVE --format="value(account)" || echo "Could not list accounts"
-
-          # Try to get identity token with impersonation (required for WIF)
-          echo "Attempting to get identity token via impersonation..."
-          RESULT=$(gcloud auth print-identity-token \
+          # Get identity token with impersonation (required for WIF)
+          echo "Getting identity token via impersonation..."
+          gcloud auth print-identity-token \
             --impersonate-service-account=github-actions@inspire-7-finep.iam.gserviceaccount.com \
-            --audiences=https://destaquesgovbr-embeddings-api-990583792367.southamerica-east1.run.app 2>&1) || true
+            --audiences=https://destaquesgovbr-embeddings-api-990583792367.southamerica-east1.run.app \
+            > /tmp/identity_token.txt 2>&1
 
-          if [[ "$RESULT" == *"ERROR"* ]] || [ -z "$RESULT" ]; then
-            echo "Impersonation failed with: $RESULT"
+          if grep -q "ERROR" /tmp/identity_token.txt || [ ! -s /tmp/identity_token.txt ]; then
             echo "::warning::Could not get identity token via impersonation."
-            echo "IDENTITY_TOKEN=" >> $GITHUB_OUTPUT
+            cat /tmp/identity_token.txt
+            echo "TOKEN_FILE=" >> $GITHUB_OUTPUT
           else
-            echo "Successfully obtained identity token via impersonation"
-            echo "Token length: ${#RESULT}"
-            echo "IDENTITY_TOKEN=$RESULT" >> $GITHUB_OUTPUT
+            echo "Successfully obtained identity token ($(wc -c < /tmp/identity_token.txt) bytes)"
+            echo "TOKEN_FILE=/tmp/identity_token.txt" >> $GITHUB_OUTPUT
           fi
 
       - name: Generate embeddings for news articles
         run: |
+          # Read token from file if available
+          IDENTITY_TOKEN=""
+          if [ -n "${{ steps.identity.outputs.TOKEN_FILE }}" ] && [ -f "${{ steps.identity.outputs.TOKEN_FILE }}" ]; then
+            IDENTITY_TOKEN=$(cat "${{ steps.identity.outputs.TOKEN_FILE }}")
+            echo "Using identity token from file"
+          fi
+
           docker run --rm \
             -e DATABASE_URL="${{ steps.secrets.outputs.DATABASE_URL }}" \
             -e EMBEDDINGS_API_URL="https://destaquesgovbr-embeddings-api-990583792367.southamerica-east1.run.app" \
             -e EMBEDDINGS_API_KEY="${{ steps.secrets.outputs.EMBEDDINGS_API_KEY }}" \
-            -e EMBEDDINGS_IDENTITY_TOKEN="${{ steps.identity.outputs.IDENTITY_TOKEN }}" \
+            -e EMBEDDINGS_IDENTITY_TOKEN="$IDENTITY_TOKEN" \
             -e GOOGLE_APPLICATION_CREDENTIALS=/gcp/creds.json \
             -v "$GOOGLE_APPLICATION_CREDENTIALS:/gcp/creds.json:ro" \
             ghcr.io/destaquesgovbr/data-platform:latest \
