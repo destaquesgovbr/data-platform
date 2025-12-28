@@ -496,6 +496,159 @@ class PostgresManager:
             cursor.close()
             self.put_connection(conn)
 
+    def _build_typesense_query(self, include_embeddings: bool = True) -> str:
+        """
+        Build the SQL query for Typesense data fetching.
+
+        Args:
+            include_embeddings: Include content_embedding field
+
+        Returns:
+            SQL query string (without WHERE clause parameters)
+        """
+        query = """
+            SELECT
+                n.unique_id,
+                n.agency_key as agency,
+                n.title,
+                n.url,
+                n.image_url as image,
+                n.category,
+                n.content,
+                n.summary,
+                n.subtitle,
+                n.editorial_lead,
+                EXTRACT(EPOCH FROM n.published_at)::bigint as published_at_ts,
+                EXTRACT(EPOCH FROM n.extracted_at)::bigint as extracted_at_ts,
+                EXTRACT(YEAR FROM n.published_at)::int as published_year,
+                EXTRACT(MONTH FROM n.published_at)::int as published_month,
+                t1.code as theme_1_level_1_code,
+                t1.label as theme_1_level_1_label,
+                t2.code as theme_1_level_2_code,
+                t2.label as theme_1_level_2_label,
+                t3.code as theme_1_level_3_code,
+                t3.label as theme_1_level_3_label,
+                tm.code as most_specific_theme_code,
+                tm.label as most_specific_theme_label,
+                n.tags
+        """
+
+        if include_embeddings:
+            query += ",\n                n.content_embedding"
+
+        query += """
+            FROM news n
+            LEFT JOIN themes t1 ON n.theme_l1_id = t1.id
+            LEFT JOIN themes t2 ON n.theme_l2_id = t2.id
+            LEFT JOIN themes t3 ON n.theme_l3_id = t3.id
+            LEFT JOIN themes tm ON n.most_specific_theme_id = tm.id
+        """
+
+        return query
+
+    def count_news_for_typesense(
+        self,
+        start_date: str,
+        end_date: Optional[str] = None,
+    ) -> int:
+        """
+        Count news records for a date range.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD), defaults to start_date
+
+        Returns:
+            Number of records in the date range
+        """
+        end_date = end_date or start_date
+        conn = self.get_connection()
+
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM news
+                    WHERE published_at >= %s
+                      AND published_at < %s::date + INTERVAL '1 day'
+                    """,
+                    [start_date, end_date],
+                )
+                return cur.fetchone()[0]
+        finally:
+            self.put_connection(conn)
+
+    def iter_news_for_typesense(
+        self,
+        start_date: str,
+        end_date: Optional[str] = None,
+        include_embeddings: bool = True,
+        batch_size: int = 5000,
+    ):
+        """
+        Iterate over news in batches for memory-efficient Typesense indexing.
+
+        This method yields DataFrames in batches to avoid loading all data
+        into memory at once, which is important for large datasets (300k+ records).
+
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD), defaults to start_date
+            include_embeddings: Include content_embedding field
+            batch_size: Number of records per batch (default: 5000)
+
+        Yields:
+            DataFrame batches with news data ready for Typesense indexing
+        """
+        import pandas as pd
+
+        end_date = end_date or start_date
+
+        # Get total count first
+        total_count = self.count_news_for_typesense(start_date, end_date)
+        logger.info(
+            f"Total news to fetch for Typesense: {total_count} "
+            f"(date range: {start_date} to {end_date})"
+        )
+
+        if total_count == 0:
+            return
+
+        # Build base query
+        base_query = self._build_typesense_query(include_embeddings)
+        base_query += """
+            WHERE n.published_at >= %s
+              AND n.published_at < %s::date + INTERVAL '1 day'
+            ORDER BY n.published_at DESC
+            LIMIT %s OFFSET %s
+        """
+
+        offset = 0
+        batch_num = 0
+
+        while offset < total_count:
+            conn = self.get_connection()
+            try:
+                params = [start_date, end_date, batch_size, offset]
+                df = pd.read_sql_query(base_query, conn, params=params)
+
+                if df.empty:
+                    break
+
+                batch_num += 1
+                logger.info(
+                    f"Fetched batch {batch_num}: {len(df)} records "
+                    f"(offset: {offset}, total: {total_count})"
+                )
+
+                yield df
+
+                offset += batch_size
+
+            finally:
+                self.put_connection(conn)
+
     def get_news_for_typesense(
         self,
         start_date: str,
@@ -505,6 +658,9 @@ class PostgresManager:
     ) -> "pd.DataFrame":
         """
         Get news with theme labels for Typesense indexing.
+
+        WARNING: This method loads all data into memory at once.
+        For large datasets, use iter_news_for_typesense() instead.
 
         Args:
             start_date: Start date (YYYY-MM-DD)
@@ -522,43 +678,9 @@ class PostgresManager:
         conn = self.get_connection()
 
         try:
-            # Query with JOINs to get theme labels
-            query = """
-                SELECT
-                    n.unique_id,
-                    n.agency_key as agency,
-                    n.title,
-                    n.url,
-                    n.image_url as image,
-                    n.category,
-                    n.content,
-                    n.summary,
-                    n.subtitle,
-                    n.editorial_lead,
-                    EXTRACT(EPOCH FROM n.published_at)::bigint as published_at_ts,
-                    EXTRACT(EPOCH FROM n.extracted_at)::bigint as extracted_at_ts,
-                    EXTRACT(YEAR FROM n.published_at)::int as published_year,
-                    EXTRACT(MONTH FROM n.published_at)::int as published_month,
-                    t1.code as theme_1_level_1_code,
-                    t1.label as theme_1_level_1_label,
-                    t2.code as theme_1_level_2_code,
-                    t2.label as theme_1_level_2_label,
-                    t3.code as theme_1_level_3_code,
-                    t3.label as theme_1_level_3_label,
-                    tm.code as most_specific_theme_code,
-                    tm.label as most_specific_theme_label,
-                    n.tags
-            """
-
-            if include_embeddings:
-                query += ",\n                    n.content_embedding"
-
+            # Build query
+            query = self._build_typesense_query(include_embeddings)
             query += """
-                FROM news n
-                LEFT JOIN themes t1 ON n.theme_l1_id = t1.id
-                LEFT JOIN themes t2 ON n.theme_l2_id = t2.id
-                LEFT JOIN themes t3 ON n.theme_l3_id = t3.id
-                LEFT JOIN themes tm ON n.most_specific_theme_id = tm.id
                 WHERE n.published_at >= %s
                   AND n.published_at < %s::date + INTERVAL '1 day'
                 ORDER BY n.published_at DESC
