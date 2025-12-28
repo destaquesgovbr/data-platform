@@ -496,6 +496,92 @@ class PostgresManager:
             cursor.close()
             self.put_connection(conn)
 
+    def get_news_for_typesense(
+        self,
+        start_date: str,
+        end_date: Optional[str] = None,
+        include_embeddings: bool = True,
+        limit: Optional[int] = None,
+    ) -> "pd.DataFrame":
+        """
+        Get news with theme labels for Typesense indexing.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD), defaults to start_date
+            include_embeddings: Include content_embedding field
+            limit: Maximum number of records
+
+        Returns:
+            DataFrame with news data ready for Typesense indexing
+        """
+        import pandas as pd
+
+        end_date = end_date or start_date
+
+        conn = self.get_connection()
+
+        try:
+            # Query with JOINs to get theme labels
+            query = """
+                SELECT
+                    n.unique_id,
+                    n.agency_key as agency,
+                    n.title,
+                    n.url,
+                    n.image_url as image,
+                    n.category,
+                    n.content,
+                    n.summary,
+                    n.subtitle,
+                    n.editorial_lead,
+                    EXTRACT(EPOCH FROM n.published_at)::bigint as published_at_ts,
+                    EXTRACT(EPOCH FROM n.extracted_at)::bigint as extracted_at_ts,
+                    EXTRACT(YEAR FROM n.published_at)::int as published_year,
+                    EXTRACT(MONTH FROM n.published_at)::int as published_month,
+                    t1.code as theme_1_level_1_code,
+                    t1.label as theme_1_level_1_label,
+                    t2.code as theme_1_level_2_code,
+                    t2.label as theme_1_level_2_label,
+                    t3.code as theme_1_level_3_code,
+                    t3.label as theme_1_level_3_label,
+                    tm.code as most_specific_theme_code,
+                    tm.label as most_specific_theme_label,
+                    n.tags
+            """
+
+            if include_embeddings:
+                query += ",\n                    n.content_embedding"
+
+            query += """
+                FROM news n
+                LEFT JOIN themes t1 ON n.theme_l1_id = t1.id
+                LEFT JOIN themes t2 ON n.theme_l2_id = t2.id
+                LEFT JOIN themes t3 ON n.theme_l3_id = t3.id
+                LEFT JOIN themes tm ON n.most_specific_theme_id = tm.id
+                WHERE n.published_at >= %s
+                  AND n.published_at < %s::date + INTERVAL '1 day'
+                ORDER BY n.published_at DESC
+            """
+
+            params = [start_date, end_date]
+
+            if limit:
+                query += " LIMIT %s"
+                params.append(limit)
+
+            df = pd.read_sql_query(query, conn, params=params)
+
+            logger.info(
+                f"Fetched {len(df)} news for Typesense "
+                f"(date range: {start_date} to {end_date})"
+            )
+
+            return df
+
+        finally:
+            self.put_connection(conn)
+
     def __enter__(self):
         """Context manager entry."""
         return self
