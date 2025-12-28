@@ -39,7 +39,6 @@ class EmbeddingGenerator:
         database_url: Optional[str] = None,
         api_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        identity_token: Optional[str] = None,
     ):
         """
         Initialize the embedding generator.
@@ -48,8 +47,6 @@ class EmbeddingGenerator:
             database_url: PostgreSQL connection string. If None, reads from DATABASE_URL env var.
             api_url: Embeddings API URL. If None, reads from EMBEDDINGS_API_URL env var.
             api_key: API key for authentication. If None, reads from EMBEDDINGS_API_KEY env var.
-            identity_token: Pre-fetched identity token for Cloud Run auth. If None, reads from
-                           EMBEDDINGS_IDENTITY_TOKEN env var or fetches dynamically via ADC.
         """
         self.database_url = database_url or os.getenv("DATABASE_URL")
         if not self.database_url:
@@ -62,55 +59,6 @@ class EmbeddingGenerator:
         self.api_key = api_key or os.getenv("EMBEDDINGS_API_KEY")
         if not self.api_key:
             raise ValueError("EMBEDDINGS_API_KEY environment variable is required")
-
-        # Identity token for Cloud Run IAM auth (can be pre-fetched or fetched dynamically)
-        self._identity_token: Optional[str] = identity_token or os.getenv("EMBEDDINGS_IDENTITY_TOKEN")
-
-    def _get_identity_token(self) -> str:
-        """
-        Get Google Cloud identity token for Cloud Run authentication.
-
-        Uses Application Default Credentials (ADC) to get an identity token.
-        In GitHub Actions, this uses Workload Identity Federation.
-        Locally, uses gcloud credentials.
-        """
-        if self._identity_token:
-            return self._identity_token
-
-        try:
-            import google.auth
-            import google.auth.transport.requests
-            from google.oauth2 import id_token
-
-            # Get credentials and make a request to get identity token
-            request = google.auth.transport.requests.Request()
-
-            # Get ID token for the target audience (the API URL)
-            self._identity_token = id_token.fetch_id_token(request, self.api_url)
-            logger.debug("Successfully obtained identity token for Cloud Run auth")
-
-            return self._identity_token
-
-        except Exception as e:
-            logger.warning(f"Failed to get identity token via ADC: {e}")
-            logger.info("Trying to get identity token from metadata server...")
-
-            # Fallback: try metadata server (for Cloud Run, GCE, etc.)
-            try:
-                with httpx.Client(timeout=5) as client:
-                    response = client.get(
-                        "http://metadata.google.internal/computeMetadata/v1/instance/"
-                        f"service-accounts/default/identity?audience={self.api_url}",
-                        headers={"Metadata-Flavor": "Google"}
-                    )
-                    response.raise_for_status()
-                    self._identity_token = response.text
-                    return self._identity_token
-            except Exception as e2:
-                logger.error(f"Failed to get identity token from metadata server: {e2}")
-                raise RuntimeError(
-                    "Could not obtain identity token. Ensure you have valid Google Cloud credentials."
-                ) from e2
 
     def _get_connection(self):
         """Get a PostgreSQL connection."""
@@ -215,16 +163,12 @@ class EmbeddingGenerator:
         Returns:
             numpy array of shape (len(texts), 768)
         """
-        # Get identity token for Cloud Run IAM authentication
-        identity_token = self._get_identity_token()
-
         # Call the embeddings API
         with httpx.Client(timeout=self.API_TIMEOUT) as client:
             response = client.post(
                 f"{self.api_url.rstrip('/')}/generate",
                 json={"texts": texts},
                 headers={
-                    "Authorization": f"Bearer {identity_token}",
                     "X-API-Key": self.api_key,
                     "Content-Type": "application/json",
                 },

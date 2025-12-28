@@ -1,11 +1,20 @@
 -- DestaquesGovBR PostgreSQL Schema
--- Version: 1.1
+-- Version: 1.2
 -- Database: destaquesgovbr
 -- Encoding: UTF-8
 -- Timezone: UTC
 --
 -- Migration from HuggingFace Dataset to Cloud SQL PostgreSQL
 -- This schema supports ~300k news records with normalized agencies and themes
+--
+-- NOTE: The canonical schema is in docker/postgres/init.sql
+-- This file should stay synchronized with init.sql
+
+-- =============================================================================
+-- EXTENSIONS
+-- =============================================================================
+-- Enable pgvector extension for semantic embeddings
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- =============================================================================
 -- TABLE: agencies
@@ -107,7 +116,11 @@ CREATE TABLE news (
 
     -- Denormalized fields (for query performance)
     agency_key VARCHAR(100),
-    agency_name VARCHAR(500)
+    agency_name VARCHAR(500),
+
+    -- Embeddings (Phase 4.7)
+    content_embedding vector(768),
+    embedding_generated_at TIMESTAMP WITH TIME ZONE
 );
 
 COMMENT ON TABLE news IS 'Main news storage (migrated from HuggingFace Dataset)';
@@ -117,6 +130,8 @@ COMMENT ON COLUMN news.summary IS 'AI-generated summary from Cogfy';
 COMMENT ON COLUMN news.video_url IS 'Video URL if available';
 COMMENT ON COLUMN news.agency_key IS 'Denormalized agency.key for performance';
 COMMENT ON COLUMN news.agency_name IS 'Denormalized agency.name for performance';
+COMMENT ON COLUMN news.content_embedding IS 'Semantic embedding vector (768 dims)';
+COMMENT ON COLUMN news.embedding_generated_at IS 'Timestamp when embedding was generated';
 
 -- Primary lookup index
 CREATE UNIQUE INDEX idx_news_unique_id ON news(unique_id);
@@ -141,6 +156,17 @@ CREATE INDEX idx_news_date_range ON news(published_at)
 -- Full-text search (PostgreSQL Portuguese support)
 CREATE INDEX idx_news_fts ON news
     USING GIN (to_tsvector('portuguese', title || ' ' || COALESCE(content, '')));
+
+-- Embedding indexes (Phase 4.7)
+-- HNSW index for fast cosine similarity search
+CREATE INDEX idx_news_content_embedding_hnsw
+ON news USING hnsw (content_embedding vector_cosine_ops)
+WITH (m = 16, ef_construction = 64);
+
+-- Index for finding records without embeddings
+CREATE INDEX idx_news_embedding_status
+ON news (embedding_generated_at)
+WHERE content_embedding IS NULL;
 
 -- =============================================================================
 -- TABLE: sync_log
@@ -291,7 +317,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 INSERT INTO schema_version (version, description)
-VALUES ('1.1', 'Schema for DestaquesGovBR data platform - added video_url, removed synced_to_hf_at');
+VALUES ('1.2', 'Added content_embedding and embedding_generated_at columns for semantic search');
 
 -- =============================================================================
 -- COMPLETION MESSAGE
@@ -301,7 +327,7 @@ DO $$
 BEGIN
     RAISE NOTICE '';
     RAISE NOTICE '========================================';
-    RAISE NOTICE 'DestaquesGovBR Schema v1.1 - READY';
+    RAISE NOTICE 'DestaquesGovBR Schema v1.2 - READY';
     RAISE NOTICE '========================================';
     RAISE NOTICE '';
     RAISE NOTICE 'Next steps:';
