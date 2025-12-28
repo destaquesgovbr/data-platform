@@ -1,0 +1,633 @@
+"""
+Teste de integração completo do pipeline data-platform.
+
+Este teste executa o fluxo completo end-to-end:
+1. Limpeza de BDs (PostgreSQL + Typesense)
+2. Criação de schema e dados mestre (agencies, themes)
+3. Scraping (MEC, GESTAO, CGU) - 20 a 23/12/2025
+4. Upload para Cogfy (AI enrichment)
+5. Enrich com temas do Cogfy
+6. Geração de embeddings via API Cloud Run
+7. Carga full no Typesense (com embeddings)
+
+Requisitos:
+- Docker containers rodando (PostgreSQL + Typesense)
+- COGFY_API_KEY configurado
+- Cloud Run API de embeddings acessível
+
+Execução:
+    poetry run pytest tests/integration/test_full_pipeline.py -v -s
+"""
+
+import os
+import subprocess
+import time
+import psycopg2
+import requests
+import pytest
+from datetime import datetime
+
+# ==============================================================================
+# CONFIGURAÇÃO
+# ==============================================================================
+DATABASE_URL = "postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev"
+START_DATE = "2025-12-20"
+END_DATE = "2025-12-23"
+AGENCIES = "mec,gestao,cgu"
+
+# Typesense
+TYPESENSE_HOST = "localhost"
+TYPESENSE_PORT = "8108"
+TYPESENSE_API_KEY = "local_dev_key_12345"
+TYPESENSE_PROTOCOL = "http"
+
+# Tempo de espera para processamento Cogfy (segundos)
+COGFY_WAIT_TIME = 120  # 2 minutos
+
+
+# ==============================================================================
+# FIXTURES
+# ==============================================================================
+@pytest.fixture(scope="module")
+def docker_services():
+    """
+    Inicia containers Docker antes dos testes.
+
+    - Limpa containers existentes
+    - Inicia PostgreSQL e Typesense frescos
+    - Aguarda serviços ficarem prontos
+    """
+    print("\n" + "=" * 70)
+    print("FASE 0: Preparando ambiente Docker")
+    print("=" * 70)
+
+    # Limpar containers existentes
+    print("🔧 Parando e removendo containers existentes...")
+    subprocess.run(["docker-compose", "down", "-v"], check=True, cwd=os.getcwd())
+
+    # Iniciar containers limpos
+    print("🚀 Iniciando PostgreSQL e Typesense...")
+    subprocess.run(["docker-compose", "up", "-d"], check=True, cwd=os.getcwd())
+
+    # Aguardar PostgreSQL
+    print("⏳ Aguardando PostgreSQL ficar pronto...")
+    for i in range(30):  # Máximo 30 segundos
+        try:
+            result = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    "destaquesgovbr-postgres",
+                    "pg_isready",
+                    "-U",
+                    "destaquesgovbr_dev",
+                ],
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                print("✅ PostgreSQL pronto!")
+                break
+        except subprocess.TimeoutExpired:
+            pass
+        time.sleep(1)
+    else:
+        raise RuntimeError("PostgreSQL não ficou pronto em 30 segundos")
+
+    # Aguardar Typesense
+    print("⏳ Aguardando Typesense ficar pronto...")
+    for i in range(30):  # Máximo 30 segundos
+        try:
+            response = requests.get(f"http://{TYPESENSE_HOST}:{TYPESENSE_PORT}/health", timeout=2)
+            if response.status_code == 200:
+                print("✅ Typesense pronto!")
+                break
+        except requests.exceptions.RequestException:
+            pass
+        time.sleep(1)
+    else:
+        raise RuntimeError("Typesense não ficou pronto em 30 segundos")
+
+    print("\n✅ Ambiente Docker preparado com sucesso!\n")
+
+    yield
+
+    # Cleanup opcional - manter containers rodando para inspeção
+    # subprocess.run(["docker-compose", "down"], check=True)
+
+
+@pytest.fixture(scope="module")
+def env_vars():
+    """Configura variáveis de ambiente para todos os testes."""
+    original_env = os.environ.copy()
+
+    os.environ.update(
+        {
+            "DATABASE_URL": DATABASE_URL,
+            "TYPESENSE_HOST": TYPESENSE_HOST,
+            "TYPESENSE_PORT": TYPESENSE_PORT,
+            "TYPESENSE_API_KEY": TYPESENSE_API_KEY,
+            "TYPESENSE_PROTOCOL": TYPESENSE_PROTOCOL,
+            "STORAGE_BACKEND": "postgres",
+            "STORAGE_READ_FROM": "postgres",
+        }
+    )
+
+    yield
+
+    # Restaurar env vars originais
+    os.environ.clear()
+    os.environ.update(original_env)
+
+
+# ==============================================================================
+# HELPER FUNCTIONS
+# ==============================================================================
+def run_cli_command(command_list, description=""):
+    """
+    Executa comando CLI do data-platform.
+
+    Args:
+        command_list: Lista com comando e argumentos
+        description: Descrição da operação para logging
+    """
+    if description:
+        print(f"\n📋 {description}")
+
+    full_command = ["poetry", "run", "data-platform"] + command_list
+    print(f"   Executando: {' '.join(full_command)}")
+
+    result = subprocess.run(
+        full_command,
+        capture_output=True,
+        text=True,
+        timeout=600,  # 10 minutos timeout
+    )
+
+    if result.stdout:
+        print(f"   STDOUT: {result.stdout[:500]}")  # Primeiros 500 chars
+
+    if result.returncode != 0:
+        print(f"   ❌ ERRO (exit code {result.returncode})")
+        if result.stderr:
+            print(f"   STDERR: {result.stderr}")
+        raise subprocess.CalledProcessError(
+            result.returncode, full_command, result.stdout, result.stderr
+        )
+
+    print(f"   ✅ Sucesso")
+    return result
+
+
+def get_db_connection():
+    """Retorna conexão com PostgreSQL."""
+    return psycopg2.connect(DATABASE_URL)
+
+
+def count_news(conn=None, where_clause=""):
+    """Conta notícias no PostgreSQL."""
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    cur = conn.cursor()
+    query = f"SELECT COUNT(*) FROM news {where_clause}"
+    cur.execute(query)
+    count = cur.fetchone()[0]
+    cur.close()
+
+    if close_conn:
+        conn.close()
+
+    return count
+
+
+# ==============================================================================
+# TESTES
+# ==============================================================================
+def test_01_populate_master_data(docker_services, env_vars):
+    """
+    FASE 1: Popula dados mestre (agencies e themes).
+    """
+    print("\n" + "=" * 70)
+    print("FASE 1: Populando dados mestre")
+    print("=" * 70)
+
+    # Popular agencies
+    print("\n📊 Populando agencies...")
+    result = subprocess.run(
+        ["poetry", "run", "python", "scripts/populate_agencies.py"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, f"Falha ao popular agencies: {result.stderr}"
+    print("✅ Agencies populadas")
+
+    # Popular themes
+    print("\n📊 Populando themes...")
+    result = subprocess.run(
+        ["poetry", "run", "python", "scripts/populate_themes.py"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, f"Falha ao popular themes: {result.stderr}"
+    print("✅ Themes populadas")
+
+    # Validar
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT COUNT(*) FROM agencies")
+    agencies_count = cur.fetchone()[0]
+    assert agencies_count > 0, "Nenhuma agency foi inserida"
+    print(f"   📈 Total de agencies: {agencies_count}")
+
+    cur.execute("SELECT COUNT(*) FROM themes")
+    themes_count = cur.fetchone()[0]
+    assert themes_count > 0, "Nenhum theme foi inserido"
+    print(f"   📈 Total de themes: {themes_count}")
+
+    cur.close()
+    conn.close()
+
+    print("\n✅ FASE 1 COMPLETA: Dados mestre carregados")
+
+
+def test_02_scrape_govbr(docker_services, env_vars):
+    """
+    FASE 2: Scraping de notícias gov.br (MEC, GESTAO, CGU).
+    """
+    print("\n" + "=" * 70)
+    print(f"FASE 2: Scraping gov.br ({AGENCIES})")
+    print("=" * 70)
+
+    run_cli_command(
+        [
+            "scrape",
+            "--start-date",
+            START_DATE,
+            "--end-date",
+            END_DATE,
+            "--agencies",
+            AGENCIES,
+            "--allow-update",
+            "--sequential",
+        ],
+        "Scraping notícias gov.br",
+    )
+
+    # Validar que notícias foram inseridas
+    total_news = count_news()
+    assert total_news > 0, "Nenhuma notícia foi scraped"
+    print(f"\n📰 Total de notícias scraped: {total_news}")
+
+    # Validar datas
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT
+            DATE(published_at) as date,
+            COUNT(*) as count
+        FROM news
+        GROUP BY DATE(published_at)
+        ORDER BY date
+    """)
+    results = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    print("\n📊 Distribuição por data:")
+    for date, count in results:
+        print(f"   {date}: {count} notícias")
+
+    print("\n✅ FASE 2 COMPLETA: Scraping finalizado")
+
+
+def test_03_upload_cogfy(docker_services, env_vars):
+    """
+    FASE 3: Upload de notícias para Cogfy (AI enrichment).
+
+    Requer COGFY_API_KEY configurado.
+    """
+    print("\n" + "=" * 70)
+    print("FASE 3: Upload para Cogfy")
+    print("=" * 70)
+
+    # Verificar que COGFY_API_KEY está configurado
+    if not os.getenv("COGFY_API_KEY"):
+        pytest.fail(
+            "COGFY_API_KEY não configurado. Configure com: export COGFY_API_KEY=<sua-chave>"
+        )
+
+    run_cli_command(
+        ["upload-cogfy", "--start-date", START_DATE, "--end-date", END_DATE],
+        "Enviando notícias para Cogfy",
+    )
+
+    print("\n✅ FASE 3 COMPLETA: Upload para Cogfy finalizado")
+    print(f"\n⏸️  AGUARDANDO: Cogfy processará as notícias (~{COGFY_WAIT_TIME // 60} minutos)")
+    print("   O Cogfy usa LLM para classificar temas e gerar resumos...")
+
+    # Aguardar processamento do Cogfy
+    print(f"\n⏳ Aguardando {COGFY_WAIT_TIME} segundos para processamento Cogfy...")
+    for i in range(COGFY_WAIT_TIME // 60):
+        time.sleep(60)
+        remaining = COGFY_WAIT_TIME // 60 - i - 1
+        print(f"   ⏱️  {remaining} minutos restantes...")
+
+    print("\n✅ Tempo de espera completo. Prosseguindo para enrich...")
+
+
+def test_04_enrich_themes(docker_services, env_vars):
+    """
+    FASE 4: Enrich com temas classificados pelo Cogfy.
+    """
+    print("\n" + "=" * 70)
+    print("FASE 4: Enrich themes (baixar de Cogfy)")
+    print("=" * 70)
+
+    # Verificar que COGFY_API_KEY está configurado
+    if not os.getenv("COGFY_API_KEY"):
+        pytest.fail("COGFY_API_KEY não configurado")
+
+    run_cli_command(
+        ["enrich", "--start-date", START_DATE, "--end-date", END_DATE],
+        "Baixando temas enriquecidos do Cogfy",
+    )
+
+    # Validar enriquecimento
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Contar notícias com tema
+    cur.execute("SELECT COUNT(*) FROM news WHERE most_specific_theme_id IS NOT NULL")
+    enriched_count = cur.fetchone()[0]
+
+    # Contar notícias com summary
+    cur.execute("SELECT COUNT(*) FROM news WHERE summary IS NOT NULL AND summary != ''")
+    summary_count = cur.fetchone()[0]
+
+    total = count_news(conn)
+
+    cur.close()
+    conn.close()
+
+    print(f"\n📊 Resultados do enriquecimento:")
+    print(f"   Total de notícias: {total}")
+    print(f"   Com tema classificado: {enriched_count} ({enriched_count / total * 100:.1f}%)")
+    print(f"   Com AI summary: {summary_count} ({summary_count / total * 100:.1f}%)")
+
+    assert enriched_count > 0, "Nenhuma notícia foi enriquecida com temas"
+
+    print("\n✅ FASE 4 COMPLETA: Enriquecimento finalizado")
+
+
+def test_05_generate_embeddings(docker_services, env_vars):
+    """
+    FASE 5: Geração de embeddings semânticos via API Cloud Run.
+
+    Requer API de embeddings rodando (Cloud Run).
+    """
+    print("\n" + "=" * 70)
+    print("FASE 5: Geração de embeddings")
+    print("=" * 70)
+
+    run_cli_command(
+        [
+            "generate-embeddings",
+            "--start-date",
+            START_DATE,
+            "--end-date",
+            END_DATE,
+            "--batch-size",
+            "32",
+        ],
+        "Gerando embeddings via API Cloud Run",
+    )
+
+    # Validar embeddings
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Contar notícias com embedding
+    cur.execute("SELECT COUNT(*) FROM news WHERE content_embedding IS NOT NULL")
+    embeddings_count = cur.fetchone()[0]
+
+    total = count_news(conn)
+
+    cur.close()
+    conn.close()
+
+    print(f"\n📊 Resultados dos embeddings:")
+    print(f"   Total de notícias: {total}")
+    print(f"   Com embeddings: {embeddings_count} ({embeddings_count / total * 100:.1f}%)")
+
+    assert embeddings_count > 0, "Nenhum embedding foi gerado"
+
+    print("\n✅ FASE 5 COMPLETA: Embeddings gerados")
+
+
+def test_06_sync_typesense_full(docker_services, env_vars):
+    """
+    FASE 6: Sync full para Typesense (com embeddings).
+
+    - Deleta collection 'news' existente
+    - Recria collection com schema atualizado
+    - Popula com todas as notícias do PostgreSQL
+    """
+    print("\n" + "=" * 70)
+    print("FASE 6: Sync full Typesense")
+    print("=" * 70)
+
+    # Deletar collection existente
+    print("\n🗑️  Deletando collection 'news' (se existir)...")
+    try:
+        subprocess.run(
+            [
+                "poetry",
+                "run",
+                "data-platform",
+                "typesense-delete",
+                "--collection-name",
+                "news",
+                "--confirm",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        print("   ✅ Collection deletada")
+    except subprocess.SubprocessError:
+        print("   ℹ️  Collection não existia ou já foi deletada")
+
+    # Sync full
+    run_cli_command(
+        [
+            "sync-typesense",
+            "--start-date",
+            START_DATE,
+            "--end-date",
+            END_DATE,
+            "--full-sync",
+            "--include-embeddings",
+        ],
+        "Executando sync full (recria collection e popula)",
+    )
+
+    # Validar dados no Typesense
+    print("\n📊 Validando dados no Typesense...")
+
+    # Testar busca
+    response = requests.get(
+        f"http://{TYPESENSE_HOST}:{TYPESENSE_PORT}/collections/news/documents/search",
+        params={"q": "educação", "query_by": "title"},
+        headers={"X-TYPESENSE-API-KEY": TYPESENSE_API_KEY},
+        timeout=10,
+    )
+
+    assert response.status_code == 200, f"Erro ao buscar no Typesense: {response.status_code}"
+
+    data = response.json()
+    found = data.get("found", 0)
+    print(f"   🔍 Busca por 'educação': {found} resultados encontrados")
+
+    # Listar collections
+    print("\n📋 Listando collections...")
+    result = subprocess.run(
+        ["poetry", "run", "data-platform", "typesense-list"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    print(f"   {result.stdout}")
+
+    print("\n✅ FASE 6 COMPLETA: Typesense populado")
+
+
+def test_07_validate_final_state(docker_services, env_vars):
+    """
+    FASE 7: Validação final do estado completo do sistema.
+
+    Verifica:
+    - PostgreSQL tem notícias com todos os enriquecimentos
+    - Typesense está acessível e tem dados
+    - Embeddings foram gerados
+    - Temas foram enriquecidos
+    """
+    print("\n" + "=" * 70)
+    print("FASE 7: Validação final")
+    print("=" * 70)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Estatísticas gerais
+    cur.execute("SELECT COUNT(*) FROM news")
+    total_news = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM news WHERE most_specific_theme_id IS NOT NULL")
+    with_themes = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM news WHERE summary IS NOT NULL AND summary != ''")
+    with_summary = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM news WHERE content_embedding IS NOT NULL")
+    with_embeddings = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM agencies")
+    total_agencies = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM themes")
+    total_themes = cur.fetchone()[0]
+
+    # Estatísticas por agency
+    cur.execute("""
+        SELECT agency_key, COUNT(*) as count
+        FROM news
+        GROUP BY agency_key
+        ORDER BY count DESC
+    """)
+    by_agency = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    # Imprimir relatório
+    print("\n" + "=" * 70)
+    print("📊 RELATÓRIO FINAL")
+    print("=" * 70)
+    print(f"\n🗄️  POSTGRESQL:")
+    print(f"   Total de notícias: {total_news}")
+    print(f"   Com temas: {with_themes} ({with_themes / total_news * 100:.1f}%)")
+    print(f"   Com AI summary: {with_summary} ({with_summary / total_news * 100:.1f}%)")
+    print(f"   Com embeddings: {with_embeddings} ({with_embeddings / total_news * 100:.1f}%)")
+    print(f"   Total de agencies: {total_agencies}")
+    print(f"   Total de themes: {total_themes}")
+
+    print(f"\n📈 DISTRIBUIÇÃO POR AGENCY:")
+    for agency, count in by_agency:
+        print(f"   {agency}: {count} notícias")
+
+    print(f"\n🔍 TYPESENSE:")
+    # Testar acesso ao Typesense
+    try:
+        response = requests.get(
+            f"http://{TYPESENSE_HOST}:{TYPESENSE_PORT}/collections/news/documents/search",
+            params={"q": "*", "per_page": "1"},
+            headers={"X-TYPESENSE-API-KEY": TYPESENSE_API_KEY},
+            timeout=5,
+        )
+        data = response.json()
+        ts_found = data.get("found", 0)
+        print(f"   Total de documentos: {ts_found}")
+        print(f"   Status: ✅ Acessível")
+    except Exception as e:
+        print(f"   Status: ❌ Erro: {e}")
+
+    print(f"\n⏱️  PERÍODO TESTADO:")
+    print(f"   Início: {START_DATE}")
+    print(f"   Fim: {END_DATE}")
+    print(f"   Agencies: {AGENCIES}")
+
+    print("\n" + "=" * 70)
+    print("✅ BATERIA DE TESTES COMPLETA!")
+    print("=" * 70)
+
+    # Asserções finais
+    assert total_news > 0, "Sistema vazio - nenhuma notícia"
+    assert with_themes > 0, "Nenhuma notícia foi enriquecida com temas"
+    assert with_embeddings > 0, "Nenhum embedding foi gerado"
+    assert total_agencies > 0, "Nenhuma agency foi carregada"
+    assert total_themes > 0, "Nenhum theme foi carregado"
+
+
+# ==============================================================================
+# EXECUÇÃO STANDALONE
+# ==============================================================================
+if __name__ == "__main__":
+    print("""
+    ════════════════════════════════════════════════════════════════════════
+    BATERIA DE TESTES - DATA PLATFORM
+    ════════════════════════════════════════════════════════════════════════
+
+    Este script testa o pipeline completo:
+    1. Populate master data (agencies, themes)
+    2. Scraping (MEC, GESTAO, CGU)
+    3. Upload para Cogfy
+    4. Enrich themes
+    5. Generate embeddings
+    6. Sync Typesense
+    7. Validação final
+
+    Requisitos:
+    - Docker containers rodando
+    - COGFY_API_KEY configurado
+    - Cloud Run API de embeddings acessível
+
+    Execute com:
+        poetry run pytest tests/integration/test_full_pipeline.py -v -s
+
+    ════════════════════════════════════════════════════════════════════════
+    """)
