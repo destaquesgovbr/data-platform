@@ -117,6 +117,7 @@ jobs:
           COGFY_API_KEY: ${{ steps.secrets.outputs.COGFY_API_KEY }}
           EMBEDDINGS_API_URL: ${{ steps.secrets.outputs.EMBEDDINGS_API_URL }}
           EMBEDDINGS_API_KEY: ${{ steps.secrets.outputs.EMBEDDINGS_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           export PYTHONPATH=src
           poetry run pytest tests/integration/test_full_pipeline.py -v -s --tb=short
