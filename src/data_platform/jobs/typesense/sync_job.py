@@ -34,13 +34,13 @@ def sync_to_typesense(
     full_sync: bool = False,
     batch_size: int = DEFAULT_TS_BATCH_SIZE,
     pg_batch_size: int = DEFAULT_PG_BATCH_SIZE,
-    include_embeddings: bool = True,
     limit: int | None = None,
 ) -> dict[str, Any]:
     """
     Sincroniza notícias do PostgreSQL para Typesense.
 
     Processa dados em batches para evitar estouro de memória em datasets grandes.
+    Sempre inclui embeddings na indexação.
 
     Args:
         start_date: Data inicial (YYYY-MM-DD)
@@ -48,11 +48,10 @@ def sync_to_typesense(
         full_sync: Se True, força reindexação mesmo em coleção não vazia
         batch_size: Tamanho do lote para indexação no Typesense (default: 1000)
         pg_batch_size: Tamanho do lote para leitura do PostgreSQL (default: 5000)
-        include_embeddings: Se True, inclui embeddings na indexação
         limit: Número máximo de registros (para testes)
 
     Returns:
-        Dicionário com estatísticas:
+        Dicionário com estatísticas (sempre inclui embeddings):
             - total_fetched: Total de registros lidos do PostgreSQL
             - total_processed: Total de registros processados
             - total_indexed: Total de registros indexados com sucesso
@@ -105,7 +104,6 @@ def sync_to_typesense(
                 end_date=end_date,
                 full_sync=full_sync,
                 batch_size=batch_size,
-                include_embeddings=include_embeddings,
                 limit=limit,
             )
 
@@ -118,7 +116,6 @@ def sync_to_typesense(
         for df_batch in pg_manager.iter_news_for_typesense(
             start_date=start_date,
             end_date=end_date,
-            include_embeddings=include_embeddings,
             batch_size=pg_batch_size,
         ):
             batch_num += 1
@@ -174,18 +171,17 @@ def _sync_small_dataset(
     end_date: str,
     full_sync: bool,
     batch_size: int,
-    include_embeddings: bool,
     limit: int | None,
 ) -> dict[str, Any]:
     """
     Sincroniza datasets pequenos usando o método tradicional (tudo em memória).
 
     Usado quando limit é pequeno ou para datasets pequenos.
+    Sempre inclui embeddings.
     """
     df = pg_manager.get_news_for_typesense(
         start_date=start_date,
         end_date=end_date,
-        include_embeddings=include_embeddings,
         limit=limit,
     )
 

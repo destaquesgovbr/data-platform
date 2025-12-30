@@ -192,7 +192,6 @@ def sync_typesense(
     end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
     full_sync: bool = typer.Option(False, help="Force full sync (overwrite existing)"),
     batch_size: int = typer.Option(1000, help="Batch size for Typesense upsert"),
-    include_embeddings: bool = typer.Option(True, help="Include content embeddings"),
     max_records: Optional[int] = typer.Option(None, help="Max records to sync (for testing)"),
 ) -> None:
     """
@@ -200,18 +199,19 @@ def sync_typesense(
 
     Reads news with themes and embeddings from PostgreSQL and indexes them in Typesense.
     Supports incremental updates (upsert) and full reload.
+
+    Note: Always includes content embeddings in the sync.
     """
     from data_platform.jobs.typesense import sync_to_typesense
 
     logging.info(f"Syncing to Typesense from {start_date} to {end_date or start_date}")
-    logging.info(f"Mode: {'Full sync' if full_sync else 'Incremental'}, Embeddings: {include_embeddings}")
+    logging.info(f"Mode: {'Full sync' if full_sync else 'Incremental'}")
 
     stats = sync_to_typesense(
         start_date=start_date,
         end_date=end_date,
         full_sync=full_sync,
         batch_size=batch_size,
-        include_embeddings=include_embeddings,
         limit=max_records,
     )
 
