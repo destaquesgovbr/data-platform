@@ -513,6 +513,7 @@ class PostgresManager:
                 n.title,
                 n.url,
                 n.image_url as image,
+                n.video_url,
                 n.category,
                 n.content,
                 n.summary,

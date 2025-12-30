@@ -26,6 +26,7 @@ COLLECTION_SCHEMA: dict[str, Any] = {
         {"name": "title", "type": "string", "facet": False, "optional": True},
         {"name": "url", "type": "string", "facet": False, "optional": True},
         {"name": "image", "type": "string", "facet": False, "optional": True},
+        {"name": "video_url", "type": "string", "facet": False, "optional": True},
         {"name": "category", "type": "string", "facet": True, "optional": True},
         {"name": "content", "type": "string", "facet": False, "optional": True},
         {"name": "summary", "type": "string", "facet": False, "optional": True},
