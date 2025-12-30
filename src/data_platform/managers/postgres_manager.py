@@ -496,12 +496,11 @@ class PostgresManager:
             cursor.close()
             self.put_connection(conn)
 
-    def _build_typesense_query(self, include_embeddings: bool = True) -> str:
+    def _build_typesense_query(self) -> str:
         """
         Build the SQL query for Typesense data fetching.
 
-        Args:
-            include_embeddings: Include content_embedding field
+        Always includes content_embedding field.
 
         Returns:
             SQL query string (without WHERE clause parameters)
@@ -531,11 +530,9 @@ class PostgresManager:
                 t3.label as theme_1_level_3_label,
                 tm.code as most_specific_theme_code,
                 tm.label as most_specific_theme_label,
-                n.tags
+                n.tags,
+                n.content_embedding
         """
-
-        if include_embeddings:
-            query += ",\n                n.content_embedding"
 
         query += """
             FROM news n
@@ -584,7 +581,6 @@ class PostgresManager:
         self,
         start_date: str,
         end_date: Optional[str] = None,
-        include_embeddings: bool = True,
         batch_size: int = 5000,
     ):
         """
@@ -596,11 +592,10 @@ class PostgresManager:
         Args:
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD), defaults to start_date
-            include_embeddings: Include content_embedding field
             batch_size: Number of records per batch (default: 5000)
 
         Yields:
-            DataFrame batches with news data ready for Typesense indexing
+            DataFrame batches with news data ready for Typesense indexing (includes embeddings)
         """
         import pandas as pd
 
@@ -617,7 +612,7 @@ class PostgresManager:
             return
 
         # Build base query
-        base_query = self._build_typesense_query(include_embeddings)
+        base_query = self._build_typesense_query()
         base_query += """
             WHERE n.published_at >= %s
               AND n.published_at < %s::date + INTERVAL '1 day'
@@ -654,7 +649,6 @@ class PostgresManager:
         self,
         start_date: str,
         end_date: Optional[str] = None,
-        include_embeddings: bool = True,
         limit: Optional[int] = None,
     ) -> "pd.DataFrame":
         """
@@ -666,11 +660,10 @@ class PostgresManager:
         Args:
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD), defaults to start_date
-            include_embeddings: Include content_embedding field
             limit: Maximum number of records
 
         Returns:
-            DataFrame with news data ready for Typesense indexing
+            DataFrame with news data ready for Typesense indexing (includes embeddings)
         """
         import pandas as pd
 
@@ -680,7 +673,7 @@ class PostgresManager:
 
         try:
             # Build query
-            query = self._build_typesense_query(include_embeddings)
+            query = self._build_typesense_query()
             query += """
                 WHERE n.published_at >= %s
                   AND n.published_at < %s::date + INTERVAL '1 day'
