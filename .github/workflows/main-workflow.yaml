@@ -286,10 +286,88 @@ jobs:
             data-platform generate-embeddings --start-date "${{ needs.setup-dates.outputs.start_date }}" --end-date "${{ needs.setup-dates.outputs.end_date }}"
           echo "Embedding generation completed successfully"
 
+  typesense-sync:
+    name: Sync to Typesense
+    runs-on: ubuntu-latest
+    needs: [setup-dates, generate-embeddings]
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Fetch Typesense Config
+        id: typesense
+        uses: destaquesgovbr/reusable-workflows/actions/fetch-typesense-config@v1
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          secret_name: typesense-write-conn
+
+      - name: Fetch Database URL
+        id: database
+        run: |
+          DATABASE_URL=$(gcloud secrets versions access latest --secret=govbrnews-postgres-connection-string)
+          echo "::add-mask::$DATABASE_URL"
+          echo "url=$DATABASE_URL" >> $GITHUB_OUTPUT
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction --only main
+
+      - name: Sync data to Typesense
+        env:
+          TYPESENSE_HOST: ${{ steps.typesense.outputs.host }}
+          TYPESENSE_PORT: ${{ steps.typesense.outputs.port }}
+          TYPESENSE_API_KEY: ${{ steps.typesense.outputs.api_key }}
+          DATABASE_URL: ${{ steps.database.outputs.url }}
+        run: |
+          echo "📥 Syncing data to Typesense..."
+          echo "Date range: ${{ needs.setup-dates.outputs.start_date }} to ${{ needs.setup-dates.outputs.end_date }}"
+          poetry run data-platform sync-typesense \
+            --start-date "${{ needs.setup-dates.outputs.start_date }}" \
+            --end-date "${{ needs.setup-dates.outputs.end_date }}"
+          echo "✅ Typesense sync completed successfully"
+
+      - name: Trigger portal cache refresh
+        if: success()
+        run: |
+          echo "🔄 Triggering portal deployment to refresh cache..."
+          gcloud run services update destaquesgovbr-portal \
+            --region southamerica-east1 \
+            --update-env-vars "CACHE_BUST=$(date +%s)" \
+            --quiet
+
   pipeline-summary:
     name: Pipeline Summary
     runs-on: ubuntu-latest
-    needs: [setup-dates, scraper, ebc-scraper, upload-to-cogfy, enrich-themes, generate-embeddings]
+    needs: [setup-dates, scraper, ebc-scraper, upload-to-cogfy, enrich-themes, generate-embeddings, typesense-sync]
     if: always()
     steps:
       - name: Pipeline completion summary
@@ -301,13 +379,15 @@ jobs:
           echo "Upload status: ${{ needs.upload-to-cogfy.result }}"
           echo "Dataset enrichment status: ${{ needs.enrich-themes.result }}"
           echo "Embedding generation status: ${{ needs.generate-embeddings.result }}"
+          echo "Typesense sync status: ${{ needs.typesense-sync.result }}"
           echo "============================================"
 
           if [ "${{ needs.scraper.result }}" = "success" ] && \
              [ "${{ needs.ebc-scraper.result }}" = "success" ] && \
              [ "${{ needs.upload-to-cogfy.result }}" = "success" ] && \
              [ "${{ needs.enrich-themes.result }}" = "success" ] && \
-             [ "${{ needs.generate-embeddings.result }}" = "success" ]; then
+             [ "${{ needs.generate-embeddings.result }}" = "success" ] && \
+             [ "${{ needs.typesense-sync.result }}" = "success" ]; then
             echo "All pipeline stages completed successfully!"
             exit 0
           else
