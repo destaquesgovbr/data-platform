@@ -265,9 +265,19 @@ class EnrichmentManager:
             }
         return None
 
+    @retry(
+        exceptions=(Exception,),
+        tries=3,
+        delay=10,
+        backoff=2,
+        jitter=(1, 5)
+    )
     def _query_single_day(self, target_date: Union[str, datetime]) -> List[Dict]:
         """
         Query Cogfy for all records on a single day.
+
+        Retries up to 3 times with exponential backoff for transient errors
+        (504 Gateway Timeout, 502 Bad Gateway, etc).
 
         Args:
             target_date: Date to query for
@@ -276,7 +286,7 @@ class EnrichmentManager:
             List of records from Cogfy for that day
 
         Raises:
-            Exception: If the query fails for any reason
+            Exception: If the query fails after all retries
         """
         filters = self._build_single_day_filters(target_date)
         filter_criteria = self._build_filter_criteria(filters)
