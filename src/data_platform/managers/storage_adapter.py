@@ -403,6 +403,7 @@ class StorageAdapter:
         agency: Optional[str] = None,
     ) -> pd.DataFrame:
         """Get records from PostgreSQL with date range filtering."""
+        import json
         from psycopg2.extras import RealDictCursor
         from data_platform.models.news import News
 
@@ -425,6 +426,16 @@ class StorageAdapter:
 
             cursor.execute(query, params)
             rows = cursor.fetchall()
+
+            # Convert content_embedding from JSON string to list for Pydantic validation
+            for row in rows:
+                if row.get('content_embedding') and isinstance(row['content_embedding'], str):
+                    try:
+                        row['content_embedding'] = json.loads(row['content_embedding'])
+                    except (json.JSONDecodeError, TypeError):
+                        logger.warning(f"Failed to parse content_embedding for record {row.get('unique_id')}")
+                        row['content_embedding'] = None
+
             records = [News(**row) for row in rows]
         finally:
             cursor.close()
@@ -456,6 +467,8 @@ class StorageAdapter:
                 "theme_1_level_2_code": self._get_theme_code(record.theme_l2_id),
                 "theme_1_level_3_code": self._get_theme_code(record.theme_l3_id),
                 "most_specific_theme_code": self._get_theme_code(record.most_specific_theme_id),
+                "content_embedding": record.content_embedding,
+                "embedding_generated_at": record.embedding_generated_at,
             })
 
         return pd.DataFrame(data)
