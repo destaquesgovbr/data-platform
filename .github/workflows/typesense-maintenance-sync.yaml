@@ -1,20 +1,49 @@
-name: Typesense Full Data Reload
+name: Typesense Maintenance Sync
 
 on:
-  # Manual trigger only - this is a destructive operation
+  # Manual trigger only - for maintenance and special operations
   workflow_dispatch:
     inputs:
-      confirm_deletion:
-        description: 'Type "DELETE" to confirm collection deletion and full reload'
+      operation_type:
+        description: 'Type of maintenance operation'
         required: true
-        type: string
-      start_date:
-        description: 'Start date for data load (YYYY-MM-DD, default: 1900-01-01)'
+        type: choice
+        options:
+          - 'incremental-sync'
+          - 'full-reload'
+        default: 'incremental-sync'
+
+      confirm_deletion:
+        description: 'For full-reload: Type "DELETE" to confirm collection deletion'
         required: false
-        default: '1900-01-01'
         type: string
+        default: ''
+
+      start_date:
+        description: 'Start date for data sync (YYYY-MM-DD)'
+        required: true
+        default: '2024-01-01'
+        type: string
+
+      end_date:
+        description: 'End date for data sync (YYYY-MM-DD, default: today)'
+        required: false
+        type: string
+
+      batch_size:
+        description: 'Batch size for Typesense upsert operations'
+        required: false
+        default: '1000'
+        type: number
+
+      max_records:
+        description: 'Max records to sync (for testing, 0 = unlimited)'
+        required: false
+        default: '0'
+        type: number
+
       skip_portal_refresh:
-        description: 'Skip portal cache refresh after reload'
+        description: 'Skip portal cache refresh after sync'
         required: false
         default: false
         type: boolean
@@ -24,8 +53,8 @@ env:
   COLLECTION_NAME: 'news'
 
 jobs:
-  full-reload:
-    name: Delete Collection and Reload All Data
+  maintenance-sync:
+    name: Typesense Maintenance Sync
     runs-on: ubuntu-latest
 
     permissions:
@@ -34,13 +63,14 @@ jobs:
 
     steps:
       - name: Validate confirmation input
+        if: github.event.inputs.operation_type == 'full-reload'
         run: |
           if [ "${{ github.event.inputs.confirm_deletion }}" != "DELETE" ]; then
-            echo "❌ Confirmation failed. You must type 'DELETE' to proceed."
+            echo "❌ Confirmation failed. You must type 'DELETE' for full-reload."
             echo "   This operation will permanently delete the collection and reload all data."
             exit 1
           fi
-          echo "✅ Confirmation validated"
+          echo "✅ Confirmation validated for full-reload operation"
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -89,6 +119,7 @@ jobs:
           poetry install --no-interaction --only main
 
       - name: Delete existing collection
+        if: github.event.inputs.operation_type == 'full-reload'
         continue-on-error: true
         env:
           TYPESENSE_HOST: ${{ steps.typesense.outputs.host }}
@@ -102,7 +133,7 @@ jobs:
           else
             echo "⚠️  Collection deletion reported failure"
             echo "   This may be expected if collection doesn't exist"
-            echo "   Continuing with full load (will create new collection)..."
+            echo "   Continuing with data load (will create new collection)..."
           fi
 
           # Always succeed this step to allow workflow to continue
@@ -111,29 +142,51 @@ jobs:
       - name: Calculate date range
         id: dates
         run: |
-          START_DATE="${{ github.event.inputs.start_date || '2025-01-01' }}"
-          END_DATE=$(date +%Y-%m-%d)
+          START_DATE="${{ github.event.inputs.start_date }}"
+          END_DATE="${{ github.event.inputs.end_date }}"
+
+          if [ -z "$END_DATE" ]; then
+            END_DATE=$(date +%Y-%m-%d)
+          fi
+
           echo "start_date=$START_DATE" >> $GITHUB_OUTPUT
           echo "end_date=$END_DATE" >> $GITHUB_OUTPUT
-          echo "Loading data from $START_DATE to $END_DATE"
+          echo "📅 Date range: $START_DATE to $END_DATE"
 
-      - name: Run full data load
+      - name: Run data sync
         env:
           TYPESENSE_HOST: ${{ steps.typesense.outputs.host }}
           TYPESENSE_PORT: ${{ steps.typesense.outputs.port }}
           TYPESENSE_API_KEY: ${{ steps.typesense.outputs.api_key }}
           DATABASE_URL: ${{ steps.database.outputs.url }}
         run: |
-          echo "📥 Starting full data load from PostgreSQL..."
-          poetry run data-platform sync-typesense \
-            --start-date "${{ steps.dates.outputs.start_date }}" \
-            --end-date "${{ steps.dates.outputs.end_date }}" \
-            --full-sync
+          OPERATION="${{ github.event.inputs.operation_type }}"
+
+          if [ "$OPERATION" = "full-reload" ]; then
+            echo "📥 Starting FULL data reload from PostgreSQL..."
+            FULL_SYNC_FLAG="--full-sync"
+          else
+            echo "📥 Starting INCREMENTAL data sync from PostgreSQL..."
+            FULL_SYNC_FLAG=""
+          fi
+
+          CMD="poetry run data-platform sync-typesense \
+            --start-date \"${{ steps.dates.outputs.start_date }}\" \
+            --end-date \"${{ steps.dates.outputs.end_date }}\" \
+            --batch-size ${{ github.event.inputs.batch_size }} \
+            $FULL_SYNC_FLAG"
+
+          if [ "${{ github.event.inputs.max_records }}" != "0" ]; then
+            CMD="$CMD --max-records ${{ github.event.inputs.max_records }}"
+          fi
+
+          echo "Running: $CMD"
+          eval $CMD
 
           if [ $? -eq 0 ]; then
-            echo "✅ Full data load completed successfully"
+            echo "✅ Data sync completed successfully"
           else
-            echo "❌ Full data load failed"
+            echo "❌ Data sync failed"
             exit 1
           fi
 
@@ -160,18 +213,31 @@ jobs:
         run: |
           echo "================================"
           if [ ${{ job.status }} == 'success' ]; then
-            echo "✅ Full reload completed successfully"
+            OPERATION="${{ github.event.inputs.operation_type }}"
+
+            echo "✅ Maintenance sync completed successfully"
             echo ""
             echo "Summary:"
-            echo "  - Collection '${{ env.COLLECTION_NAME }}' deleted"
-            echo "  - All data reloaded from PostgreSQL"
+            echo "  - Operation type: $OPERATION"
+
+            if [ "$OPERATION" = "full-reload" ]; then
+              echo "  - Collection '${{ env.COLLECTION_NAME }}' deleted and recreated"
+            fi
+
             echo "  - Date range: ${{ steps.dates.outputs.start_date }} to ${{ steps.dates.outputs.end_date }}"
+            echo "  - Batch size: ${{ github.event.inputs.batch_size }}"
+
+            if [ "${{ github.event.inputs.max_records }}" != "0" ]; then
+              echo "  - Max records: ${{ github.event.inputs.max_records }}"
+            fi
+
             echo "  - Collection verified"
+
             if [ "${{ github.event.inputs.skip_portal_refresh }}" != "true" ]; then
               echo "  - Portal cache refreshed"
             fi
           else
-            echo "❌ Full reload failed"
+            echo "❌ Maintenance sync failed"
             echo ""
             echo "Check the logs above for details."
             exit 1
