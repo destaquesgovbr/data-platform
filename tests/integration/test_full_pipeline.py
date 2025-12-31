@@ -508,7 +508,7 @@ def test_06_sync_typesense_full(docker_services, env_vars):
     except subprocess.SubprocessError:
         print("   ℹ️  Collection não existia ou já foi deletada")
 
-    # Sync full
+    # Sync full (embeddings are always included now)
     run_cli_command(
         [
             "sync-typesense",
@@ -517,7 +517,6 @@ def test_06_sync_typesense_full(docker_services, env_vars):
             "--end-date",
             END_DATE,
             "--full-sync",
-            "--include-embeddings",
         ],
         "Executando sync full (recria collection e popula)",
     )
