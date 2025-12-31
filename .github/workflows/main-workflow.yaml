@@ -207,17 +207,35 @@ jobs:
           echo "This allows time for Cogfy to complete vector embeddings and indexing"
           sleep ${WAIT_SECONDS}
 
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           docker system prune -af
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction --only main
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -233,15 +251,16 @@ jobs:
           echo "HF_TOKEN=$(gcloud secrets versions access latest --secret=hf-token)" >> $GITHUB_OUTPUT
 
       - name: Enrich dataset with AI-generated data
+        env:
+          COGFY_API_KEY: ${{ steps.secrets.outputs.COGFY_API_KEY }}
+          HF_TOKEN: ${{ steps.secrets.outputs.HF_TOKEN }}
+          STORAGE_BACKEND: dual_write
+          STORAGE_READ_FROM: postgres
+          DATABASE_URL: ${{ steps.secrets.outputs.DATABASE_URL }}
         run: |
-          docker run --rm \
-            -e COGFY_API_KEY="${{ steps.secrets.outputs.COGFY_API_KEY }}" \
-            -e HF_TOKEN="${{ steps.secrets.outputs.HF_TOKEN }}" \
-            -e STORAGE_BACKEND=dual_write \
-            -e STORAGE_READ_FROM=postgres \
-            -e DATABASE_URL="${{ steps.secrets.outputs.DATABASE_URL }}" \
-            ghcr.io/destaquesgovbr/data-platform:latest \
-            data-platform enrich --start-date "${{ needs.setup-dates.outputs.start_date }}" --end-date "${{ needs.setup-dates.outputs.end_date }}"
+          poetry run data-platform enrich \
+            --start-date "${{ needs.setup-dates.outputs.start_date }}" \
+            --end-date "${{ needs.setup-dates.outputs.end_date }}"
           echo "Dataset enrichment completed successfully"
 
   generate-embeddings:
