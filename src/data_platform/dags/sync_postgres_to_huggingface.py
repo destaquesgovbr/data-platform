@@ -8,7 +8,7 @@ NOTA: Esta DAG eh auto-contida e nao depende de modulos externos
 do projeto data_platform para funcionar no Cloud Composer.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import OrderedDict
 import logging
 import os
@@ -77,6 +77,10 @@ def sync_postgres_to_huggingface_dag():
         from huggingface_hub import HfApi
 
         # Obter data alvo (dia anterior ao logical_date)
+        # Em execuções manuais, logical_date pode ser None - usar data atual como fallback
+        if logical_date is None:
+            logical_date = datetime.now(timezone.utc)
+            logging.info("Execucao manual detectada - usando data atual como logical_date")
         target_date = (logical_date - timedelta(days=1)).strftime("%Y-%m-%d")
         logging.info(f"Iniciando sync para data: {target_date}")
 
