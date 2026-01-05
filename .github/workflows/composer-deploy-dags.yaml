@@ -21,7 +21,7 @@ env:
   PROJECT_ID: inspire-7-finep
   COMPOSER_ENVIRONMENT: destaquesgovbr-composer
   COMPOSER_REGION: us-central1
-  DAGS_BUCKET: gs://us-central1-destaquesgovbr--a02910d4-bucket/dags
+  DAGS_BUCKET: gs://us-central1-destaquesgovbr--30208ee3-bucket/dags
   DAGS_LOCAL_PATH: src/data_platform/dags
 
 jobs:
