@@ -1,0 +1,7 @@
+# Dependências Python para DAGs do Cloud Composer
+# Este arquivo é sincronizado para o GCS bucket do Composer
+# e as dependências são instaladas automaticamente
+
+# HuggingFace dependencies for sync_postgres_to_huggingface DAG
+datasets>=2.14.0
+huggingface-hub>=0.20.0

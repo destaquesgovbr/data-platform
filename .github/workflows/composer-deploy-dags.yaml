@@ -104,10 +104,24 @@ jobs:
           echo "DAGs to be deployed:"
           ls -la ${{ env.DAGS_LOCAL_PATH }}/
 
+      - name: Deploy requirements.txt (if exists)
+        run: |
+          if [ -f "${{ env.DAGS_LOCAL_PATH }}/requirements.txt" ]; then
+            echo "Found requirements.txt, updating Composer environment..."
+            gcloud composer environments update ${{ env.COMPOSER_ENVIRONMENT }} \
+              --location=${{ env.COMPOSER_REGION }} \
+              --update-pypi-packages-from-file=${{ env.DAGS_LOCAL_PATH }}/requirements.txt
+            echo "Requirements updated successfully!"
+          else
+            echo "No requirements.txt found, skipping dependency update"
+          fi
+
       - name: Deploy DAGs to GCS
         run: |
           echo "Syncing DAGs to ${{ env.DAGS_BUCKET }}..."
-          gsutil -m rsync -r -d ${{ env.DAGS_LOCAL_PATH }}/ ${{ env.DAGS_BUCKET }}/
+          gsutil -m rsync -r -d \
+            --exclude="requirements.txt" \
+            ${{ env.DAGS_LOCAL_PATH }}/ ${{ env.DAGS_BUCKET }}/
           echo "DAGs deployed successfully!"
 
       - name: Verify deployment
