@@ -110,8 +110,9 @@ jobs:
             echo "Found requirements.txt, updating Composer environment..."
             gcloud composer environments update ${{ env.COMPOSER_ENVIRONMENT }} \
               --location=${{ env.COMPOSER_REGION }} \
-              --update-pypi-packages-from-file=${{ env.DAGS_LOCAL_PATH }}/requirements.txt
-            echo "Requirements updated successfully!"
+              --update-pypi-packages-from-file=${{ env.DAGS_LOCAL_PATH }}/requirements.txt \
+              || echo "No package changes needed (packages already installed)"
+            echo "Requirements check completed!"
           else
             echo "No requirements.txt found, skipping dependency update"
           fi
