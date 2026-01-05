@@ -120,7 +120,7 @@ jobs:
         run: |
           echo "Syncing DAGs to ${{ env.DAGS_BUCKET }}..."
           gsutil -m rsync -r -d \
-            --exclude="requirements.txt" \
+            -x "requirements\.txt$" \
             ${{ env.DAGS_LOCAL_PATH }}/ ${{ env.DAGS_BUCKET }}/
           echo "DAGs deployed successfully!"
 
