@@ -14,7 +14,7 @@ on:
       test_connections:
         description: 'Test Airflow connections after deploy'
         required: false
-        default: 'false'
+        default: false
         type: boolean
 
 env:

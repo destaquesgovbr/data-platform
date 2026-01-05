@@ -1,0 +1,86 @@
+BACKUP COMMIT BEFORE TYPESENSE SYNC INTEGRATION
+================================================
+
+Date: 2025-12-30
+Purpose: Reference point for rollback if needed
+
+COMMIT HASH: f457114801d508cb49f9d8c2a11138a8f34957e2
+
+COMMIT MESSAGE:
+---------------
+fix: add video_url field to typesense sync
+
+Add video_url field to:
+- PostgreSQL query (_build_typesense_query)
+- Typesense schema definition (COLLECTION_SCHEMA)
+
+The video_url field was present in the news table but not being synced
+to Typesense. This fix ensures the field is properly synchronized.
+
+Note: Existing Typesense collections need to be recreated to include
+this field (schema is immutable after collection creation).
+
+ROLLBACK INSTRUCTIONS:
+----------------------
+
+If you need to rollback all changes from the Typesense Sync integration:
+
+1. Hard reset to this commit:
+   git reset --hard f457114801d508cb49f9d8c2a11138a8f34957e2
+
+2. Force push (DANGEROUS - use only if necessary):
+   git push --force origin main
+
+3. Or create revert commits (SAFER):
+   git revert <commit-hash-fase-3>
+   git revert <commit-hash-fase-2>
+   git revert <commit-hash-fase-1>
+   git push origin main
+
+BRANCH STATUS:
+--------------
+On branch main
+Your branch is up to date with 'origin/main'.
+
+UNCOMMITTED CHANGES:
+--------------------
+None (working tree clean at time of snapshot)
+
+FILES THAT WILL BE MODIFIED:
+-----------------------------
+Phase 1 (Python):
+- src/data_platform/managers/postgres_manager.py
+- src/data_platform/jobs/typesense/sync_job.py
+- src/data_platform/cli.py
+
+Phase 2 (Workflows):
+- .github/workflows/typesense-full-reload.yaml (renamed to typesense-maintenance-sync.yaml)
+
+Phase 3 (Workflows):
+- .github/workflows/main-workflow.yaml (add typesense-sync job)
+- .github/workflows/typesense-daily-load.yaml (DELETED)
+
+VERIFICATION:
+-------------
+
+To verify you're on the correct commit:
+  git log --oneline -1
+
+Should show:
+  f457114 fix: add video_url field to typesense sync
+
+To see diff after integration:
+  git diff f457114 HEAD
+
+To restore individual files to this state:
+  git checkout f457114 -- <file-path>
+
+EMERGENCY CONTACTS:
+-------------------
+Documentation: _plan/TS_SYNC_ROLLBACK.md
+Tracking: _plan/TS_SYNC_MOVED_TO_MAIN_WORKFL.md
+Quick Ref: _plan/TS_SYNC_QUICK_REFERENCE.md
+
+===================================================
+DO NOT DELETE THIS FILE - CRITICAL FOR ROLLBACK
+===================================================

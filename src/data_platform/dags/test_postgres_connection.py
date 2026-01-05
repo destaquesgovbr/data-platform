@@ -6,6 +6,7 @@ Testa:
 - Latência de queries (us-central1 → southamerica-east1)
 - Acesso a Airflow Variables do Secret Manager
 """
+
 from datetime import datetime, timedelta
 import time
 
@@ -16,12 +17,12 @@ from airflow.models import Variable
 
 
 default_args = {
-    'owner': 'data-platform',
-    'depends_on_past': False,
-    'email_on_failure': False,
-    'email_on_retry': False,
-    'retries': 1,
-    'retry_delay': timedelta(minutes=5),
+    "owner": "data-platform",
+    "depends_on_past": False,
+    "email_on_failure": False,
+    "email_on_retry": False,
+    "retries": 1,
+    "retry_delay": timedelta(minutes=5),
 }
 
 
@@ -33,7 +34,7 @@ def test_postgres_connection(**context):
     print("=" * 60)
 
     # Inicializar hook
-    hook = PostgresHook(postgres_conn_id='postgres_default')
+    hook = PostgresHook(postgres_conn_id="postgres_default")
 
     # Teste 1: Conexão básica
     print("\n[1/4] Testando conexão básica...")
@@ -82,14 +83,16 @@ def test_postgres_connection(**context):
     print(f"SELECT 1:      {latency_query:.2f}ms")
     print(f"Version():     {latency_version:.2f}ms")
     print(f"Listar tabelas: {latency_tables:.2f}ms")
-    print(f"Média:         {(latency_connect + latency_query + latency_version + latency_tables) / 4:.2f}ms")
+    print(
+        f"Média:         {(latency_connect + latency_query + latency_version + latency_tables) / 4:.2f}ms"
+    )
     print("=" * 60)
 
     # Push metrics to XCom
-    context['ti'].xcom_push(key='latency_connect_ms', value=latency_connect)
-    context['ti'].xcom_push(key='latency_query_ms', value=latency_query)
-    context['ti'].xcom_push(key='latency_version_ms', value=latency_version)
-    context['ti'].xcom_push(key='latency_tables_ms', value=latency_tables)
+    context["ti"].xcom_push(key="latency_connect_ms", value=latency_connect)
+    context["ti"].xcom_push(key="latency_query_ms", value=latency_query)
+    context["ti"].xcom_push(key="latency_version_ms", value=latency_version)
+    context["ti"].xcom_push(key="latency_tables_ms", value=latency_tables)
 
     conn.close()
     print("\n✓ Teste concluído com sucesso!")
@@ -102,12 +105,7 @@ def test_secret_manager_variables(**context):
     print("=" * 60)
 
     # Listar variáveis disponíveis (sem revelar valores)
-    test_vars = [
-        'typesense_host',
-        'postgres_db',
-        'gcp_project_id',
-        'gcp_region'
-    ]
+    test_vars = ["typesense_host", "postgres_db", "gcp_project_id", "gcp_region"]
 
     found_vars = []
     for var_name in test_vars:
@@ -128,27 +126,26 @@ def test_secret_manager_variables(**context):
     print("=" * 60)
 
     # Push to XCom
-    context['ti'].xcom_push(key='variables_found', value=found_vars)
+    context["ti"].xcom_push(key="variables_found", value=found_vars)
 
 
 # Definir DAG
 with DAG(
-    'test_postgres_connection',
+    "test_postgres_connection",
     default_args=default_args,
-    description='Testa conexão PostgreSQL cross-region e Secret Manager',
+    description="Testa conexão PostgreSQL cross-region e Secret Manager",
     schedule=None,  # Manual only
     start_date=datetime(2025, 1, 1),
     catchup=False,
-    tags=['test', 'postgres', 'validation'],
+    tags=["test", "postgres", "validation"],
 ) as dag:
-
     test_db = PythonOperator(
-        task_id='test_postgres_connection',
+        task_id="test_postgres_connection",
         python_callable=test_postgres_connection,
     )
 
     test_secrets = PythonOperator(
-        task_id='test_secret_manager_variables',
+        task_id="test_secret_manager_variables",
         python_callable=test_secret_manager_variables,
     )
 
