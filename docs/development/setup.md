@@ -178,6 +178,19 @@ mypy src/
 black src/ tests/ && ruff src/ tests/ && mypy src/ && pytest
 ```
 
+#### 5.1 Pre-Commit
+
+The project has a [`.pre-commit-config.yaml`](/.pre-commit-config.yaml) file at the root, configured with hooks for formatting (`ruff-format`), linting (`ruff-check --fix`) and type checking (`mypy`).
+
+**Install the git hooks** in the local repository. This is a **mandatory** step:
+
+  ```bash
+  pre-commit install
+  ```
+
+
+This configures git to run the hooks automatically before each commit.
+
 ### 6. Commit and Push
 
 ```bash
