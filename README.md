@@ -176,6 +176,15 @@ poetry run ruff check src/ tests/
 poetry run mypy src/
 ```
 
+### Uso do Pre-Commit (Obrigatório)
+
+Este projeto utiliza o framework [pre-commit](https://pre-commit.com) para automatizar a verificação de padrões de código antes de cada commit. As ferramentas de linting (`ruff-check`), formatação (`ruff-format`) e type checking (`mypy`) são executadas automaticamente.
+
+**Primeiros passos após clonar o repositório:**
+1.  **Instale** o hook do git: `pre-commit install`
+
+A partir de então, o `pre-commit` rodará automaticamente ao tentar fazer um `git commit`, garantindo que apenas código que passe pelas verificações seja versionado.
+
 ---
 
 ## 📚 Documentação
