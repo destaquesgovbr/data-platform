@@ -2,5 +2,7 @@
 # Versões exatas para acelerar instalação (evita timeout no dependency resolution)
 
 # HuggingFace dependencies for sync_postgres_to_huggingface DAG
-datasets==3.2.0
+# Nota: Removemos 'datasets' (pesado, causava OOM) - usamos API + parquet diretamente
 huggingface-hub==0.27.0
+pyarrow>=14.0.0
+requests>=2.31.0

@@ -4,16 +4,18 @@ DAG para sincronizar noticias do PostgreSQL para HuggingFace.
 Executa diariamente apos o pipeline de scraper/enrichment.
 Processa noticias do dia anterior (logical_date - 1 day).
 
-NOTA: Esta DAG eh auto-contida e nao depende de modulos externos
-do projeto data_platform para funcionar no Cloud Composer.
+ABORDAGEM: Append incremental via parquet shards
+- Consulta IDs existentes via Dataset Viewer API (sem baixar dataset)
+- Cria parquet shard com novos registros
+- Upload direto via huggingface_hub
+
+Memoria: ~10MB (apenas novos registros) vs ~1-2GB (dataset completo)
 """
 
 from datetime import datetime, timedelta, timezone
-from collections import OrderedDict
 import logging
 import os
-import shutil
-from pathlib import Path
+import tempfile
 
 from airflow.decorators import dag, task
 from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -22,6 +24,7 @@ from airflow.hooks.base import BaseHook
 # Constants
 DATASET_PATH = "nitaibezerra/govbrnews"
 REDUCED_DATASET_PATH = "nitaibezerra/govbrnews-reduced"
+HF_API_BASE = "https://datasets-server.huggingface.co"
 
 # Colunas do dataset HuggingFace (ordem importante)
 HF_COLUMNS = [
@@ -57,27 +60,31 @@ HF_COLUMNS = [
 def sync_postgres_to_huggingface_dag():
     """
     DAG que sincroniza noticias do PostgreSQL para HuggingFace.
+
+    Usa abordagem incremental via parquet shards para evitar OOM.
     """
 
     @task
     def sync_news_to_huggingface(logical_date=None) -> dict:
         """
-        Task unica que:
+        Task que sincroniza noticias do PostgreSQL para HuggingFace.
+
+        Abordagem:
         1. Le noticias do dia anterior do PostgreSQL
-        2. Converte para formato HuggingFace (OrderedDict)
-        3. Faz push para HuggingFace Hub
+        2. Consulta IDs existentes via HuggingFace API (sem baixar dataset)
+        3. Filtra apenas novos registros
+        4. Cria parquet shard e faz upload
 
         Returns:
             dict: Estatisticas do sync
         """
         # Imports dentro da task para lazy loading
-        import pandas as pd
-        from datasets import Dataset, load_dataset
-        from datasets.exceptions import DatasetNotFoundError
+        import requests
+        import pyarrow as pa
+        import pyarrow.parquet as pq
         from huggingface_hub import HfApi
 
         # Obter data alvo (dia anterior ao logical_date)
-        # Em execuções manuais, logical_date pode ser None - usar data atual como fallback
         if logical_date is None:
             logical_date = datetime.now(timezone.utc)
             logging.info("Execucao manual detectada - usando data atual como logical_date")
@@ -87,9 +94,10 @@ def sync_postgres_to_huggingface_dag():
         # Configurar HF_TOKEN da connection
         hf_conn = BaseHook.get_connection('huggingface_default')
         hf_token = hf_conn.password
-        os.environ["HF_TOKEN"] = hf_token
 
-        # Query PostgreSQL
+        # ==========================================
+        # 1. Query PostgreSQL
+        # ==========================================
         pg_hook = PostgresHook(postgres_conn_id="postgres_default")
 
         query = """
@@ -129,142 +137,217 @@ def sync_postgres_to_huggingface_dag():
         """
 
         records = pg_hook.get_records(query, parameters=[target_date, target_date])
-        logging.info(f"Encontrados {len(records)} registros para {target_date}")
+        logging.info(f"Encontrados {len(records)} registros no PostgreSQL para {target_date}")
 
         if not records:
             logging.warning(f"Nenhum registro encontrado para {target_date}. Pulando sync.")
             return {
                 "status": "skipped",
                 "target_date": target_date,
+                "records_from_pg": 0,
                 "records_synced": 0,
             }
 
-        # Converter para OrderedDict
-        new_data = OrderedDict()
-        for col in HF_COLUMNS:
-            new_data[col] = []
-
+        # Converter records para lista de dicts
+        new_records = []
         for record in records:
+            row = {}
             for i, col in enumerate(HF_COLUMNS):
                 value = record[i]
                 # Converter datetime para string ISO
                 if hasattr(value, 'isoformat'):
                     value = value.isoformat()
-                new_data[col].append(value)
+                row[col] = value
+            new_records.append(row)
 
         # ==========================================
-        # Logica do DatasetManager.insert() inline
+        # 2. Consultar IDs existentes via API
         # ==========================================
+        def get_existing_ids_for_date(date_str: str) -> set:
+            """Consulta unique_ids do dia via Dataset Viewer API."""
+            existing_ids = set()
+            offset = 0
+            max_iterations = 100  # Safety limit
 
-        def load_existing_dataset():
-            """Carrega dataset existente do HuggingFace."""
-            try:
-                # Limpar cache para evitar problemas de schema
-                cache_dir = Path.home() / ".cache" / "huggingface" / "datasets" / DATASET_PATH.replace("/", "___")
-                if cache_dir.exists():
-                    logging.info(f"Limpando cache em {cache_dir}")
-                    shutil.rmtree(cache_dir, ignore_errors=True)
+            logging.info(f"Consultando IDs existentes para {date_str} via API...")
 
-                existing = load_dataset(DATASET_PATH, split="train", download_mode="force_redownload")
-                logging.info(f"Dataset existente carregado. Linhas: {len(existing)}")
-                return existing
-            except DatasetNotFoundError:
-                logging.info(f"Dataset nao encontrado em {DATASET_PATH}")
-                return None
+            for _ in range(max_iterations):
+                try:
+                    url = f"{HF_API_BASE}/filter"
+                    params = {
+                        "dataset": DATASET_PATH,
+                        "config": "default",
+                        "split": "train",
+                        "where": f"\"published_at\">'{date_str}T00:00:00' AND \"published_at\"<'{date_str}T23:59:59'",
+                        "offset": offset,
+                        "length": 100,
+                    }
+                    resp = requests.get(url, params=params, timeout=30)
 
-        def merge_data(hf_dataset, new_data, allow_update=True):
-            """Merge novos dados com dataset existente."""
-            df_existing = hf_dataset.to_pandas()
-            df_new = pd.DataFrame(new_data)
+                    if resp.status_code != 200:
+                        logging.warning(f"API retornou status {resp.status_code}: {resp.text[:200]}")
+                        break
 
-            # Converter colunas datetime
-            datetime_cols = ['published_at', 'updated_datetime', 'extracted_at']
-            for col in datetime_cols:
-                if col in df_new.columns:
-                    df_new[col] = pd.to_datetime(df_new[col], errors='coerce')
+                    data = resp.json()
 
-            # Garantir mesmas colunas
-            all_cols = set(df_existing.columns).union(df_new.columns)
-            for col in all_cols:
-                if col not in df_existing.columns:
-                    df_existing[col] = None
-                if col not in df_new.columns:
-                    df_new[col] = None
+                    if "error" in data:
+                        logging.warning(f"API retornou erro: {data['error']}")
+                        # Se o índice está carregando, continuar sem dedup
+                        break
 
-            # Remover duplicatas
-            df_existing.drop_duplicates(subset="unique_id", keep="first", inplace=True)
-            df_new.drop_duplicates(subset="unique_id", keep="first", inplace=True)
+                    rows = data.get("rows", [])
+                    if not rows:
+                        break
 
-            # Usar unique_id como index
-            df_existing.set_index("unique_id", inplace=True)
-            df_new.set_index("unique_id", inplace=True)
+                    for row in rows:
+                        existing_ids.add(row["row"]["unique_id"])
 
-            if allow_update:
-                # Atualizar linhas existentes
-                df_existing.update(df_new)
+                    offset += 100
+                    if len(rows) < 100:
+                        break
 
-                # Adicionar novas linhas
-                missing_ids = df_new.index.difference(df_existing.index)
-                if not missing_ids.empty:
-                    logging.info(f"Inserindo {len(missing_ids)} novas linhas.")
-                    df_existing = pd.concat([df_existing, df_new.loc[missing_ids]], axis=0)
-                else:
-                    logging.info("Todas as linhas ja existiam e foram atualizadas.")
-            else:
-                # Apenas adicionar novas
-                df_filtered = df_new.loc[df_new.index.difference(df_existing.index)]
-                if not df_filtered.empty:
-                    logging.info(f"Adicionando {len(df_filtered)} novas linhas.")
-                    df_existing = pd.concat([df_existing, df_filtered], axis=0)
+                except requests.RequestException as e:
+                    logging.warning(f"Erro ao consultar API: {e}")
+                    break
 
-            df_existing.reset_index(inplace=True)
-            return Dataset.from_pandas(df_existing, preserve_index=False)
+            logging.info(f"Encontrados {len(existing_ids)} IDs existentes no HuggingFace para {date_str}")
+            return existing_ids
 
-        def sort_dataset(hf_dataset):
-            """Ordena dataset por agency e published_at."""
-            df = hf_dataset.to_pandas()
-            df.sort_values(by=["agency", "published_at"], ascending=[True, False], inplace=True)
-            return Dataset.from_pandas(df, preserve_index=False)
+        existing_ids = get_existing_ids_for_date(target_date)
 
-        def push_reduced_dataset(df):
-            """Cria e envia versao reduzida do dataset."""
-            reduced_df = df[["published_at", "agency", "title", "url"]]
-            reduced_dataset = Dataset.from_pandas(reduced_df, preserve_index=False)
-            reduced_dataset.push_to_hub(REDUCED_DATASET_PATH, private=False, token=hf_token)
-            logging.info(f"Dataset reduzido enviado para {REDUCED_DATASET_PATH}")
+        # ==========================================
+        # 3. Filtrar apenas novos registros
+        # ==========================================
+        new_only = [r for r in new_records if r["unique_id"] not in existing_ids]
 
-        # Executar logica de insert
-        logging.info(f"Iniciando push de {len(records)} registros para HuggingFace...")
+        if not new_only:
+            logging.info(f"Todos os {len(new_records)} registros ja existem no HuggingFace. Pulando sync.")
+            return {
+                "status": "skipped",
+                "target_date": target_date,
+                "records_from_pg": len(records),
+                "records_already_exist": len(existing_ids),
+                "records_synced": 0,
+            }
 
-        dataset = load_existing_dataset()
-        if dataset is None:
-            logging.info("Criando dataset do zero...")
-            dataset = Dataset.from_dict(new_data)
-        else:
-            dataset = merge_data(dataset, new_data, allow_update=True)
+        logging.info(f"Novos registros a sincronizar: {len(new_only)} de {len(new_records)}")
 
-        # Ordenar
-        dataset = sort_dataset(dataset)
+        # ==========================================
+        # 4. Criar parquet shard
+        # ==========================================
+        # Preparar dados para PyArrow
+        data_dict = {col: [] for col in HF_COLUMNS}
+        for row in new_only:
+            for col in HF_COLUMNS:
+                data_dict[col].append(row.get(col))
 
-        # Push para HuggingFace
-        dataset.push_to_hub(DATASET_PATH, private=False, token=hf_token)
-        logging.info(f"Dataset principal enviado para {DATASET_PATH}")
+        # Criar schema PyArrow
+        # Nota: tags eh uma lista de strings
+        schema = pa.schema([
+            ("unique_id", pa.string()),
+            ("agency", pa.string()),
+            ("published_at", pa.string()),  # ISO format string
+            ("updated_datetime", pa.string()),
+            ("extracted_at", pa.string()),
+            ("title", pa.string()),
+            ("subtitle", pa.string()),
+            ("editorial_lead", pa.string()),
+            ("url", pa.string()),
+            ("content", pa.string()),
+            ("image", pa.string()),
+            ("video_url", pa.string()),
+            ("category", pa.string()),
+            ("tags", pa.list_(pa.string())),
+            ("theme_1_level_1", pa.string()),
+            ("theme_1_level_1_code", pa.string()),
+            ("theme_1_level_1_label", pa.string()),
+            ("theme_1_level_2_code", pa.string()),
+            ("theme_1_level_2_label", pa.string()),
+            ("theme_1_level_3_code", pa.string()),
+            ("theme_1_level_3_label", pa.string()),
+            ("most_specific_theme_code", pa.string()),
+            ("most_specific_theme_label", pa.string()),
+            ("summary", pa.string()),
+        ])
 
-        # Push versao reduzida
-        push_reduced_dataset(dataset.to_pandas())
+        table = pa.table(data_dict, schema=schema)
 
+        # Salvar em arquivo temporário
+        timestamp = datetime.now(timezone.utc).strftime('%H%M%S')
+        shard_name = f"data/train-{target_date}-{timestamp}.parquet"
+
+        with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
+            local_path = tmp.name
+            pq.write_table(table, local_path, compression='snappy')
+            logging.info(f"Parquet shard criado: {local_path}")
+
+        # ==========================================
+        # 5. Upload para HuggingFace
+        # ==========================================
+        api = HfApi(token=hf_token)
+
+        try:
+            api.upload_file(
+                path_or_fileobj=local_path,
+                path_in_repo=shard_name,
+                repo_id=DATASET_PATH,
+                repo_type="dataset",
+                commit_message=f"Add {len(new_only)} news from {target_date}",
+            )
+            logging.info(f"Parquet shard enviado: {shard_name}")
+        finally:
+            # Limpar arquivo temporário
+            os.unlink(local_path)
+
+        # ==========================================
+        # 6. Atualizar dataset reduzido
+        # ==========================================
+        # Criar versao reduzida (apenas colunas essenciais)
+        reduced_data = {
+            "published_at": data_dict["published_at"],
+            "agency": data_dict["agency"],
+            "title": data_dict["title"],
+            "url": data_dict["url"],
+        }
+        reduced_table = pa.table(reduced_data)
+
+        reduced_shard_name = f"data/train-{target_date}-{timestamp}.parquet"
+        with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
+            reduced_path = tmp.name
+            pq.write_table(reduced_table, reduced_path, compression='snappy')
+
+        try:
+            api.upload_file(
+                path_or_fileobj=reduced_path,
+                path_in_repo=reduced_shard_name,
+                repo_id=REDUCED_DATASET_PATH,
+                repo_type="dataset",
+                commit_message=f"Add {len(new_only)} news from {target_date}",
+            )
+            logging.info(f"Dataset reduzido atualizado: {reduced_shard_name}")
+        finally:
+            os.unlink(reduced_path)
+
+        # ==========================================
+        # 7. Log final
+        # ==========================================
         logging.info("=" * 60)
         logging.info("PostgreSQL -> HuggingFace Sync Concluido")
         logging.info("=" * 60)
         logging.info(f"Data processada: {target_date}")
-        logging.info(f"Registros sincronizados: {len(records)}")
-        logging.info(f"Dataset: {DATASET_PATH}")
+        logging.info(f"Registros do PostgreSQL: {len(records)}")
+        logging.info(f"Registros ja existentes: {len(existing_ids)}")
+        logging.info(f"Registros sincronizados: {len(new_only)}")
+        logging.info(f"Shard: {shard_name}")
         logging.info("=" * 60)
 
         return {
             "status": "success",
             "target_date": target_date,
-            "records_synced": len(records),
+            "records_from_pg": len(records),
+            "records_already_exist": len(existing_ids),
+            "records_synced": len(new_only),
+            "shard_name": shard_name,
             "dataset_path": DATASET_PATH,
         }
 
