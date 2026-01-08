@@ -155,12 +155,13 @@ class DatasetManager:
         df_existing = hf_dataset.to_pandas()
         df_new = pd.DataFrame(new_data)
 
-        # Clean datetime columns in new data to avoid NaT conversion issues
+        # Clean datetime columns in new data - convert to UTC naive for Parquet compatibility
         datetime_cols = ['published_at', 'updated_datetime', 'extracted_at']
         for col in datetime_cols:
             if col in df_new.columns:
-                # Replace None with pd.NaT for proper datetime handling
-                df_new[col] = pd.to_datetime(df_new[col], errors='coerce')
+                # Convert to datetime, normalize to UTC, then remove timezone
+                df_new[col] = pd.to_datetime(df_new[col], errors='coerce', utc=True)
+                df_new[col] = df_new[col].dt.tz_localize(None)
 
         # Ensure both DataFrames have same columns
         all_cols = set(df_existing.columns).union(df_new.columns)
@@ -220,12 +221,13 @@ class DatasetManager:
         """
         df = hf_dataset.to_pandas()
 
-        # Clean datetime columns in updated_df to avoid NaT conversion issues
+        # Clean datetime columns in updated_df - convert to UTC naive for Parquet compatibility
         datetime_cols = ['published_at', 'updated_datetime', 'extracted_at']
         for col in datetime_cols:
             if col in updated_df.columns:
-                # Replace None with pd.NaT for proper datetime handling
-                updated_df[col] = pd.to_datetime(updated_df[col], errors='coerce')
+                # Convert to datetime, normalize to UTC, then remove timezone
+                updated_df[col] = pd.to_datetime(updated_df[col], errors='coerce', utc=True)
+                updated_df[col] = updated_df[col].dt.tz_localize(None)
 
         # 1. Identify & add new columns if needed
         for col in updated_df.columns:

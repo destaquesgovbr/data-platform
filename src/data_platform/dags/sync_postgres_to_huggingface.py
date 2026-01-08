@@ -154,8 +154,10 @@ def sync_postgres_to_huggingface_dag():
             row = {}
             for i, col in enumerate(HF_COLUMNS):
                 value = record[i]
-                # Converter datetime para string ISO
+                # Converter datetime para string ISO (sem timezone para compatibilidade Parquet)
                 if hasattr(value, 'isoformat'):
+                    if hasattr(value, 'tzinfo') and value.tzinfo is not None:
+                        value = value.astimezone(timezone.utc).replace(tzinfo=None)
                     value = value.isoformat()
                 row[col] = value
             new_records.append(row)
