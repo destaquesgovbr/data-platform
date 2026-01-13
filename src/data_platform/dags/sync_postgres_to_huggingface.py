@@ -21,6 +21,9 @@ from airflow.decorators import dag, task
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.hooks.base import BaseHook
 
+# Timezone do Brasil (UTC-3) - usado nos arquivos base do dataset
+BRT = timezone(timedelta(hours=-3))
+
 # Constants
 DATASET_PATH = "nitaibezerra/govbrnews"
 REDUCED_DATASET_PATH = "nitaibezerra/govbrnews-reduced"
@@ -149,16 +152,25 @@ def sync_postgres_to_huggingface_dag():
             }
 
         # Converter records para lista de dicts
+        # IMPORTANTE: Manter timestamps como objetos datetime para compatibilidade
+        # com o schema dos arquivos base do dataset HuggingFace
         new_records = []
         for record in records:
             row = {}
             for i, col in enumerate(HF_COLUMNS):
                 value = record[i]
-                # Converter datetime para string ISO (sem timezone para compatibilidade Parquet)
-                if hasattr(value, 'isoformat'):
-                    if hasattr(value, 'tzinfo') and value.tzinfo is not None:
-                        value = value.astimezone(timezone.utc).replace(tzinfo=None)
-                    value = value.isoformat()
+                # Converter timestamps para o formato correto do schema base:
+                # - published_at e updated_datetime: timestamp[us, tz=-03:00]
+                # - extracted_at: timestamp[ns] (naive, sem timezone)
+                if col in ('published_at', 'updated_datetime'):
+                    if value is not None and hasattr(value, 'astimezone'):
+                        # Converter para timezone -03:00 (BRT)
+                        value = value.astimezone(BRT)
+                elif col == 'extracted_at':
+                    if value is not None and hasattr(value, 'replace'):
+                        # Converter para naive (sem timezone)
+                        if hasattr(value, 'tzinfo') and value.tzinfo is not None:
+                            value = value.astimezone(timezone.utc).replace(tzinfo=None)
                 row[col] = value
             new_records.append(row)
 
@@ -243,14 +255,17 @@ def sync_postgres_to_huggingface_dag():
             for col in HF_COLUMNS:
                 data_dict[col].append(row.get(col))
 
-        # Criar schema PyArrow
-        # Nota: tags eh uma lista de strings
+        # Criar schema PyArrow compativel com arquivos base do dataset
+        # IMPORTANTE: Os tipos de timestamp devem corresponder ao schema existente:
+        # - published_at: timestamp[us, tz=-03:00]
+        # - updated_datetime: timestamp[us, tz=-03:00]
+        # - extracted_at: timestamp[ns] (naive, sem timezone)
         schema = pa.schema([
             ("unique_id", pa.string()),
             ("agency", pa.string()),
-            ("published_at", pa.string()),  # ISO format string
-            ("updated_datetime", pa.string()),
-            ("extracted_at", pa.string()),
+            ("published_at", pa.timestamp('us', tz='-03:00')),
+            ("updated_datetime", pa.timestamp('us', tz='-03:00')),
+            ("extracted_at", pa.timestamp('ns')),
             ("title", pa.string()),
             ("subtitle", pa.string()),
             ("editorial_lead", pa.string()),
@@ -311,7 +326,13 @@ def sync_postgres_to_huggingface_dag():
             "title": data_dict["title"],
             "url": data_dict["url"],
         }
-        reduced_table = pa.table(reduced_data)
+        reduced_schema = pa.schema([
+            ("published_at", pa.timestamp('us', tz='-03:00')),
+            ("agency", pa.string()),
+            ("title", pa.string()),
+            ("url", pa.string()),
+        ])
+        reduced_table = pa.table(reduced_data, schema=reduced_schema)
 
         reduced_shard_name = f"data/train-{target_date}-{timestamp}.parquet"
         with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
