@@ -316,6 +316,20 @@ def sync_postgres_to_huggingface_dag():
             # Limpar arquivo temporário
             os.unlink(local_path)
 
+        # Deletar dataset_info.json para forçar regeneração do metadata
+        # Isso evita NonMatchingSplitsSizesError quando novos shards são adicionados
+        try:
+            api.delete_file(
+                path_in_repo="dataset_info.json",
+                repo_id=DATASET_PATH,
+                repo_type="dataset",
+                commit_message=f"Force metadata refresh after adding {target_date} shard",
+            )
+            logging.info("dataset_info.json deletado - Hub vai regenerar metadata")
+        except Exception as e:
+            # Arquivo pode não existir, ignorar erro
+            logging.warning(f"Nao foi possivel deletar dataset_info.json: {e}")
+
         # ==========================================
         # 6. Atualizar dataset reduzido
         # ==========================================
@@ -350,6 +364,18 @@ def sync_postgres_to_huggingface_dag():
             logging.info(f"Dataset reduzido atualizado: {reduced_shard_name}")
         finally:
             os.unlink(reduced_path)
+
+        # Deletar dataset_info.json do dataset reduzido
+        try:
+            api.delete_file(
+                path_in_repo="dataset_info.json",
+                repo_id=REDUCED_DATASET_PATH,
+                repo_type="dataset",
+                commit_message=f"Force metadata refresh after adding {target_date} shard",
+            )
+            logging.info("dataset_info.json deletado do dataset reduzido")
+        except Exception as e:
+            logging.warning(f"Nao foi possivel deletar dataset_info.json do reduced: {e}")
 
         # ==========================================
         # 7. Log final
