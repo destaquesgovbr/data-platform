@@ -88,7 +88,7 @@ jobs:
             AGENCIES_ARG="--agencies ${{ inputs.agencies }}"
           fi
           docker run --rm \
-            -e STORAGE_BACKEND=dual_write \
+            -e STORAGE_BACKEND=postgres \
             -e DATABASE_URL="${{ steps.secrets.outputs.DATABASE_URL }}" \
             -e HF_TOKEN="${{ steps.secrets.outputs.HF_TOKEN }}" \
             ghcr.io/destaquesgovbr/data-platform:latest \
@@ -127,7 +127,7 @@ jobs:
       - name: Run EBC news scraper
         run: |
           docker run --rm \
-            -e STORAGE_BACKEND=dual_write \
+            -e STORAGE_BACKEND=postgres \
             -e DATABASE_URL="${{ steps.secrets.outputs.DATABASE_URL }}" \
             -e HF_TOKEN="${{ steps.secrets.outputs.HF_TOKEN }}" \
             ghcr.io/destaquesgovbr/data-platform:latest \
@@ -254,7 +254,7 @@ jobs:
         env:
           COGFY_API_KEY: ${{ steps.secrets.outputs.COGFY_API_KEY }}
           HF_TOKEN: ${{ steps.secrets.outputs.HF_TOKEN }}
-          STORAGE_BACKEND: dual_write
+          STORAGE_BACKEND: postgres
           STORAGE_READ_FROM: postgres
           DATABASE_URL: ${{ steps.secrets.outputs.DATABASE_URL }}
         run: |
