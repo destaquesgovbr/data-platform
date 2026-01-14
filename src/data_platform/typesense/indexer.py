@@ -125,6 +125,7 @@ def prepare_document(row: pd.Series) -> dict[str, Any]:
         "title",
         "url",
         "image",
+        "video_url",
         "category",
         "content",
         "summary",
