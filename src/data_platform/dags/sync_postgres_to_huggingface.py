@@ -378,6 +378,76 @@ def sync_postgres_to_huggingface_dag():
             logging.warning(f"Nao foi possivel deletar dataset_info.json do reduced: {e}")
 
         # ==========================================
+        # 6.5 Sanitizar README.md (remover splits metadata)
+        # ==========================================
+        # O HuggingFace pode inserir metadata de splits no README.md
+        # que fica desatualizado quando novos shards são adicionados.
+        # Removemos essa seção para que o Hub auto-calcule.
+        def sanitize_readme(repo_id: str):
+            """Remove seção splits do README.md para evitar metadata desatualizado."""
+            import re
+            try:
+                # Baixar README atual
+                readme_path = api.hf_hub_download(
+                    repo_id=repo_id,
+                    filename="README.md",
+                    repo_type="dataset",
+                )
+                with open(readme_path, 'r') as f:
+                    content = f.read()
+
+                # Verificar se tem YAML front matter com splits
+                if '---' not in content or 'splits:' not in content:
+                    return  # Nada a fazer
+
+                # Separar YAML do resto
+                parts = content.split('---')
+                if len(parts) < 3:
+                    return
+
+                yaml_section = parts[1]
+                rest = '---'.join(parts[2:])
+
+                # Remover seção splits e campos relacionados
+                original_yaml = yaml_section
+                yaml_section = re.sub(
+                    r'\n\s+splits:.*?(?=\n\s*[a-z]|\n\s*$|\Z)',
+                    '',
+                    yaml_section,
+                    flags=re.DOTALL
+                )
+                yaml_section = re.sub(r'\n\s+download_size:.*', '', yaml_section)
+                yaml_section = re.sub(r'\n\s+dataset_size:.*', '', yaml_section)
+
+                # Se houve mudança, fazer upload
+                if yaml_section != original_yaml:
+                    new_content = f"---{yaml_section}---{rest}"
+                    with tempfile.NamedTemporaryFile(
+                        mode='w', suffix='.md', delete=False
+                    ) as tmp:
+                        tmp.write(new_content)
+                        tmp_path = tmp.name
+
+                    try:
+                        api.upload_file(
+                            path_or_fileobj=tmp_path,
+                            path_in_repo="README.md",
+                            repo_id=repo_id,
+                            repo_type="dataset",
+                            commit_message="Remove stale splits metadata",
+                        )
+                        logging.info(f"README.md sanitizado em {repo_id}")
+                    finally:
+                        os.unlink(tmp_path)
+
+            except Exception as e:
+                logging.warning(f"Nao foi possivel sanitizar README.md de {repo_id}: {e}")
+
+        # Sanitizar README de ambos datasets
+        sanitize_readme(DATASET_PATH)
+        sanitize_readme(REDUCED_DATASET_PATH)
+
+        # ==========================================
         # 7. Log final
         # ==========================================
         logging.info("=" * 60)
