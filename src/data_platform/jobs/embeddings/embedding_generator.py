@@ -12,7 +12,7 @@ Input: title + " " + summary (fallback to content if summary missing)
 import logging
 import os
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 import numpy as np
@@ -36,9 +36,9 @@ class EmbeddingGenerator:
 
     def __init__(
         self,
-        database_url: Optional[str] = None,
-        api_url: Optional[str] = None,
-        api_key: Optional[str] = None,
+        database_url: str | None = None,
+        api_url: str | None = None,
+        api_key: str | None = None,
     ):
         """
         Initialize the embedding generator.
@@ -48,28 +48,25 @@ class EmbeddingGenerator:
             api_url: Embeddings API URL. If None, reads from EMBEDDINGS_API_URL env var.
             api_key: API key for authentication. If None, reads from EMBEDDINGS_API_KEY env var.
         """
-        self.database_url = database_url or os.getenv("DATABASE_URL")
+        self.database_url: str = database_url or os.getenv("DATABASE_URL") or ""
         if not self.database_url:
             raise ValueError("DATABASE_URL environment variable is required")
 
-        self.api_url = api_url or os.getenv("EMBEDDINGS_API_URL")
+        self.api_url: str = api_url or os.getenv("EMBEDDINGS_API_URL") or ""
         if not self.api_url:
             raise ValueError("EMBEDDINGS_API_URL environment variable is required")
 
-        self.api_key = api_key or os.getenv("EMBEDDINGS_API_KEY")
+        self.api_key: str = api_key or os.getenv("EMBEDDINGS_API_KEY") or ""
         if not self.api_key:
             raise ValueError("EMBEDDINGS_API_KEY environment variable is required")
 
-    def _get_connection(self):
+    def _get_connection(self) -> psycopg2.extensions.connection:
         """Get a PostgreSQL connection."""
         return psycopg2.connect(self.database_url)
 
     def _fetch_news_without_embeddings(
-        self,
-        start_date: str,
-        end_date: Optional[str] = None,
-        limit: Optional[int] = None
-    ) -> List[Tuple[int, str, Optional[str], Optional[str]]]:
+        self, start_date: str, end_date: str | None = None, limit: int | None = None
+    ) -> list[tuple[int, str, str | None, str | None]]:
         """
         Fetch news records that don't have embeddings yet.
 
@@ -97,14 +94,14 @@ class EmbeddingGenerator:
                     ORDER BY published_at DESC
                 """
 
-                params = [start_date, end_date]
+                params: list[Any] = [start_date, end_date]
 
                 if limit:
                     query += " LIMIT %s"
                     params.append(limit)
 
                 cur.execute(query, params)
-                results = cur.fetchall()
+                results: list[tuple[int, str, str | None, str | None]] = cur.fetchall()
 
                 logger.info(
                     f"Found {len(results)} news without embeddings "
@@ -116,10 +113,7 @@ class EmbeddingGenerator:
             conn.close()
 
     def _prepare_text_for_embedding(
-        self,
-        title: str,
-        summary: Optional[str],
-        content: Optional[str]
+        self, title: str, summary: str | None, content: str | None
     ) -> str:
         """
         Prepare text for embedding generation.
@@ -149,11 +143,11 @@ class EmbeddingGenerator:
 
         # Truncate to model's max length (rough estimate, tokenizer will handle exactly)
         if len(text) > self.MAX_TEXT_LENGTH * 4:  # ~4 chars per token estimate
-            text = text[:self.MAX_TEXT_LENGTH * 4]
+            text = text[: self.MAX_TEXT_LENGTH * 4]
 
         return text
 
-    def _generate_embeddings_batch(self, texts: List[str]) -> np.ndarray:
+    def _generate_embeddings_batch(self, texts: list[str]) -> np.ndarray:
         """
         Generate embeddings for a batch of texts via HTTP API.
 
@@ -179,7 +173,7 @@ class EmbeddingGenerator:
 
         # Validate response
         if "embeddings" not in result:
-            raise ValueError(f"Invalid API response: missing 'embeddings' key")
+            raise ValueError("Invalid API response: missing 'embeddings' key")
 
         embeddings = np.array(result["embeddings"], dtype=np.float32)
 
@@ -195,11 +189,7 @@ class EmbeddingGenerator:
 
         return embeddings
 
-    def _update_embeddings_batch(
-        self,
-        news_ids: List[int],
-        embeddings: np.ndarray
-    ) -> int:
+    def _update_embeddings_batch(self, news_ids: list[int], embeddings: np.ndarray) -> int:
         """
         Update news records with generated embeddings.
 
@@ -219,7 +209,7 @@ class EmbeddingGenerator:
                     (
                         embeddings[i].tolist(),  # Convert numpy array to Python list
                         datetime.utcnow(),
-                        news_ids[i]
+                        news_ids[i],
                     )
                     for i in range(len(news_ids))
                 ]
@@ -234,7 +224,7 @@ class EmbeddingGenerator:
                         WHERE id = %s
                     """,
                     update_data,
-                    page_size=100
+                    page_size=100,
                 )
 
                 conn.commit()
@@ -249,10 +239,10 @@ class EmbeddingGenerator:
     def generate_embeddings(
         self,
         start_date: str,
-        end_date: Optional[str] = None,
+        end_date: str | None = None,
         batch_size: int = DEFAULT_BATCH_SIZE,
-        max_records: Optional[int] = None
-    ) -> Dict[str, int]:
+        max_records: int | None = None,
+    ) -> dict[str, int]:
         """
         Generate embeddings for news articles.
 
@@ -274,9 +264,7 @@ class EmbeddingGenerator:
         logger.info(f"Using Embeddings API at: {self.api_url}")
 
         # Fetch news without embeddings
-        news_records = self._fetch_news_without_embeddings(
-            start_date, end_date, max_records
-        )
+        news_records = self._fetch_news_without_embeddings(start_date, end_date, max_records)
 
         if not news_records:
             logger.info("No records found without embeddings")
@@ -288,22 +276,20 @@ class EmbeddingGenerator:
         total_failed = 0
 
         for i in range(0, len(news_records), batch_size):
-            batch = news_records[i:i + batch_size]
+            batch = news_records[i : i + batch_size]
             batch_ids = [rec[0] for rec in batch]
 
             try:
                 # Prepare texts
                 texts = [
-                    self._prepare_text_for_embedding(
-                        title=rec[1],
-                        summary=rec[2],
-                        content=rec[3]
-                    )
+                    self._prepare_text_for_embedding(title=rec[1], summary=rec[2], content=rec[3])
                     for rec in batch
                 ]
 
                 # Generate embeddings via API
-                logger.info(f"Generating embeddings for batch {i // batch_size + 1} ({len(batch)} records)")
+                logger.info(
+                    f"Generating embeddings for batch {i // batch_size + 1} ({len(batch)} records)"
+                )
                 embeddings = self._generate_embeddings_batch(texts)
 
                 # Update database
@@ -318,8 +304,6 @@ class EmbeddingGenerator:
                     f"{e.response.status_code} - {e.response.text}"
                 )
                 total_failed += len(batch)
-                # Clear identity token in case it expired
-                self._identity_token = None
 
             except Exception as e:
                 logger.error(f"Error processing batch {i // batch_size + 1}: {e}")
@@ -335,5 +319,5 @@ class EmbeddingGenerator:
         return {
             "processed": total_processed,
             "successful": total_successful,
-            "failed": total_failed
+            "failed": total_failed,
         }
