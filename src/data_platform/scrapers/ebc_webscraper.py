@@ -405,13 +405,19 @@ class EBCWebScraper:
             news_data['title'] = title_elem.get_text(strip=True)
 
         # Extract source/author - <h4 class="txtNoticias"> with <a> tag
-        author_elem = soup.find('h4', class_='txtNoticias')
-        if author_elem:
-            link_elem = author_elem.find('a')
+        editorial_lead_elem = soup.find('h4', class_='txtNoticias')
+        if editorial_lead_elem:
+            link_elem = editorial_lead_elem.find("a")
             if link_elem:
-                news_data['source'] = link_elem.get_text(strip=True)
+                news_data["editorial_lead"] = link_elem.get_text(strip=True)
             else:
-                news_data['source'] = author_elem.get_text(strip=True)
+                news_data["editorial_lead"] = editorial_lead_elem.get_text(strip=True)
+        else:
+            news_data["editorial_lead"] = None
+
+        # TV Brasil videos don't have a separate "source/author" field
+        # The program name serves as the source
+        news_data["source"] = None
 
         # Extract publication date - <h5> with "No AR em" text
         date_elem = soup.find('h5')
@@ -547,6 +553,34 @@ class EBCWebScraper:
             logging.warning(f"Error extracting video URL: {e}")
 
         return ''
+    
+    def _extract_editorial_lead_tvbrasil(self, soup) -> Optional[str]:
+        """
+        Extracts the editorial lead from TV Brasil.
+
+        :param soup: BeautifulSoup object of the page
+        :return: Editorial lead or None
+        """
+        try:
+            h4_element = soup.find("h4", class_="txtNoticias")
+
+            if h4_element:
+                link = h4_element.find("a")
+                if link:
+                    text = link.get_text().strip()
+                    if text:
+                        logging.info(f"Editorial lead found: {text}")
+                        return text
+
+                text = h4_element.get_text().strip()
+                if text:
+                    logging.info(f"Editorial lead found (without link): {text}")
+                    return text
+
+        except Exception as e:
+            logging.info(f"Error while extracting TV Brasil editorial lead: {e}")
+
+        return None
 
     def parse_date(self, date_str: str) -> Optional[date]:
         """
