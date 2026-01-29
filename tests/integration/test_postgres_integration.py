@@ -5,15 +5,40 @@ These tests require a running PostgreSQL database (via Cloud SQL Proxy or local 
 Run with: pytest tests/integration/ -v
 """
 
-from datetime import datetime, timezone
+import os
+from collections.abc import Generator
+from datetime import UTC, datetime
+
 import pytest
 
 from data_platform.managers import PostgresManager
 from data_platform.models import NewsInsert
 
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev"
+)
 
-@pytest.fixture(scope="module")
-def postgres_manager():
+
+@pytest.fixture(scope="module")  # type: ignore[untyped-decorator]
+def env_vars() -> Generator[None, None, None]:
+    """Configura variáveis de ambiente para todos os testes."""
+    original_env = os.environ.copy()
+
+    os.environ.update(
+        {
+            "DATABASE_URL": DATABASE_URL,
+        }
+    )
+
+    yield
+
+    # Restaurar env vars originais
+    os.environ.clear()
+    os.environ.update(original_env)
+
+
+@pytest.fixture(scope="module")  # type: ignore[untyped-decorator]
+def postgres_manager(env_vars: None) -> Generator[PostgresManager, None, None]:
     """Create PostgresManager instance for integration tests."""
     try:
         manager = PostgresManager()
@@ -27,12 +52,12 @@ def postgres_manager():
 class TestPostgresIntegration:
     """Integration tests for PostgresManager."""
 
-    def test_connection(self, postgres_manager):
+    def test_connection(self, postgres_manager: PostgresManager) -> None:
         """Test database connection works."""
         count = postgres_manager.count()
         assert count >= 0  # Should return a valid count
 
-    def test_cache_loading(self, postgres_manager):
+    def test_cache_loading(self, postgres_manager: PostgresManager) -> None:
         """Test agency and theme cache loading."""
         # Verify agencies loaded
         assert len(postgres_manager._agencies_by_key) > 0
@@ -51,7 +76,7 @@ class TestPostgresIntegration:
         assert theme01 is not None
         assert theme01.level == 1
 
-    def test_insert_and_get(self, postgres_manager):
+    def test_insert_and_get(self, postgres_manager: PostgresManager) -> None:
         """Test inserting and retrieving news."""
         # Get an agency for testing
         agency = postgres_manager.get_agency_by_key("mec")
@@ -64,8 +89,8 @@ class TestPostgresIntegration:
             title="Test Integration News",
             url="https://example.com/test",
             content="Test content for integration testing",
-            published_at=datetime.now(timezone.utc),
-            extracted_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
+            extracted_at=datetime.now(UTC),
             agency_key="mec",
             agency_name=agency.name,
         )
@@ -81,11 +106,9 @@ class TestPostgresIntegration:
         assert news.agency_id == agency.id
 
         # Clean up
-        postgres_manager.update(
-            test_news.unique_id, {"title": "DELETED - Integration Test"}
-        )
+        postgres_manager.update(test_news.unique_id, {"title": "DELETED - Integration Test"})
 
-    def test_update(self, postgres_manager):
+    def test_update(self, postgres_manager: PostgresManager) -> None:
         """Test updating news."""
         # Get an agency for testing
         agency = postgres_manager.get_agency_by_key("mec")
@@ -97,7 +120,7 @@ class TestPostgresIntegration:
             unique_id=unique_id,
             agency_id=agency.id,
             title="Original Title",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             agency_key="mec",
             agency_name=agency.name,
         )
@@ -118,7 +141,7 @@ class TestPostgresIntegration:
         # Clean up
         postgres_manager.update(unique_id, {"title": "DELETED - Integration Test"})
 
-    def test_count_with_filters(self, postgres_manager):
+    def test_count_with_filters(self, postgres_manager: PostgresManager) -> None:
         """Test counting with filters."""
         # Get count of all news
         total = postgres_manager.count()
@@ -130,7 +153,7 @@ class TestPostgresIntegration:
             count_by_agency = postgres_manager.count({"agency_id": agency.id})
             assert count_by_agency >= 0
 
-    def test_insert_duplicate_ignores(self, postgres_manager):
+    def test_insert_duplicate_ignores(self, postgres_manager: PostgresManager) -> None:
         """Test that inserting duplicate unique_id is ignored."""
         agency = postgres_manager.get_agency_by_key("mec")
         unique_id = f"test_dup_{datetime.now().timestamp()}"
@@ -139,7 +162,7 @@ class TestPostgresIntegration:
             unique_id=unique_id,
             agency_id=agency.id,
             title="Original",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             agency_key="mec",
             agency_name=agency.name,
         )
@@ -155,7 +178,7 @@ class TestPostgresIntegration:
         # Clean up
         postgres_manager.update(unique_id, {"title": "DELETED - Integration Test"})
 
-    def test_insert_with_allow_update(self, postgres_manager):
+    def test_insert_with_allow_update(self, postgres_manager: PostgresManager) -> None:
         """Test insert with allow_update=True."""
         agency = postgres_manager.get_agency_by_key("mec")
         unique_id = f"test_upd_{datetime.now().timestamp()}"
@@ -165,7 +188,7 @@ class TestPostgresIntegration:
             unique_id=unique_id,
             agency_id=agency.id,
             title="Original",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             agency_key="mec",
             agency_name=agency.name,
         )
@@ -176,7 +199,7 @@ class TestPostgresIntegration:
             unique_id=unique_id,
             agency_id=agency.id,
             title="Updated via Insert",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             agency_key="mec",
             agency_name=agency.name,
         )
