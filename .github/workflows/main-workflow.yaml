@@ -395,12 +395,13 @@ jobs:
 
       - name: Trigger portal cache refresh
         if: success()
+        continue-on-error: true
         run: |
           echo "🔄 Triggering portal deployment to refresh cache..."
           gcloud run services update destaquesgovbr-portal \
             --region southamerica-east1 \
             --update-env-vars "CACHE_BUST=$(date +%s)" \
-            --quiet
+            --quiet || echo "⚠️ Cache refresh failed, but sync completed successfully"
 
   pipeline-summary:
     name: Pipeline Summary
