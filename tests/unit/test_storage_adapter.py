@@ -2,10 +2,9 @@
 Tests for StorageAdapter.
 """
 
-import os
 from collections import OrderedDict
 from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -80,6 +79,12 @@ class TestStorageAdapterPostgres:
         mock.get_count.return_value = 100
         mock.load_cache = Mock()
         mock._themes_by_id = {}
+        mock._themes_by_code = {}
+        # Create mock agency for _convert_to_news_insert
+        mock_agency = Mock()
+        mock_agency.id = 1
+        mock_agency.name = "Test Agency"
+        mock._agencies_by_key = {"test_agency": mock_agency}
         return mock
 
     @pytest.fixture
@@ -93,12 +98,14 @@ class TestStorageAdapterPostgres:
 
     def test_insert_postgres(self, adapter, mock_postgres):
         """Test insert to PostgreSQL."""
-        data = OrderedDict({
-            "unique_id": ["abc123"],
-            "agency": ["test_agency"],
-            "title": ["Test Title"],
-            "published_at": [datetime.now()],
-        })
+        data = OrderedDict(
+            {
+                "unique_id": ["abc123"],
+                "agency": ["test_agency"],
+                "title": ["Test Title"],
+                "published_at": [datetime.now()],
+            }
+        )
 
         result = adapter.insert(data)
 
@@ -107,10 +114,12 @@ class TestStorageAdapterPostgres:
 
     def test_update_postgres(self, adapter, mock_postgres):
         """Test update to PostgreSQL."""
-        df = pd.DataFrame({
-            "unique_id": ["abc123"],
-            "title": ["Updated Title"],
-        })
+        df = pd.DataFrame(
+            {
+                "unique_id": ["abc123"],
+                "title": ["Updated Title"],
+            }
+        )
 
         result = adapter.update(df)
 
@@ -119,9 +128,20 @@ class TestStorageAdapterPostgres:
 
     def test_get_postgres(self, adapter, mock_postgres):
         """Test get from PostgreSQL."""
+        # Mock the database connection and cursor
+        mock_cursor = Mock()
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.__enter__ = Mock(return_value=mock_cursor)
+        mock_cursor.__exit__ = Mock(return_value=False)
+
+        mock_conn = Mock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        mock_postgres.get_connection.return_value = mock_conn
+
         result = adapter.get("2024-01-01", "2024-12-31")
 
-        assert mock_postgres.get.called
+        assert mock_postgres.get_connection.called
         assert isinstance(result, pd.DataFrame)
 
 
@@ -134,6 +154,13 @@ class TestStorageAdapterDualWrite:
         mock = Mock()
         mock.insert.return_value = 10
         mock.load_cache = Mock()
+        mock._themes_by_id = {}
+        mock._themes_by_code = {}
+        # Create mock agency for _convert_to_news_insert
+        mock_agency = Mock()
+        mock_agency.id = 1
+        mock_agency.name = "Test Agency"
+        mock._agencies_by_key = {"test_agency": mock_agency}
         return mock
 
     @pytest.fixture
@@ -157,12 +184,14 @@ class TestStorageAdapterDualWrite:
 
     def test_insert_dual_write(self, adapter, mock_postgres, mock_hf):
         """Test insert writes to both backends."""
-        data = OrderedDict({
-            "unique_id": ["abc123"],
-            "agency": ["test_agency"],
-            "title": ["Test Title"],
-            "published_at": [datetime.now()],
-        })
+        data = OrderedDict(
+            {
+                "unique_id": ["abc123"],
+                "agency": ["test_agency"],
+                "title": ["Test Title"],
+                "published_at": [datetime.now()],
+            }
+        )
 
         result = adapter.insert(data)
 
@@ -174,12 +203,14 @@ class TestStorageAdapterDualWrite:
         """Test dual-write continues if one backend fails."""
         mock_hf.insert.side_effect = Exception("HuggingFace error")
 
-        data = OrderedDict({
-            "unique_id": ["abc123"],
-            "agency": ["test_agency"],
-            "title": ["Test Title"],
-            "published_at": [datetime.now()],
-        })
+        data = OrderedDict(
+            {
+                "unique_id": ["abc123"],
+                "agency": ["test_agency"],
+                "title": ["Test Title"],
+                "published_at": [datetime.now()],
+            }
+        )
 
         # Should not raise, PostgreSQL still succeeds
         result = adapter.insert(data)
@@ -194,7 +225,6 @@ class TestDataConversion:
     @pytest.fixture
     def mock_postgres_with_cache(self):
         """Create mock PostgresManager with agency cache."""
-        from data_platform.models.news import Agency, Theme
 
         mock = Mock()
         # Create mock agencies
@@ -240,27 +270,29 @@ class TestDataConversion:
     def test_convert_to_news_insert(self, adapter):
         """Test converting OrderedDict to NewsInsert list."""
         now = datetime.now()
-        data = OrderedDict({
-            "unique_id": ["abc123", "def456"],
-            "agency": ["agency1", "agency2"],
-            "title": ["Title 1", "Title 2"],
-            "published_at": [now, now],
-            "image": ["http://img1.jpg", "http://img2.jpg"],
-            "url": [None, None],
-            "video_url": [None, None],
-            "category": [None, None],
-            "tags": [[], []],
-            "content": [None, None],
-            "editorial_lead": [None, None],
-            "subtitle": [None, None],
-            "summary": [None, None],
-            "updated_datetime": [None, None],
-            "extracted_at": [None, None],
-            "theme_1_level_1_code": [None, None],
-            "theme_1_level_2_code": [None, None],
-            "theme_1_level_3_code": [None, None],
-            "most_specific_theme_code": [None, None],
-        })
+        data = OrderedDict(
+            {
+                "unique_id": ["abc123", "def456"],
+                "agency": ["agency1", "agency2"],
+                "title": ["Title 1", "Title 2"],
+                "published_at": [now, now],
+                "image": ["http://img1.jpg", "http://img2.jpg"],
+                "url": [None, None],
+                "video_url": [None, None],
+                "category": [None, None],
+                "tags": [[], []],
+                "content": [None, None],
+                "editorial_lead": [None, None],
+                "subtitle": [None, None],
+                "summary": [None, None],
+                "updated_datetime": [None, None],
+                "extracted_at": [None, None],
+                "theme_1_level_1_code": [None, None],
+                "theme_1_level_2_code": [None, None],
+                "theme_1_level_3_code": [None, None],
+                "most_specific_theme_code": [None, None],
+            }
+        )
 
         result = adapter._convert_to_news_insert(data)
 

@@ -6,9 +6,10 @@ supporting dual-write mode for migration phases.
 """
 
 import os
-from enum import Enum
-from typing import Optional, List, OrderedDict, Dict, Any
+from collections import OrderedDict
 from datetime import datetime
+from enum import Enum
+from typing import Any
 
 import pandas as pd
 from loguru import logger
@@ -45,10 +46,10 @@ class StorageAdapter:
 
     def __init__(
         self,
-        backend: Optional[StorageBackend] = None,
-        read_from: Optional[StorageBackend] = None,
-        postgres_manager: Optional[PostgresManager] = None,
-        dataset_manager: Optional[Any] = None,  # DatasetManager from scraper
+        backend: StorageBackend | None = None,
+        read_from: StorageBackend | None = None,
+        postgres_manager: PostgresManager | None = None,
+        dataset_manager: Any | None = None,  # DatasetManager from scraper
     ):
         """
         Initialize StorageAdapter.
@@ -78,7 +79,9 @@ class StorageAdapter:
             # Default: read from same backend as write
             self.read_from = self.backend
 
-        logger.info(f"StorageAdapter initialized: write={self.backend.value}, read={self.read_from.value}")
+        logger.info(
+            f"StorageAdapter initialized: write={self.backend.value}, read={self.read_from.value}"
+        )
 
         # Lazy-load managers
         self._postgres_manager = postgres_manager
@@ -101,6 +104,7 @@ class StorageAdapter:
             # DatasetManager is in the scraper repo
             try:
                 from dataset_manager import DatasetManager
+
                 logger.info("Initializing DatasetManager (HuggingFace)...")
                 self._dataset_manager = DatasetManager()
             except ImportError:
@@ -141,8 +145,14 @@ class StorageAdapter:
         if self.backend in (StorageBackend.POSTGRES, StorageBackend.DUAL_WRITE):
             try:
                 news_list = self._convert_to_news_insert(new_data)
-                inserted = self.postgres.insert(news_list, allow_update=allow_update)
-                logger.success(f"PostgreSQL: inserted {inserted} records")
+                if not news_list:
+                    logger.warning(
+                        f"No valid records to insert into PostgreSQL "
+                        f"(all {total_records} records were skipped due to missing required fields)"
+                    )
+                else:
+                    inserted = self.postgres.insert(news_list, allow_update=allow_update)
+                    logger.success(f"PostgreSQL: inserted {inserted} records")
             except Exception as e:
                 logger.error(f"PostgreSQL insert failed: {e}")
                 errors.append(("postgres", str(e)))
@@ -209,7 +219,7 @@ class StorageAdapter:
         self,
         min_date: str,
         max_date: str,
-        agency: Optional[str] = None,
+        agency: str | None = None,
     ) -> pd.DataFrame:
         """
         Get records from storage by date range.
@@ -244,7 +254,7 @@ class StorageAdapter:
     # Private helper methods
     # -------------------------------------------------------------------------
 
-    def _convert_to_news_insert(self, data: OrderedDict) -> List[NewsInsert]:
+    def _convert_to_news_insert(self, data: OrderedDict) -> list[NewsInsert]:
         """Convert OrderedDict data to list of NewsInsert objects."""
         news_list = []
 
@@ -317,14 +327,14 @@ class StorageAdapter:
 
         return news_list
 
-    def _resolve_theme_id(self, theme_code: Optional[str]) -> Optional[int]:
+    def _resolve_theme_id(self, theme_code: str | None) -> int | None:
         """Resolve theme code to ID using cache."""
         if not theme_code:
             return None
         theme = self.postgres._themes_by_code.get(theme_code)
         return theme.id if theme else None
 
-    def _parse_datetime(self, value: Any) -> Optional[datetime]:
+    def _parse_datetime(self, value: Any) -> datetime | None:
         """Parse datetime from various formats."""
         if value is None:
             return None
@@ -400,11 +410,13 @@ class StorageAdapter:
         self,
         min_date: str,
         max_date: str,
-        agency: Optional[str] = None,
+        agency: str | None = None,
     ) -> pd.DataFrame:
         """Get records from PostgreSQL with date range filtering."""
         import json
+
         from psycopg2.extras import RealDictCursor
+
         from data_platform.models.news import News
 
         conn = self.postgres.get_connection()
@@ -429,12 +441,14 @@ class StorageAdapter:
 
             # Convert content_embedding from JSON string to list for Pydantic validation
             for row in rows:
-                if row.get('content_embedding') and isinstance(row['content_embedding'], str):
+                if row.get("content_embedding") and isinstance(row["content_embedding"], str):
                     try:
-                        row['content_embedding'] = json.loads(row['content_embedding'])
+                        row["content_embedding"] = json.loads(row["content_embedding"])
                     except (json.JSONDecodeError, TypeError):
-                        logger.warning(f"Failed to parse content_embedding for record {row.get('unique_id')}")
-                        row['content_embedding'] = None
+                        logger.warning(
+                            f"Failed to parse content_embedding for record {row.get('unique_id')}"
+                        )
+                        row["content_embedding"] = None
 
             records = [News(**row) for row in rows]
         finally:
@@ -447,33 +461,35 @@ class StorageAdapter:
 
         data = []
         for record in records:
-            data.append({
-                "unique_id": record.unique_id,
-                "agency": record.agency_key,
-                "title": record.title,
-                "url": record.url,
-                "image": record.image_url,  # Match HF column name
-                "video_url": record.video_url,
-                "category": record.category,
-                "tags": record.tags,
-                "content": record.content,
-                "editorial_lead": record.editorial_lead,
-                "subtitle": record.subtitle,
-                "summary": record.summary,
-                "published_at": record.published_at,
-                "updated_datetime": record.updated_datetime,
-                "extracted_at": record.extracted_at,
-                "theme_1_level_1_code": self._get_theme_code(record.theme_l1_id),
-                "theme_1_level_2_code": self._get_theme_code(record.theme_l2_id),
-                "theme_1_level_3_code": self._get_theme_code(record.theme_l3_id),
-                "most_specific_theme_code": self._get_theme_code(record.most_specific_theme_id),
-                "content_embedding": record.content_embedding,
-                "embedding_generated_at": record.embedding_generated_at,
-            })
+            data.append(
+                {
+                    "unique_id": record.unique_id,
+                    "agency": record.agency_key,
+                    "title": record.title,
+                    "url": record.url,
+                    "image": record.image_url,  # Match HF column name
+                    "video_url": record.video_url,
+                    "category": record.category,
+                    "tags": record.tags,
+                    "content": record.content,
+                    "editorial_lead": record.editorial_lead,
+                    "subtitle": record.subtitle,
+                    "summary": record.summary,
+                    "published_at": record.published_at,
+                    "updated_datetime": record.updated_datetime,
+                    "extracted_at": record.extracted_at,
+                    "theme_1_level_1_code": self._get_theme_code(record.theme_l1_id),
+                    "theme_1_level_2_code": self._get_theme_code(record.theme_l2_id),
+                    "theme_1_level_3_code": self._get_theme_code(record.theme_l3_id),
+                    "most_specific_theme_code": self._get_theme_code(record.most_specific_theme_id),
+                    "content_embedding": record.content_embedding,
+                    "embedding_generated_at": record.embedding_generated_at,
+                }
+            )
 
         return pd.DataFrame(data)
 
-    def _get_theme_code(self, theme_id: Optional[int]) -> Optional[str]:
+    def _get_theme_code(self, theme_id: int | None) -> str | None:
         """Get theme code from ID using cache."""
         if theme_id is None:
             return None
