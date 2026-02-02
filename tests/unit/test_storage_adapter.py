@@ -79,6 +79,12 @@ class TestStorageAdapterPostgres:
         mock.get_count.return_value = 100
         mock.load_cache = Mock()
         mock._themes_by_id = {}
+        mock._themes_by_code = {}
+        # Create mock agency for _convert_to_news_insert
+        mock_agency = Mock()
+        mock_agency.id = 1
+        mock_agency.name = "Test Agency"
+        mock._agencies_by_key = {"test_agency": mock_agency}
 
         mock_conn = Mock()
         mock_cursor = Mock()
@@ -146,6 +152,13 @@ class TestStorageAdapterDualWrite:
         mock = Mock()
         mock.insert.return_value = 10
         mock.load_cache = Mock()
+        mock._themes_by_id = {}
+        mock._themes_by_code = {}
+        # Create mock agency for _convert_to_news_insert
+        mock_agency = Mock()
+        mock_agency.id = 1
+        mock_agency.name = "Test Agency"
+        mock._agencies_by_key = {"test_agency": mock_agency}
         return mock
 
     @pytest.fixture  # type: ignore
