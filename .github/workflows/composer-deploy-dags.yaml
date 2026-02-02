@@ -21,7 +21,6 @@ env:
   PROJECT_ID: inspire-7-finep
   COMPOSER_ENVIRONMENT: destaquesgovbr-composer
   COMPOSER_REGION: us-central1
-  DAGS_BUCKET: gs://us-central1-destaquesgovbr--30208ee3-bucket/dags
   DAGS_LOCAL_PATH: src/data_platform/dags
 
 jobs:
@@ -99,6 +98,15 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
+      - name: Get Composer DAGs bucket
+        id: composer
+        run: |
+          DAGS_BUCKET=$(gcloud composer environments describe ${{ env.COMPOSER_ENVIRONMENT }} \
+            --location=${{ env.COMPOSER_REGION }} \
+            --format="value(config.dagGcsPrefix)")
+          echo "dags_bucket=$DAGS_BUCKET" >> $GITHUB_OUTPUT
+          echo "DAGs bucket: $DAGS_BUCKET"
+
       - name: List DAGs to deploy
         run: |
           echo "DAGs to be deployed:"
@@ -119,16 +127,16 @@ jobs:
 
       - name: Deploy DAGs to GCS
         run: |
-          echo "Syncing DAGs to ${{ env.DAGS_BUCKET }}..."
+          echo "Syncing DAGs to ${{ steps.composer.outputs.dags_bucket }}..."
           gsutil -m rsync -r -d \
             -x "requirements\.txt$" \
-            ${{ env.DAGS_LOCAL_PATH }}/ ${{ env.DAGS_BUCKET }}/
+            ${{ env.DAGS_LOCAL_PATH }}/ ${{ steps.composer.outputs.dags_bucket }}/
           echo "DAGs deployed successfully!"
 
       - name: Verify deployment
         run: |
           echo "Verifying DAGs in bucket..."
-          gsutil ls -l ${{ env.DAGS_BUCKET }}/
+          gsutil ls -l ${{ steps.composer.outputs.dags_bucket }}/
 
       - name: Wait for Airflow to parse DAGs
         run: |
