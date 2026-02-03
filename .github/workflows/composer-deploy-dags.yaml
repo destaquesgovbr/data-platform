@@ -1,6 +1,5 @@
 # Cloud Composer DAGs Deployment
 # Automatically deploys DAGs to Cloud Composer when changes are pushed to main
-# Also triggered automatically when Composer infrastructure changes (via infra repo)
 
 name: Deploy DAGs to Composer
 
@@ -17,8 +16,6 @@ on:
         required: false
         default: false
         type: boolean
-  repository_dispatch:
-    types: [composer-changed]  # Triggered by infra repo after Composer changes
 
 env:
   PROJECT_ID: inspire-7-finep
@@ -90,12 +87,7 @@ jobs:
       - name: Log trigger source
         run: |
           echo "## Deploy Triggered" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
-            echo "🔄 **Triggered by**: Composer infrastructure change (infra repo)" >> $GITHUB_STEP_SUMMARY
-            echo "- **Event**: ${{ github.event.action }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Infra commit**: ${{ github.event.client_payload.commit }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Actor**: ${{ github.event.client_payload.actor }}" >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "🖱️ **Triggered by**: Manual dispatch" >> $GITHUB_STEP_SUMMARY
           else
             echo "📦 **Triggered by**: Push to main (DAG changes)" >> $GITHUB_STEP_SUMMARY
