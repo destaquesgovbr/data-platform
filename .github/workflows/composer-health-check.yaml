@@ -1,0 +1,118 @@
+# Cloud Composer Health Check
+# Periodically verifies DAGs exist in Composer bucket and triggers deploy if empty
+
+name: Composer Health Check
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  workflow_dispatch:  # Manual trigger for testing
+
+env:
+  PROJECT_ID: inspire-7-finep
+  COMPOSER_ENVIRONMENT: destaquesgovbr-composer
+  COMPOSER_REGION: us-central1
+
+jobs:
+  check-dags:
+    name: Check DAGs Health
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      actions: write  # Needed to trigger other workflows
+
+    outputs:
+      dags_missing: ${{ steps.check.outputs.missing }}
+      dag_count: ${{ steps.check.outputs.count }}
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Get Composer DAGs bucket
+        id: composer
+        run: |
+          DAGS_BUCKET=$(gcloud composer environments describe ${{ env.COMPOSER_ENVIRONMENT }} \
+            --location=${{ env.COMPOSER_REGION }} \
+            --format="value(config.dagGcsPrefix)")
+          echo "dags_bucket=$DAGS_BUCKET" >> $GITHUB_OUTPUT
+          echo "DAGs bucket: $DAGS_BUCKET"
+
+      - name: Check DAGs exist
+        id: check
+        run: |
+          DAGS_BUCKET="${{ steps.composer.outputs.dags_bucket }}"
+
+          # Count Python DAG files in the bucket
+          DAG_COUNT=$(gsutil ls "$DAGS_BUCKET/*.py" 2>/dev/null | wc -l || echo "0")
+          echo "count=$DAG_COUNT" >> $GITHUB_OUTPUT
+
+          echo "## Composer Health Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bucket**: $DAGS_BUCKET" >> $GITHUB_STEP_SUMMARY
+          echo "- **DAG files found**: $DAG_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$DAG_COUNT" -lt 1 ]; then
+            echo "::error::ALERT: No DAGs found in Composer bucket!"
+            echo "missing=true" >> $GITHUB_OUTPUT
+            echo "❌ **Status**: UNHEALTHY - No DAGs in bucket" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🔄 Will trigger automatic DAG deployment..." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "missing=false" >> $GITHUB_OUTPUT
+            echo "✅ **Status**: HEALTHY" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "DAGs in bucket:" >> $GITHUB_STEP_SUMMARY
+            gsutil ls "$DAGS_BUCKET/*.py" | while read dag; do
+              echo "- $(basename $dag)" >> $GITHUB_STEP_SUMMARY
+            done
+          fi
+
+      - name: List DAG details (if healthy)
+        if: steps.check.outputs.missing == 'false'
+        run: |
+          echo "DAG files in bucket:"
+          gsutil ls -l "${{ steps.composer.outputs.dags_bucket }}/*.py"
+
+  auto-deploy:
+    name: Auto-Deploy DAGs
+    needs: check-dags
+    if: needs.check-dags.outputs.dags_missing == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+
+    steps:
+      - name: Trigger DAG deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            console.log('Triggering DAG deployment workflow...');
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'composer-deploy-dags.yaml',
+              ref: 'main',
+              inputs: {
+                test_connections: 'false'
+              }
+            });
+            console.log('DAG deployment triggered successfully!');
+
+      - name: Update summary
+        run: |
+          echo "## Auto-Recovery Initiated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🚀 **DAG deployment workflow triggered**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the [Deploy DAGs to Composer](../../actions/workflows/composer-deploy-dags.yaml) workflow for progress." >> $GITHUB_STEP_SUMMARY
