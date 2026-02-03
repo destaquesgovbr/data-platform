@@ -215,6 +215,62 @@ Ver [docs/typesense/](docs/typesense/) para documentação completa:
 
 ---
 
+## Cloud Composer (Airflow)
+
+O Cloud Composer é usado para orquestrar DAGs que sincronizam dados entre PostgreSQL e HuggingFace.
+
+### DAGs
+
+| DAG | Schedule | Descrição |
+|-----|----------|-----------|
+| `sync_postgres_to_huggingface` | 6 AM UTC | Sincroniza notícias do dia anterior para HuggingFace |
+| `test_postgres_connection` | Manual | Testa conectividade com PostgreSQL |
+
+### Workflows
+
+| Workflow | Descrição |
+|----------|-----------|
+| `composer-deploy-dags.yaml` | Deploy de DAGs para o Composer |
+| `composer-health-check.yaml` | Verifica saúde do Composer (a cada 6h) |
+
+### Deploy de DAGs
+
+```bash
+# Disparar deploy manualmente
+gh workflow run composer-deploy-dags.yaml
+```
+
+O deploy também é disparado automaticamente quando:
+1. Arquivos em `src/data_platform/dags/` são modificados
+2. O Composer é modificado via Terraform (cross-repo dispatch)
+
+### Resiliência
+
+O Composer possui proteções contra perda de DAGs:
+
+1. **Prevenção**: `prevent_destroy=true` no Terraform impede destruição acidental
+2. **Validação**: CI/CD bloqueia planos que tentam recriar o Composer
+3. **Auto-Recovery**: Health check a cada 6h dispara deploy se bucket estiver vazio
+4. **Cross-Repo Trigger**: Mudanças no Composer disparam deploy automático
+
+### Troubleshooting
+
+Se as DAGs sumirem do Airflow:
+
+```bash
+# 1. Verificar bucket atual
+gcloud composer environments describe destaquesgovbr-composer \
+  --location=us-central1 \
+  --format="value(config.dagGcsPrefix)"
+
+# 2. Disparar redeploy
+gh workflow run composer-deploy-dags.yaml
+```
+
+Ver [docs/runbooks/composer-recovery.md](docs/runbooks/composer-recovery.md) para runbook completo.
+
+---
+
 ## Desenvolvimento
 
 ### Padrões de Código
