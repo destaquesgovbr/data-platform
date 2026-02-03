@@ -20,17 +20,22 @@ Execução:
 """
 
 import os
+import shutil
 import subprocess
 import time
+from collections.abc import Generator
+
 import psycopg2
-import requests
+import psycopg2.extensions
 import pytest
-from datetime import datetime
+import requests  # type: ignore[import-untyped]
 
 # ==============================================================================
 # CONFIGURAÇÃO
 # ==============================================================================
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev"
+)
 START_DATE = "2025-12-20"
 END_DATE = "2025-12-23"
 AGENCIES = "mec,gestao,cgu"
@@ -48,8 +53,8 @@ COGFY_WAIT_TIME = 120  # 2 minutos
 # ==============================================================================
 # FIXTURES
 # ==============================================================================
-@pytest.fixture(scope="module")
-def docker_services():
+@pytest.fixture(scope="module")  # type: ignore[untyped-decorator]
+def docker_services() -> Generator[None, None, None]:
     """
     Inicia containers Docker antes dos testes.
 
@@ -67,13 +72,16 @@ def docker_services():
     is_ci = os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true"
 
     if not is_ci:
+        # Detectar comando docker compose disponível
+        docker_compose_cmd = get_docker_compose_command()
+
         # Limpar containers existentes
         print("🔧 Parando e removendo containers existentes...")
-        subprocess.run(["docker-compose", "down", "-v"], check=True, cwd=os.getcwd())
+        subprocess.run(docker_compose_cmd + ["down", "-v"], check=True, cwd=os.getcwd())
 
         # Iniciar containers limpos
         print("🚀 Iniciando PostgreSQL e Typesense...")
-        subprocess.run(["docker-compose", "up", "-d"], check=True, cwd=os.getcwd())
+        subprocess.run(docker_compose_cmd + ["up", "-d"], check=True, cwd=os.getcwd())
     else:
         print("ℹ️  Running in CI - using existing service containers...")
 
@@ -85,6 +93,7 @@ def docker_services():
             if is_ci:
                 # Em CI, testar conexão direta ao PostgreSQL
                 import psycopg2
+
                 conn = psycopg2.connect(DATABASE_URL)
                 conn.close()
                 print("✅ PostgreSQL pronto!")
@@ -115,7 +124,7 @@ def docker_services():
 
     # Aguardar Typesense
     print("⏳ Aguardando Typesense ficar pronto...")
-    for i in range(30):  # Máximo 30 segundos
+    for _i in range(30):  # Máximo 30 segundos
         try:
             response = requests.get(f"http://{TYPESENSE_HOST}:{TYPESENSE_PORT}/health", timeout=2)
             if response.status_code == 200:
@@ -135,8 +144,8 @@ def docker_services():
     # subprocess.run(["docker-compose", "down"], check=True)
 
 
-@pytest.fixture(scope="module")
-def env_vars():
+@pytest.fixture(scope="module")  # type: ignore[untyped-decorator]
+def env_vars() -> Generator[None, None, None]:
     """Configura variáveis de ambiente para todos os testes."""
     original_env = os.environ.copy()
 
@@ -162,7 +171,9 @@ def env_vars():
 # ==============================================================================
 # HELPER FUNCTIONS
 # ==============================================================================
-def run_cli_command(command_list, description=""):
+def run_cli_command(
+    command_list: list[str], description: str = ""
+) -> subprocess.CompletedProcess[str]:
     """
     Executa comando CLI do data-platform.
 
@@ -194,16 +205,16 @@ def run_cli_command(command_list, description=""):
             result.returncode, full_command, result.stdout, result.stderr
         )
 
-    print(f"   ✅ Sucesso")
+    print("   ✅ Sucesso")
     return result
 
 
-def get_db_connection():
+def get_db_connection() -> psycopg2.extensions.connection:
     """Retorna conexão com PostgreSQL."""
     return psycopg2.connect(DATABASE_URL)
 
 
-def count_news(conn=None, where_clause=""):
+def count_news(conn: psycopg2.extensions.connection | None = None, where_clause: str = "") -> int:
     """Conta notícias no PostgreSQL."""
     close_conn = False
     if conn is None:
@@ -219,13 +230,36 @@ def count_news(conn=None, where_clause=""):
     if close_conn:
         conn.close()
 
-    return count
+    return count  # type: ignore[no-any-return]
+
+
+def get_docker_compose_command() -> list[str]:
+    """
+    Returns the appropriate docker compose command for the environment.
+
+    Modern Docker uses 'docker compose' (plugin), legacy uses 'docker-compose' (standalone).
+    Checks for modern command first, then falls back to legacy.
+    """
+    # Try modern 'docker compose' first
+    if shutil.which("docker"):
+        result = subprocess.run(
+            ["docker", "compose", "version"],
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            return ["docker", "compose"]
+
+    # Fall back to legacy 'docker-compose'
+    if shutil.which("docker-compose"):
+        return ["docker-compose"]
+
+    raise RuntimeError("Neither 'docker compose' nor 'docker-compose' found")
 
 
 # ==============================================================================
 # TESTES
 # ==============================================================================
-def test_01_populate_master_data(docker_services, env_vars):
+def test_01_populate_master_data(docker_services: None, env_vars: None) -> None:
     """
     FASE 1: Popula dados mestre (agencies e themes).
     """
@@ -233,18 +267,30 @@ def test_01_populate_master_data(docker_services, env_vars):
     print("FASE 1: Populando dados mestre")
     print("=" * 70)
 
-    # Criar schema do banco de dados
-    print("\n🗄️  Criando schema do banco de dados...")
-    with open("scripts/create_schema.sql", "r") as f:
-        schema_sql = f.read()
-
+    # Check if schema already exists (created by docker init.sql)
+    print("\n🗄️  Verificando schema do banco de dados...")
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute(schema_sql)
-    conn.commit()
+    cur.execute(
+        "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'agencies')"
+    )
+    schema_exists = cur.fetchone()[0]
     cur.close()
     conn.close()
-    print("✅ Schema criado")
+
+    if schema_exists:
+        print("✅ Schema já existe (criado pelo Docker init.sql)")
+    else:
+        print("🔧 Criando schema do banco de dados...")
+        with open("scripts/create_schema.sql") as f:
+            schema_sql = f.read()
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(schema_sql)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("✅ Schema criado")
 
     # Popular agencies
     print("\n📊 Populando agencies...")
@@ -302,7 +348,7 @@ def test_01_populate_master_data(docker_services, env_vars):
     print("\n✅ FASE 1 COMPLETA: Dados mestre carregados")
 
 
-def test_02_scrape_govbr(docker_services, env_vars):
+def test_02_scrape_govbr(docker_services: None, env_vars: None) -> None:
     """
     FASE 2: Scraping de notícias gov.br (MEC, GESTAO, CGU).
     """
@@ -352,7 +398,7 @@ def test_02_scrape_govbr(docker_services, env_vars):
     print("\n✅ FASE 2 COMPLETA: Scraping finalizado")
 
 
-def test_03_upload_cogfy(docker_services, env_vars):
+def test_03_upload_cogfy(docker_services: None, env_vars: None) -> None:
     """
     FASE 3: Upload de notícias para Cogfy (AI enrichment).
 
@@ -387,7 +433,7 @@ def test_03_upload_cogfy(docker_services, env_vars):
     print("\n✅ Tempo de espera completo. Prosseguindo para enrich...")
 
 
-def test_04_enrich_themes(docker_services, env_vars):
+def test_04_enrich_themes(docker_services: None, env_vars: None) -> None:
     """
     FASE 4: Enrich com temas classificados pelo Cogfy.
     """
@@ -421,7 +467,7 @@ def test_04_enrich_themes(docker_services, env_vars):
     cur.close()
     conn.close()
 
-    print(f"\n📊 Resultados do enriquecimento:")
+    print("\n📊 Resultados do enriquecimento:")
     print(f"   Total de notícias: {total}")
     print(f"   Com tema classificado: {enriched_count} ({enriched_count / total * 100:.1f}%)")
     print(f"   Com AI summary: {summary_count} ({summary_count / total * 100:.1f}%)")
@@ -431,7 +477,7 @@ def test_04_enrich_themes(docker_services, env_vars):
     print("\n✅ FASE 4 COMPLETA: Enriquecimento finalizado")
 
 
-def test_05_generate_embeddings(docker_services, env_vars):
+def test_05_generate_embeddings(docker_services: None, env_vars: None) -> None:
     """
     FASE 5: Geração de embeddings semânticos via API Cloud Run.
 
@@ -467,7 +513,7 @@ def test_05_generate_embeddings(docker_services, env_vars):
     cur.close()
     conn.close()
 
-    print(f"\n📊 Resultados dos embeddings:")
+    print("\n📊 Resultados dos embeddings:")
     print(f"   Total de notícias: {total}")
     print(f"   Com embeddings: {embeddings_count} ({embeddings_count / total * 100:.1f}%)")
 
@@ -476,7 +522,7 @@ def test_05_generate_embeddings(docker_services, env_vars):
     print("\n✅ FASE 5 COMPLETA: Embeddings gerados")
 
 
-def test_06_sync_typesense_full(docker_services, env_vars):
+def test_06_sync_typesense_full(docker_services: None, env_vars: None) -> None:
     """
     FASE 6: Sync full para Typesense (com embeddings).
 
@@ -551,7 +597,7 @@ def test_06_sync_typesense_full(docker_services, env_vars):
     print("\n✅ FASE 6 COMPLETA: Typesense populado")
 
 
-def test_07_validate_final_state(docker_services, env_vars):
+def test_07_validate_final_state(docker_services: None, env_vars: None) -> None:
     """
     FASE 7: Validação final do estado completo do sistema.
 
@@ -603,7 +649,7 @@ def test_07_validate_final_state(docker_services, env_vars):
     print("\n" + "=" * 70)
     print("📊 RELATÓRIO FINAL")
     print("=" * 70)
-    print(f"\n🗄️  POSTGRESQL:")
+    print("\n🗄️  POSTGRESQL:")
     print(f"   Total de notícias: {total_news}")
     print(f"   Com temas: {with_themes} ({with_themes / total_news * 100:.1f}%)")
     print(f"   Com AI summary: {with_summary} ({with_summary / total_news * 100:.1f}%)")
@@ -611,11 +657,11 @@ def test_07_validate_final_state(docker_services, env_vars):
     print(f"   Total de agencies: {total_agencies}")
     print(f"   Total de themes: {total_themes}")
 
-    print(f"\n📈 DISTRIBUIÇÃO POR AGENCY:")
+    print("\n📈 DISTRIBUIÇÃO POR AGENCY:")
     for agency, count in by_agency:
         print(f"   {agency}: {count} notícias")
 
-    print(f"\n🔍 TYPESENSE:")
+    print("\n🔍 TYPESENSE:")
     # Testar acesso ao Typesense
     try:
         response = requests.get(
@@ -627,11 +673,11 @@ def test_07_validate_final_state(docker_services, env_vars):
         data = response.json()
         ts_found = data.get("found", 0)
         print(f"   Total de documentos: {ts_found}")
-        print(f"   Status: ✅ Acessível")
+        print("   Status: ✅ Acessível")
     except Exception as e:
         print(f"   Status: ❌ Erro: {e}")
 
-    print(f"\n⏱️  PERÍODO TESTADO:")
+    print("\n⏱️  PERÍODO TESTADO:")
     print(f"   Início: {START_DATE}")
     print(f"   Fim: {END_DATE}")
     print(f"   Agencies: {AGENCIES}")

@@ -4,8 +4,6 @@ Unit tests for EmbeddingGenerator.
 Phase 4.7: Embeddings Semânticos (HTTP API version)
 """
 
-import json
-from datetime import datetime
 from unittest.mock import MagicMock, Mock, patch
 
 import httpx
@@ -18,40 +16,33 @@ from data_platform.jobs.embeddings import EmbeddingGenerator
 class TestEmbeddingGenerator:
     """Tests for EmbeddingGenerator class."""
 
-    @pytest.fixture
+    @pytest.fixture  # type: ignore
     def mock_database_url(self) -> str:
         """Mock database URL."""
         return "postgresql://user:pass@localhost:5432/test"
 
-    @pytest.fixture
+    @pytest.fixture  # type: ignore
     def mock_api_url(self) -> str:
         """Mock API URL."""
         return "https://embeddings-api.example.com"
 
-    @pytest.fixture
+    @pytest.fixture  # type: ignore
     def mock_api_key(self) -> str:
         """Mock API key."""
         return "test-api-key-12345"
 
-    @pytest.fixture
-    def mock_identity_token(self) -> str:
-        """Mock identity token."""
-        return "test-identity-token-xyz"
-
-    @pytest.fixture
+    @pytest.fixture  # type: ignore
     def generator(
         self,
         mock_database_url: str,
         mock_api_url: str,
         mock_api_key: str,
-        mock_identity_token: str,
     ) -> EmbeddingGenerator:
         """Create EmbeddingGenerator instance with mocked credentials."""
         return EmbeddingGenerator(
             database_url=mock_database_url,
             api_url=mock_api_url,
             api_key=mock_api_key,
-            identity_token=mock_identity_token,
         )
 
     def test_init_with_all_params(
@@ -59,37 +50,31 @@ class TestEmbeddingGenerator:
         mock_database_url: str,
         mock_api_url: str,
         mock_api_key: str,
-        mock_identity_token: str,
     ) -> None:
         """Test initialization with all explicit parameters."""
         generator = EmbeddingGenerator(
             database_url=mock_database_url,
             api_url=mock_api_url,
             api_key=mock_api_key,
-            identity_token=mock_identity_token,
         )
         assert generator.database_url == mock_database_url
         assert generator.api_url == mock_api_url
         assert generator.api_key == mock_api_key
-        assert generator._identity_token == mock_identity_token
 
     def test_init_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test initialization from environment variables."""
         test_db_url = "postgresql://env:pass@localhost:5432/test"
         test_api_url = "https://api.example.com"
         test_api_key = "env-api-key"
-        test_token = "env-token"
 
         monkeypatch.setenv("DATABASE_URL", test_db_url)
         monkeypatch.setenv("EMBEDDINGS_API_URL", test_api_url)
         monkeypatch.setenv("EMBEDDINGS_API_KEY", test_api_key)
-        monkeypatch.setenv("EMBEDDINGS_IDENTITY_TOKEN", test_token)
 
         generator = EmbeddingGenerator()
         assert generator.database_url == test_db_url
         assert generator.api_url == test_api_url
         assert generator.api_key == test_api_key
-        assert generator._identity_token == test_token
 
     def test_init_missing_database_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test initialization fails without DATABASE_URL."""
@@ -210,7 +195,6 @@ class TestEmbeddingGenerator:
         call_args = mock_client.post.call_args
         assert "/generate" in call_args[0][0]
         assert call_args[1]["json"]["texts"] == texts
-        assert "Authorization" in call_args[1]["headers"]
         assert "X-API-Key" in call_args[1]["headers"]
         assert call_args[1]["headers"]["X-API-Key"] == generator.api_key
 
@@ -323,8 +307,11 @@ class TestEmbeddingGenerator:
     @patch("data_platform.jobs.embeddings.embedding_generator.psycopg2.connect")
     @patch("data_platform.jobs.embeddings.embedding_generator.httpx.Client")
     def test_generate_embeddings_end_to_end(
-        self, mock_client_class: Mock, mock_connect: Mock, mock_execute_batch: Mock,
-        generator: EmbeddingGenerator
+        self,
+        mock_client_class: Mock,
+        mock_connect: Mock,
+        mock_execute_batch: Mock,
+        generator: EmbeddingGenerator,
     ) -> None:
         """Test full generate_embeddings workflow (mocked DB and API)."""
         # Mock database connection
@@ -386,9 +373,7 @@ class TestEmbeddingGenerator:
         # No records
         mock_cursor.fetchall.return_value = []
 
-        stats = generator.generate_embeddings(
-            start_date="2025-01-01", end_date="2025-01-01"
-        )
+        stats = generator.generate_embeddings(start_date="2025-01-01", end_date="2025-01-01")
 
         # Should return zero stats
         assert stats["processed"] == 0
@@ -427,9 +412,7 @@ class TestEmbeddingGenerator:
         mock_client_class.return_value = mock_client
 
         # Run generate_embeddings - should not raise, but count as failed
-        stats = generator.generate_embeddings(
-            start_date="2025-01-01", end_date="2025-01-01"
-        )
+        stats = generator.generate_embeddings(start_date="2025-01-01", end_date="2025-01-01")
 
         # Verify error was handled
         assert stats["processed"] == 1
