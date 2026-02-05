@@ -110,6 +110,9 @@ class EBCScrapeManager:
             # Fallback to 'ebc' if not specified
             agency = item.get("agency", "ebc")
 
+            # Extract editorial_lead (e.g., program name for TV Brasil)
+            editorial_lead = item.get("editorial_lead", "").strip() or None
+
             converted_item = {
                 "title": item.get("title", "").strip(),
                 "url": item.get("url", "").strip(),
@@ -117,7 +120,7 @@ class EBCScrapeManager:
                 "updated_datetime": updated_datetime,
                 "category": "Notícias",  # EBC doesn't have specific categories like gov.br
                 "tags": item.get("tags", []),  # Now extracted from article pages
-                "editorial_lead": None,  # EBC articles don't typically have editorial leads
+                "editorial_lead": editorial_lead,  # Program name for TV Brasil (e.g., "Caminhos da Reportagem")
                 "subtitle": None,  # EBC articles don't typically have subtitles in the same format
                 "content": item.get("content", "").strip(),
                 "image": item.get("image", "").strip(),
