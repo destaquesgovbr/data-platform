@@ -322,6 +322,7 @@ class EBCWebScraper:
                     'published_datetime': None,
                     'updated_datetime': None,
                     'tags': [],
+                    'editorial_lead': '',
                     'content': '',
                     'image': '',
                     'video_url': '',
@@ -340,6 +341,7 @@ class EBCWebScraper:
                 'published_datetime': None,
                 'updated_datetime': None,
                 'tags': [],
+                'editorial_lead': '',
                 'content': '',
                 'image': '',
                 'video_url': '',
@@ -390,6 +392,7 @@ class EBCWebScraper:
                 'published_datetime': None,
                 'updated_datetime': None,
                 'tags': [],
+                'editorial_lead': '',
                 'content': '',
                 'image': '',
                 'video_url': '',
@@ -404,14 +407,18 @@ class EBCWebScraper:
         if title_elem:
             news_data['title'] = title_elem.get_text(strip=True)
 
-        # Extract source/author - <h4 class="txtNoticias"> with <a> tag
-        author_elem = soup.find('h4', class_='txtNoticias')
-        if author_elem:
-            link_elem = author_elem.find('a')
+        # Extract editorial_lead (program name) - <h4 class="txtNoticias"> with <a> tag
+        # This is the program name like "Caminhos da Reportagem" that appears above the title
+        editorial_elem = soup.find('h4', class_='txtNoticias')
+        if editorial_elem:
+            link_elem = editorial_elem.find('a')
             if link_elem:
-                news_data['source'] = link_elem.get_text(strip=True)
+                news_data['editorial_lead'] = link_elem.get_text(strip=True)
             else:
-                news_data['source'] = author_elem.get_text(strip=True)
+                news_data['editorial_lead'] = editorial_elem.get_text(strip=True)
+
+        # TV Brasil doesn't have a traditional author/source field
+        news_data['source'] = ''
 
         # Extract publication date - <h5> with "No AR em" text
         date_elem = soup.find('h5')
