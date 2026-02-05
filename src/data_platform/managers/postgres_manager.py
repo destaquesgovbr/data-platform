@@ -6,16 +6,18 @@ Manages news storage in PostgreSQL with connection pooling, caching, and error h
 
 import os
 import subprocess
-from datetime import datetime
-from typing import Optional, List, Dict, Any, Tuple
+from collections.abc import Iterator
+from typing import Any, cast
 from urllib.parse import quote_plus
 
-import psycopg2
-from psycopg2 import pool, sql
-from psycopg2.extras import RealDictCursor, execute_values
+import pandas as pd
 from loguru import logger
+from psycopg2 import extensions, pool
+from psycopg2.extras import RealDictCursor, execute_values
+from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
 
-from data_platform.models.news import News, NewsInsert, Agency, Theme
+from data_platform.models.news import Agency, News, NewsInsert, Theme
 
 
 class PostgresManager:
@@ -30,7 +32,7 @@ class PostgresManager:
 
     def __init__(
         self,
-        connection_string: Optional[str] = None,
+        connection_string: str | None = None,
         min_connections: int = 1,
         max_connections: int = 10,
     ):
@@ -45,11 +47,14 @@ class PostgresManager:
         self.connection_string = connection_string or self._get_connection_string()
         self.pool = self._create_pool(min_connections, max_connections)
 
+        # SQLAlchemy engine for pandas operations (NullPool avoids duplicate pooling)
+        self._engine = create_engine(self.connection_string, poolclass=NullPool)
+
         # In-memory caches
-        self._agencies_by_key: Dict[str, Agency] = {}
-        self._agencies_by_id: Dict[int, Agency] = {}
-        self._themes_by_code: Dict[str, Theme] = {}
-        self._themes_by_id: Dict[int, Theme] = {}
+        self._agencies_by_key: dict[str, Agency] = {}
+        self._agencies_by_id: dict[int, Agency] = {}
+        self._themes_by_code: dict[str, Theme] = {}
+        self._themes_by_id: dict[int, Theme] = {}
         self._cache_loaded = False
 
     def _get_connection_string(self) -> str:
@@ -65,9 +70,10 @@ class PostgresManager:
             PostgreSQL connection string
         """
         # Check for DATABASE_URL environment variable first (for local development)
-        if os.getenv("DATABASE_URL"):
+        database_url = os.getenv("DATABASE_URL")
+        if database_url:
             logger.info("Using DATABASE_URL from environment")
-            return os.getenv("DATABASE_URL")
+            return database_url
 
         try:
             # Try Secret Manager for Cloud deployment
@@ -110,7 +116,9 @@ class PostgresManager:
         if proxy_check.returncode == 0:
             logger.info("Cloud SQL Proxy detected, using localhost connection")
             encoded_password = quote_plus(password)
-            return f"postgresql://destaquesgovbr_app:{encoded_password}@127.0.0.1:5432/destaquesgovbr"
+            return (
+                f"postgresql://destaquesgovbr_app:{encoded_password}@127.0.0.1:5432/destaquesgovbr"
+            )
 
         # Return original secret for direct connection
         return secret_conn_str
@@ -133,7 +141,7 @@ class PostgresManager:
             self.connection_string,
         )
 
-    def get_connection(self):
+    def get_connection(self) -> extensions.connection:
         """
         Get connection from pool.
 
@@ -142,7 +150,7 @@ class PostgresManager:
         """
         return self.pool.getconn()
 
-    def put_connection(self, conn):
+    def put_connection(self, conn: extensions.connection) -> None:
         """
         Return connection to pool.
 
@@ -151,12 +159,13 @@ class PostgresManager:
         """
         self.pool.putconn(conn)
 
-    def close_all(self):
+    def close_all(self) -> None:
         """Close all connections in pool."""
         logger.info("Closing all database connections")
         self.pool.closeall()
+        self._engine.dispose()
 
-    def load_cache(self):
+    def load_cache(self) -> None:
         """Load agencies and themes into memory cache."""
         if self._cache_loaded:
             logger.debug("Cache already loaded")
@@ -174,7 +183,7 @@ class PostgresManager:
             for row in agencies:
                 agency = Agency(**row)
                 self._agencies_by_key[agency.key] = agency
-                self._agencies_by_id[agency.id] = agency
+                self._agencies_by_id[cast(int, agency.id)] = agency
 
             # Load themes
             cursor.execute("SELECT * FROM themes")
@@ -182,7 +191,7 @@ class PostgresManager:
             for row in themes:
                 theme = Theme(**row)
                 self._themes_by_code[theme.code] = theme
-                self._themes_by_id[theme.id] = theme
+                self._themes_by_id[cast(int, theme.id)] = theme
 
             self._cache_loaded = True
             logger.success(
@@ -194,7 +203,7 @@ class PostgresManager:
             cursor.close()
             self.put_connection(conn)
 
-    def get_agency_by_key(self, key: str) -> Optional[Agency]:
+    def get_agency_by_key(self, key: str) -> Agency | None:
         """
         Get agency by key (cached).
 
@@ -208,7 +217,7 @@ class PostgresManager:
             self.load_cache()
         return self._agencies_by_key.get(key)
 
-    def get_theme_by_code(self, code: str) -> Optional[Theme]:
+    def get_theme_by_code(self, code: str) -> Theme | None:
         """
         Get theme by code (cached).
 
@@ -222,7 +231,7 @@ class PostgresManager:
             self.load_cache()
         return self._themes_by_code.get(code)
 
-    def insert(self, news: List[NewsInsert], allow_update: bool = False) -> int:
+    def insert(self, news: list[NewsInsert], allow_update: bool = False) -> int:
         """
         Insert news records (batch operation).
 
@@ -304,16 +313,14 @@ class PostgresManager:
 
             # Base INSERT
             insert_query = f"""
-                INSERT INTO news ({', '.join(columns)})
+                INSERT INTO news ({", ".join(columns)})
                 VALUES %s
             """
 
             if allow_update:
                 # ON CONFLICT UPDATE
                 update_cols = [
-                    c
-                    for c in columns
-                    if c not in ["unique_id", "agency_id", "published_at"]
+                    c for c in columns if c not in ["unique_id", "agency_id", "published_at"]
                 ]
                 update_set = ", ".join([f"{c} = EXCLUDED.{c}" for c in update_cols])
                 insert_query += f"""
@@ -330,7 +337,7 @@ class PostgresManager:
             conn.commit()
 
             logger.success(f"Inserted/updated {inserted} news records")
-            return inserted
+            return inserted  # type: ignore[no-any-return]
 
         except Exception as e:
             conn.rollback()
@@ -341,7 +348,7 @@ class PostgresManager:
             cursor.close()
             self.put_connection(conn)
 
-    def update(self, unique_id: str, updates: Dict[str, Any]) -> bool:
+    def update(self, unique_id: str, updates: dict[str, Any]) -> bool:
         """
         Update news record by unique_id.
 
@@ -385,7 +392,7 @@ class PostgresManager:
             else:
                 logger.warning(f"News {unique_id} not found")
 
-            return updated
+            return updated  # type: ignore[no-any-return]
 
         except Exception as e:
             conn.rollback()
@@ -398,11 +405,11 @@ class PostgresManager:
 
     def get(
         self,
-        filters: Optional[Dict[str, Any]] = None,
-        limit: Optional[int] = None,
+        filters: dict[str, Any] | None = None,
+        limit: int | None = None,
         offset: int = 0,
         order_by: str = "published_at DESC",
-    ) -> List[News]:
+    ) -> list[News]:
         """
         Get news records with filters.
 
@@ -449,7 +456,7 @@ class PostgresManager:
             cursor.close()
             self.put_connection(conn)
 
-    def get_by_unique_id(self, unique_id: str) -> Optional[News]:
+    def get_by_unique_id(self, unique_id: str) -> News | None:
         """
         Get single news by unique_id.
 
@@ -462,7 +469,7 @@ class PostgresManager:
         results = self.get(filters={"unique_id": unique_id}, limit=1)
         return results[0] if results else None
 
-    def count(self, filters: Optional[Dict[str, Any]] = None) -> int:
+    def count(self, filters: dict[str, Any] | None = None) -> int:
         """
         Count news records with optional filters.
 
@@ -490,7 +497,7 @@ class PostgresManager:
             cursor.execute(query, params)
             count = cursor.fetchone()[0]
 
-            return count
+            return count  # type: ignore[no-any-return]
 
         finally:
             cursor.close()
@@ -547,7 +554,7 @@ class PostgresManager:
     def count_news_for_typesense(
         self,
         start_date: str,
-        end_date: Optional[str] = None,
+        end_date: str | None = None,
     ) -> int:
         """
         Count news records for a date range.
@@ -573,16 +580,16 @@ class PostgresManager:
                     """,
                     [start_date, end_date],
                 )
-                return cur.fetchone()[0]
+                return cur.fetchone()[0]  # type: ignore[no-any-return]
         finally:
             self.put_connection(conn)
 
     def iter_news_for_typesense(
         self,
         start_date: str,
-        end_date: Optional[str] = None,
+        end_date: str | None = None,
         batch_size: int = 5000,
-    ):
+    ) -> Iterator[pd.DataFrame]:
         """
         Iterate over news in batches for memory-efficient Typesense indexing.
 
@@ -597,8 +604,6 @@ class PostgresManager:
         Yields:
             DataFrame batches with news data ready for Typesense indexing (includes embeddings)
         """
-        import pandas as pd
-
         end_date = end_date or start_date
 
         # Get total count first
@@ -624,33 +629,28 @@ class PostgresManager:
         batch_num = 0
 
         while offset < total_count:
-            conn = self.get_connection()
-            try:
-                params = [start_date, end_date, batch_size, offset]
-                df = pd.read_sql_query(base_query, conn, params=params)
+            params = (start_date, end_date, batch_size, offset)
+            df = pd.read_sql_query(base_query, self._engine, params=params)
 
-                if df.empty:
-                    break
+            if df.empty:
+                break
 
-                batch_num += 1
-                logger.info(
-                    f"Fetched batch {batch_num}: {len(df)} records "
-                    f"(offset: {offset}, total: {total_count})"
-                )
+            batch_num += 1
+            logger.info(
+                f"Fetched batch {batch_num}: {len(df)} records "
+                f"(offset: {offset}, total: {total_count})"
+            )
 
-                yield df
+            yield df
 
-                offset += batch_size
-
-            finally:
-                self.put_connection(conn)
+            offset += batch_size
 
     def get_news_for_typesense(
         self,
         start_date: str,
-        end_date: Optional[str] = None,
-        limit: Optional[int] = None,
-    ) -> "pd.DataFrame":
+        end_date: str | None = None,
+        limit: int | None = None,
+    ) -> pd.DataFrame:
         """
         Get news with theme labels for Typesense indexing.
 
@@ -665,43 +665,39 @@ class PostgresManager:
         Returns:
             DataFrame with news data ready for Typesense indexing (includes embeddings)
         """
-        import pandas as pd
-
         end_date = end_date or start_date
 
-        conn = self.get_connection()
+        # Build query
+        query = self._build_typesense_query()
+        query += """
+            WHERE n.published_at >= %s
+              AND n.published_at < %s::date + INTERVAL '1 day'
+            ORDER BY n.published_at DESC
+        """
 
-        try:
-            # Build query
-            query = self._build_typesense_query()
-            query += """
-                WHERE n.published_at >= %s
-                  AND n.published_at < %s::date + INTERVAL '1 day'
-                ORDER BY n.published_at DESC
-            """
+        params: list[str | int] = [start_date, end_date]
 
-            params = [start_date, end_date]
+        if limit:
+            query += " LIMIT %s"
+            params.append(limit)
 
-            if limit:
-                query += " LIMIT %s"
-                params.append(limit)
+        df = pd.read_sql_query(query, self._engine, params=tuple(params))
 
-            df = pd.read_sql_query(query, conn, params=params)
+        logger.info(
+            f"Fetched {len(df)} news for Typesense (date range: {start_date} to {end_date})"
+        )
 
-            logger.info(
-                f"Fetched {len(df)} news for Typesense "
-                f"(date range: {start_date} to {end_date})"
-            )
+        return df
 
-            return df
-
-        finally:
-            self.put_connection(conn)
-
-    def __enter__(self):
+    def __enter__(self) -> "PostgresManager":
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
         """Context manager exit."""
         self.close_all()
