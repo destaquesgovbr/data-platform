@@ -5,11 +5,14 @@ These tests mock the database connection to test logic without requiring a real 
 """
 
 from datetime import datetime
-from unittest.mock import Mock, MagicMock, patch
+from typing import Any
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
+from pydantic import ValidationError
 
 from data_platform.managers import PostgresManager
-from data_platform.models import News, NewsInsert, Agency, Theme
+from data_platform.models import Agency, News, NewsInsert, Theme
 
 
 class TestPostgresManager:
@@ -17,7 +20,7 @@ class TestPostgresManager:
 
     @patch("data_platform.managers.postgres_manager.pool")
     @patch("data_platform.managers.postgres_manager.subprocess")
-    def test_init(self, mock_subprocess, mock_pool):
+    def test_init(self, mock_subprocess: Mock, mock_pool: Mock) -> None:
         """Test PostgresManager initialization."""
         # Mock subprocess to return connection string
         mock_subprocess.run.return_value = Mock(
@@ -32,7 +35,7 @@ class TestPostgresManager:
         assert len(manager._themes_by_code) == 0
 
     @patch("data_platform.managers.postgres_manager.pool")
-    def test_get_agency_by_key(self, mock_pool):
+    def test_get_agency_by_key(self, mock_pool: Mock) -> None:
         """Test get_agency_by_key method."""
         manager = PostgresManager(connection_string="postgresql://test")
 
@@ -48,7 +51,7 @@ class TestPostgresManager:
         assert result.name == "Ministério da Educação"
 
     @patch("data_platform.managers.postgres_manager.pool")
-    def test_get_agency_by_key_not_found(self, mock_pool):
+    def test_get_agency_by_key_not_found(self, mock_pool: Mock) -> None:
         """Test get_agency_by_key when agency doesn't exist."""
         manager = PostgresManager(connection_string="postgresql://test")
         manager._cache_loaded = True
@@ -58,7 +61,7 @@ class TestPostgresManager:
         assert result is None
 
     @patch("data_platform.managers.postgres_manager.pool")
-    def test_get_theme_by_code(self, mock_pool):
+    def test_get_theme_by_code(self, mock_pool: Mock) -> None:
         """Test get_theme_by_code method."""
         manager = PostgresManager(connection_string="postgresql://test")
 
@@ -75,7 +78,7 @@ class TestPostgresManager:
         assert result.level == 1
 
     @patch("data_platform.managers.postgres_manager.pool")
-    def test_insert_empty_list_raises_error(self, mock_pool):
+    def test_insert_empty_list_raises_error(self, mock_pool: Mock) -> None:
         """Test that insert raises ValueError on empty list."""
         manager = PostgresManager(connection_string="postgresql://test")
 
@@ -83,7 +86,7 @@ class TestPostgresManager:
             manager.insert([])
 
     @patch("data_platform.managers.postgres_manager.pool")
-    def test_update_empty_dict_raises_error(self, mock_pool):
+    def test_update_empty_dict_raises_error(self, mock_pool: Mock) -> None:
         """Test that update raises ValueError on empty updates dict."""
         manager = PostgresManager(connection_string="postgresql://test")
 
@@ -91,7 +94,7 @@ class TestPostgresManager:
             manager.update("unique123", {})
 
     @patch("data_platform.managers.postgres_manager.pool")
-    def test_context_manager(self, mock_pool):
+    def test_context_manager(self, mock_pool: Mock) -> None:
         """Test PostgresManager as context manager."""
         mock_pool_instance = MagicMock()
         mock_pool.SimpleConnectionPool.return_value = mock_pool_instance
@@ -108,7 +111,7 @@ class TestPostgresManagerConnectionString:
 
     @patch("data_platform.managers.postgres_manager.subprocess.run")
     @patch("data_platform.managers.postgres_manager.pool")
-    def test_connection_string_with_cloud_sql_proxy(self, mock_pool, mock_run):
+    def test_connection_string_with_cloud_sql_proxy(self, mock_pool: Mock, mock_run: Mock) -> None:
         """Test connection string when Cloud SQL Proxy is running."""
         # Mock secret manager response
         mock_run.return_value = Mock(
@@ -118,17 +121,13 @@ class TestPostgresManagerConnectionString:
         )
 
         # Mock pgrep finding cloud-sql-proxy
-        with patch(
-            "data_platform.managers.postgres_manager.subprocess.run"
-        ) as mock_subprocess:
+        with patch("data_platform.managers.postgres_manager.subprocess.run") as mock_subprocess:
 
-            def run_side_effect(*args, **kwargs):
+            def run_side_effect(*args: Any, **kwargs: Any) -> Mock:
                 if args[0][0] == "pgrep":
                     return Mock(returncode=0)  # Process found
                 elif args[0][0] == "gcloud":
-                    return Mock(
-                        returncode=0, stdout="postgresql://user:pass@10.5.0.3:5432/db\n"
-                    )
+                    return Mock(returncode=0, stdout="postgresql://user:pass@10.5.0.3:5432/db\n")
                 return Mock(returncode=1)
 
             mock_subprocess.side_effect = run_side_effect
@@ -144,7 +143,7 @@ class TestPostgresManagerConnectionString:
 class TestModels:
     """Test Pydantic models."""
 
-    def test_news_model(self):
+    def test_news_model(self) -> None:
         """Test News model creation."""
         news = News(
             id=1,
@@ -158,7 +157,7 @@ class TestModels:
         assert news.unique_id == "test123"
         assert news.title == "Test News"
 
-    def test_news_insert_model(self):
+    def test_news_insert_model(self) -> None:
         """Test NewsInsert model creation."""
         news = NewsInsert(
             unique_id="test123",
@@ -171,7 +170,7 @@ class TestModels:
         assert news.title == "Test News"
         # NewsInsert is for insert operations, doesn't need id
 
-    def test_agency_model(self):
+    def test_agency_model(self) -> None:
         """Test Agency model creation."""
         agency = Agency(id=1, key="mec", name="Ministério da Educação", type="Ministério")
 
@@ -179,7 +178,7 @@ class TestModels:
         assert agency.key == "mec"
         assert agency.name == "Ministério da Educação"
 
-    def test_theme_model(self):
+    def test_theme_model(self) -> None:
         """Test Theme model creation."""
         theme = Theme(id=1, code="01", label="Economia", level=1)
 
@@ -187,7 +186,7 @@ class TestModels:
         assert theme.code == "01"
         assert theme.level == 1
 
-    def test_theme_level_validation(self):
+    def test_theme_level_validation(self) -> None:
         """Test Theme level validation (must be 1, 2, or 3)."""
         # Valid levels
         Theme(code="01", label="Test", level=1)
@@ -195,5 +194,33 @@ class TestModels:
         Theme(code="03", label="Test", level=3)
 
         # Invalid level should fail validation
-        with pytest.raises(Exception):  # Pydantic raises validation error
+        with pytest.raises(ValidationError):
             Theme(code="04", label="Test", level=4)
+
+
+class TestSQLAlchemyEngine:
+    """Tests for SQLAlchemy engine integration."""
+
+    @patch("data_platform.managers.postgres_manager.pool")
+    @patch("data_platform.managers.postgres_manager.create_engine")
+    def test_engine_created_with_nullpool(self, mock_create_engine: Mock, mock_pool: Mock) -> None:
+        """Test that SQLAlchemy engine is created with NullPool."""
+        from sqlalchemy.pool import NullPool
+
+        PostgresManager(connection_string="postgresql://test")
+
+        mock_create_engine.assert_called_once_with("postgresql://test", poolclass=NullPool)
+
+    @patch("data_platform.managers.postgres_manager.pool")
+    @patch("data_platform.managers.postgres_manager.create_engine")
+    def test_engine_disposed_on_close_all(self, mock_create_engine: Mock, mock_pool: Mock) -> None:
+        """Test that engine is disposed when close_all is called."""
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+        mock_pool_instance = MagicMock()
+        mock_pool.SimpleConnectionPool.return_value = mock_pool_instance
+
+        manager = PostgresManager(connection_string="postgresql://test")
+        manager.close_all()
+
+        mock_engine.dispose.assert_called_once()
