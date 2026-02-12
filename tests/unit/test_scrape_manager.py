@@ -19,39 +19,10 @@ class TestLoadUrlsFromYaml:
         """Create ScrapeManager with mock storage."""
         return ScrapeManager(storage=Mock())
 
-    # --- Legacy Format Tests ---
+    # --- Loading URLs Tests ---
 
-    def test_load_all_urls_legacy_format(self, scrape_manager: ScrapeManager) -> None:
-        """Test loading all URLs from legacy string format."""
-        yaml_content = {
-            "agencies": {
-                "abc": "https://www.gov.br/abc/noticias",
-                "mec": "https://www.gov.br/mec/noticias",
-            }
-        }
-        with patch("builtins.open", mock_open(read_data=yaml.dump(yaml_content))):
-            urls = scrape_manager._load_urls_from_yaml("site_urls.yaml")
-
-        assert len(urls) == 2
-        assert "https://www.gov.br/abc/noticias" in urls
-        assert "https://www.gov.br/mec/noticias" in urls
-
-    def test_load_single_agency_legacy_format(self, scrape_manager: ScrapeManager) -> None:
-        """Test loading single agency URL from legacy format."""
-        yaml_content = {
-            "agencies": {
-                "abc": "https://www.gov.br/abc/noticias",
-            }
-        }
-        with patch("builtins.open", mock_open(read_data=yaml.dump(yaml_content))):
-            urls = scrape_manager._load_urls_from_yaml("site_urls.yaml", agency="abc")
-
-        assert urls == ["https://www.gov.br/abc/noticias"]
-
-    # --- New Format Tests ---
-
-    def test_load_all_urls_new_format_all_active(self, scrape_manager: ScrapeManager) -> None:
-        """Test loading URLs when all agencies are active."""
+    def test_load_all_urls(self, scrape_manager: ScrapeManager) -> None:
+        """Test loading all URLs from YAML."""
         yaml_content = {
             "agencies": {
                 "abc": {"url": "https://www.gov.br/abc/noticias", "active": True},
@@ -62,6 +33,20 @@ class TestLoadUrlsFromYaml:
             urls = scrape_manager._load_urls_from_yaml("site_urls.yaml")
 
         assert len(urls) == 2
+        assert "https://www.gov.br/abc/noticias" in urls
+        assert "https://www.gov.br/mec/noticias" in urls
+
+    def test_load_single_agency(self, scrape_manager: ScrapeManager) -> None:
+        """Test loading single agency URL."""
+        yaml_content = {
+            "agencies": {
+                "abc": {"url": "https://www.gov.br/abc/noticias", "active": True},
+            }
+        }
+        with patch("builtins.open", mock_open(read_data=yaml.dump(yaml_content))):
+            urls = scrape_manager._load_urls_from_yaml("site_urls.yaml", agency="abc")
+
+        assert urls == ["https://www.gov.br/abc/noticias"]
 
     def test_load_all_urls_filters_inactive(self, scrape_manager: ScrapeManager) -> None:
         """Test that inactive agencies are filtered out."""
@@ -90,30 +75,6 @@ class TestLoadUrlsFromYaml:
 
         assert len(urls) == 1
 
-    # --- Mixed Format Tests ---
-
-    def test_load_mixed_format(self, scrape_manager: ScrapeManager) -> None:
-        """Test loading from file with both legacy and new formats."""
-        yaml_content = {
-            "agencies": {
-                "abc": "https://www.gov.br/abc/noticias",  # legacy
-                "mec": {
-                    "url": "https://www.gov.br/mec/noticias",
-                    "active": True,
-                },  # new
-                "cisc": {
-                    "url": "https://www.gov.br/cisc/noticias",
-                    "active": False,
-                },  # inactive
-            }
-        }
-        with patch("builtins.open", mock_open(read_data=yaml.dump(yaml_content))):
-            urls = scrape_manager._load_urls_from_yaml("site_urls.yaml")
-
-        assert len(urls) == 2
-        assert "https://www.gov.br/abc/noticias" in urls
-        assert "https://www.gov.br/mec/noticias" in urls
-
     # --- Single Agency Lookup Tests ---
 
     def test_load_single_inactive_agency_raises_error(self, scrape_manager: ScrapeManager) -> None:
@@ -129,7 +90,9 @@ class TestLoadUrlsFromYaml:
 
     def test_load_nonexistent_agency_raises_error(self, scrape_manager: ScrapeManager) -> None:
         """Test that requesting unknown agency raises ValueError."""
-        yaml_content = {"agencies": {"abc": "https://www.gov.br/abc/noticias"}}
+        yaml_content = {
+            "agencies": {"abc": {"url": "https://www.gov.br/abc/noticias", "active": True}}
+        }
         with patch("builtins.open", mock_open(read_data=yaml.dump(yaml_content))):
             with pytest.raises(ValueError, match="not found"):
                 scrape_manager._load_urls_from_yaml("site_urls.yaml", agency="unknown")
@@ -163,14 +126,14 @@ class TestExtractUrl:
     def scrape_manager(self) -> ScrapeManager:
         return ScrapeManager(storage=Mock())
 
-    def test_extract_url_from_string(self, scrape_manager: ScrapeManager) -> None:
-        """Test extracting URL from legacy string format."""
-        result = scrape_manager._extract_url("https://example.com")
+    def test_extract_url_from_dict(self, scrape_manager: ScrapeManager) -> None:
+        """Test extracting URL from dict format."""
+        result = scrape_manager._extract_url({"url": "https://example.com", "active": True})
         assert result == "https://example.com"
 
-    def test_extract_url_from_dict(self, scrape_manager: ScrapeManager) -> None:
-        """Test extracting URL from new dict format."""
-        result = scrape_manager._extract_url({"url": "https://example.com", "active": True})
+    def test_extract_url_from_dict_without_active(self, scrape_manager: ScrapeManager) -> None:
+        """Test extracting URL from dict without active field."""
+        result = scrape_manager._extract_url({"url": "https://example.com"})
         assert result == "https://example.com"
 
 
@@ -180,10 +143,6 @@ class TestIsAgencyInactive:
     @pytest.fixture  # type: ignore[untyped-decorator]
     def scrape_manager(self) -> ScrapeManager:
         return ScrapeManager(storage=Mock())
-
-    def test_legacy_format_is_always_active(self, scrape_manager: ScrapeManager) -> None:
-        """Test that legacy string format is always considered active."""
-        assert scrape_manager._is_agency_inactive("abc", "https://example.com") is False
 
     def test_active_true_is_not_inactive(self, scrape_manager: ScrapeManager) -> None:
         """Test that active=True returns False (not inactive)."""

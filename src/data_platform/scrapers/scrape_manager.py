@@ -42,9 +42,12 @@ class ScrapeManager:
         """
         Load URLs from a YAML file located in the same directory as this script.
 
-        Supports two formats:
-        - Legacy: agency_key: url_string
-        - New: agency_key: {url: str, active: bool, ...}
+        Expected format:
+            agency_key:
+              url: str
+              active: bool  # optional, defaults to True
+              disabled_reason: str  # optional
+              disabled_date: str  # optional
 
         :param file_name: The name of the YAML file.
         :param agency: Specific agency key to filter URLs. If None, load all active URLs.
@@ -82,30 +85,23 @@ class ScrapeManager:
 
         return urls
 
-    def _extract_url(self, agency_data: str | dict[str, Any]) -> str:
+    def _extract_url(self, agency_data: dict[str, Any]) -> str:
         """
-        Extract URL from agency data (supports both formats).
+        Extract URL from agency data.
 
-        :param agency_data: Either a URL string or dict with 'url' key.
+        :param agency_data: Dict with 'url' key.
         :return: The URL string.
         """
-        if isinstance(agency_data, str):
-            return agency_data
         return str(agency_data["url"])
 
-    def _is_agency_inactive(self, agency_key: str, agency_data: str | dict[str, Any]) -> bool:
+    def _is_agency_inactive(self, agency_key: str, agency_data: dict[str, Any]) -> bool:
         """
         Check if agency is inactive.
 
         :param agency_key: Agency identifier for logging.
-        :param agency_data: Either a URL string or dict with 'active' key.
+        :param agency_data: Dict with optional 'active' key.
         :return: True if agency should be skipped.
         """
-        # Legacy format (string) - always active
-        if isinstance(agency_data, str):
-            return False
-
-        # New format - check 'active' field (defaults to True if missing)
         is_active = agency_data.get("active", True)
 
         if not is_active:

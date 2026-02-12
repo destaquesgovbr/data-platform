@@ -175,13 +175,10 @@ poetry run pytest
 
 O scraper usa `src/data_platform/scrapers/config/site_urls.yaml` para definir quais agências serão processadas.
 
-**Formatos suportados**:
+**Formato**:
 
 ```yaml
-# Formato legado (string) - sempre ativo
-abc: https://www.gov.br/abc/pt-br/assuntos/noticias
-
-# Formato novo (dict) - com controle de ativação
+# Agência ativa
 mec:
   url: https://www.gov.br/mec/pt-br/assuntos/noticias
   active: true
