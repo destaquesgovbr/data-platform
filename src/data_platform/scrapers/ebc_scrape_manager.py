@@ -1,15 +1,16 @@
 import hashlib
 import logging
+import os
 from collections import OrderedDict
 from datetime import date, datetime
-from typing import Any, Dict, List
+from typing import Any
+
+import yaml  # type: ignore[import-untyped]
 
 from data_platform.scrapers.ebc_webscraper import EBCWebScraper
 
 # Set up logging configuration
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
 class EBCScrapeManager:
@@ -36,42 +37,139 @@ class EBCScrapeManager:
         """
         self.dataset_manager = storage  # Keep attribute name for compatibility
 
+    def _load_urls_from_yaml(self, file_name: str, source: str | None = None) -> list[str]:
+        """
+        Load URLs from a YAML file located in the same directory as this script.
+
+        Expected format:
+            source_key:
+              url: str
+              active: bool  # optional, defaults to True
+              disabled_reason: str  # optional
+              disabled_date: str  # optional
+
+        :param file_name: The name of the YAML file.
+        :param source: Specific source key to filter URLs. If None, load all active URLs.
+        :return: A list of URLs.
+        """
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        file_path = os.path.join(script_dir, "config", file_name)
+
+        with open(file_path) as f:
+            sources = yaml.safe_load(f)["sources"]
+
+        if source:
+            if source not in sources:
+                raise ValueError(f"Source '{source}' not found in the YAML file.")
+            source_data = sources[source]
+            if self._is_source_inactive(source, source_data):
+                raise ValueError(f"Source '{source}' is inactive.")
+            return [self._extract_url(source_data)]
+
+        # Load all active sources
+        urls = []
+        inactive_sources = []
+
+        for source_key, source_data in sources.items():
+            if self._is_source_inactive(source_key, source_data):
+                inactive_sources.append(source_key)
+                continue
+            urls.append(self._extract_url(source_data))
+
+        if inactive_sources:
+            logging.info(
+                f"Filtered {len(inactive_sources)} inactive sources: "
+                f"{', '.join(sorted(inactive_sources))}"
+            )
+
+        return urls
+
+    def _extract_url(self, source_data: dict[str, Any]) -> str:
+        """
+        Extract URL from source data.
+
+        :param source_data: Dict with 'url' key.
+        :return: The URL string.
+        """
+        return str(source_data["url"])
+
+    def _is_source_inactive(self, source_key: str, source_data: dict[str, Any]) -> bool:
+        """
+        Check if source is inactive.
+
+        :param source_key: Source identifier for logging.
+        :param source_data: Dict with optional 'active' key.
+        :return: True if source should be skipped.
+        """
+        is_active = source_data.get("active", True)
+
+        if not is_active:
+            reason = source_data.get("disabled_reason", "No reason provided")
+            logging.debug(f"Skipping inactive source '{source_key}': {reason}")
+
+        return not is_active
+
     def run_scraper(
         self,
         min_date: str,
         max_date: str,
         sequential: bool,
         allow_update: bool = False,
+        sources: list[str] | None = None,
     ):
         """
         Executes the EBC web scraping process for the given date range.
 
         :param min_date: The minimum date for filtering news.
         :param max_date: The maximum date for filtering news.
-        :param sequential: Whether to process and upload sequentially (always True for EBC since we have only one source).
+        :param sequential: Whether to scrape sequentially (True) or in bulk (False).
         :param allow_update: If True, overwrite existing entries in the dataset.
+        :param sources: A list of source names to scrape news from. If None, all active sources are scraped.
         """
         try:
-            logging.info(f"Starting EBC scraping from {min_date} to {max_date}")
-
-            # Create the EBC scraper
-            ebc_scraper = EBCWebScraper(min_date, max_date)
-
-            # Scrape the news data
-            scraped_data = ebc_scraper.scrape_news()
-
-            if scraped_data:
-                logging.info(f"Successfully scraped {len(scraped_data)} articles from EBC")
-                logging.info("Processing and uploading EBC news to HF dataset.")
-                self._process_and_upload_data(scraped_data, allow_update)
+            all_urls = []
+            # Load URLs for each source in the list
+            if sources:
+                for source in sources:
+                    try:
+                        urls = self._load_urls_from_yaml("ebc_urls.yaml", source)
+                        all_urls.extend(urls)
+                    except ValueError as e:
+                        logging.warning(f"Skipping source '{source}': {e}")
             else:
-                logging.info("No EBC news found for the specified date range.")
+                # Load all source URLs if sources list is None or empty
+                all_urls = self._load_urls_from_yaml("ebc_urls.yaml")
 
-        except Exception as e:
-            logging.error(f"Error during EBC scraping: {e}")
-            raise
+            webscrapers = [EBCWebScraper(min_date, url, max_date=max_date) for url in all_urls]
 
-    def _process_and_upload_data(self, new_data: List[Dict], allow_update: bool):
+            if sequential:
+                for scraper in webscrapers:
+                    scraped_data = scraper.scrape_news()
+                    if scraped_data:
+                        logging.info(
+                            f"Appending {len(scraped_data)} news from {scraper.base_url} to HF dataset."
+                        )
+                        self._process_and_upload_data(scraped_data, allow_update)
+                    else:
+                        logging.info(f"No news found for {scraper.base_url}.")
+            else:
+                all_news_data = []
+                for scraper in webscrapers:
+                    scraped_data = scraper.scrape_news()
+                    if scraped_data:
+                        all_news_data.extend(scraped_data)
+                    else:
+                        logging.info(f"No news found for {scraper.base_url}.")
+
+                if all_news_data:
+                    logging.info("Appending all collected news to HF dataset.")
+                    self._process_and_upload_data(all_news_data, allow_update)
+                else:
+                    logging.info("No news found for any EBC source.")
+        except ValueError as e:
+            logging.error(e)
+
+    def _process_and_upload_data(self, new_data: list[dict], allow_update: bool):
         """
         Process the EBC news data and upload it to the dataset, with the option to update existing entries.
 
@@ -87,7 +185,7 @@ class EBCScrapeManager:
         # Insert into dataset
         self.dataset_manager.insert(processed_data, allow_update=allow_update)
 
-    def _convert_ebc_to_govbr_format(self, ebc_data: List[Dict]) -> List[Dict]:
+    def _convert_ebc_to_govbr_format(self, ebc_data: list[dict]) -> list[dict]:
         """
         Convert EBC data format to match the govbrnews schema.
 
@@ -150,14 +248,14 @@ class EBCScrapeManager:
                 return datetime.now().date()
 
             # Remove extra whitespace and split by ' - '
-            date_part = date_str.strip().split(' - ')[0]
+            date_part = date_str.strip().split(" - ")[0]
             # Parse the date part (DD/MM/YYYY)
-            return datetime.strptime(date_part, '%d/%m/%Y').date()
+            return datetime.strptime(date_part, "%d/%m/%Y").date()
         except Exception as e:
             logging.warning(f"Could not parse date '{date_str}': {e}. Using current date.")
             return datetime.now().date()
 
-    def _preprocess_data(self, data: List[Dict[str, str]]) -> OrderedDict:
+    def _preprocess_data(self, data: list[dict[str, str]]) -> OrderedDict:
         """
         Preprocess data by:
         - Adding the unique_id column.
@@ -178,9 +276,7 @@ class EBCScrapeManager:
         if not data:
             return OrderedDict()
 
-        column_data = {
-            key: [item.get(key, None) for item in data] for key in data[0].keys()
-        }
+        column_data = {key: [item.get(key, None) for item in data] for key in data[0].keys()}
 
         # Reorder columns to match govbrnews format
         ordered_column_data = OrderedDict()
@@ -194,7 +290,18 @@ class EBCScrapeManager:
             ordered_column_data["updated_datetime"] = column_data.pop("updated_datetime")
 
         # Add remaining columns in order (matching govbrnews schema)
-        for key in ["title", "editorial_lead", "subtitle", "url", "category", "tags", "content", "image", "video_url", "extracted_at"]:
+        for key in [
+            "title",
+            "editorial_lead",
+            "subtitle",
+            "url",
+            "category",
+            "tags",
+            "content",
+            "image",
+            "video_url",
+            "extracted_at",
+        ]:
             if key in column_data:
                 ordered_column_data[key] = column_data.pop(key)
 
@@ -203,9 +310,7 @@ class EBCScrapeManager:
 
         return ordered_column_data
 
-    def _generate_unique_id(
-        self, agency: str, published_at_value, title: str
-    ) -> str:
+    def _generate_unique_id(self, agency: str, published_at_value, title: str) -> str:
         """
         Generate a unique identifier based on the agency, published_at, and title.
 
@@ -219,5 +324,5 @@ class EBCScrapeManager:
             if isinstance(published_at_value, date)
             else str(published_at_value)
         )
-        hash_input = f"{agency}_{date_str}_{title}".encode("utf-8")
+        hash_input = f"{agency}_{date_str}_{title}".encode()
         return hashlib.md5(hash_input).hexdigest()
