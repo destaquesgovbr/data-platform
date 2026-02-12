@@ -171,6 +171,37 @@ pip install -e .
 poetry run pytest
 ```
 
+### Configuração de URLs do Scraper
+
+O scraper usa `src/data_platform/scrapers/config/site_urls.yaml` para definir quais agências serão processadas.
+
+**Formatos suportados**:
+
+```yaml
+# Formato legado (string) - sempre ativo
+abc: https://www.gov.br/abc/pt-br/assuntos/noticias
+
+# Formato novo (dict) - com controle de ativação
+mec:
+  url: https://www.gov.br/mec/pt-br/assuntos/noticias
+  active: true
+
+# Agência desabilitada
+cisc:
+  url: https://www.gov.br/pt-br/noticias
+  active: false
+  disabled_reason: "URL generica, nao especifica da agencia"
+  disabled_date: "2025-01-15"
+```
+
+**Campos**:
+| Campo | Tipo | Obrigatório | Default | Descrição |
+|-------|------|-------------|---------|-----------|
+| `url` | string | Sim | - | URL da página de notícias |
+| `active` | bool | Não | `true` | Se deve ser processada |
+| `disabled_reason` | string | Não | - | Motivo da desativação |
+| `disabled_date` | string | Não | - | Data da desativação (YYYY-MM-DD) |
+
 ---
 
 ## Typesense

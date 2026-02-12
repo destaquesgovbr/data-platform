@@ -3,15 +3,14 @@ import logging
 import os
 from collections import OrderedDict
 from datetime import date
-from typing import Any, Dict, List
+from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
+
 from data_platform.scrapers.webscraper import WebScraper
 
 # Set up logging configuration
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
 class ScrapeManager:
@@ -39,31 +38,85 @@ class ScrapeManager:
         """
         self.dataset_manager = storage  # Keep attribute name for compatibility
 
-    def _load_urls_from_yaml(self, file_name: str, agency: str = None) -> List[str]:
+    def _load_urls_from_yaml(self, file_name: str, agency: str | None = None) -> list[str]:
         """
         Load URLs from a YAML file located in the same directory as this script.
 
+        Supports two formats:
+        - Legacy: agency_key: url_string
+        - New: agency_key: {url: str, active: bool, ...}
+
         :param file_name: The name of the YAML file.
-        :param agency: Specific agency key to filter URLs. If None, load all URLs.
+        :param agency: Specific agency key to filter URLs. If None, load all active URLs.
         :return: A list of URLs.
         """
         script_dir = os.path.dirname(os.path.abspath(__file__))
         file_path = os.path.join(script_dir, "config", file_name)
 
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             agencies = yaml.safe_load(f)["agencies"]
 
         if agency:
-            if agency in agencies:
-                return [agencies[agency]]
-            else:
+            if agency not in agencies:
                 raise ValueError(f"Agency '{agency}' not found in the YAML file.")
+            agency_data = agencies[agency]
+            if self._is_agency_inactive(agency, agency_data):
+                raise ValueError(f"Agency '{agency}' is inactive.")
+            return [self._extract_url(agency_data)]
 
-        return list(agencies.values())
+        # Load all active agencies
+        urls = []
+        inactive_agencies = []
+
+        for agency_key, agency_data in agencies.items():
+            if self._is_agency_inactive(agency_key, agency_data):
+                inactive_agencies.append(agency_key)
+                continue
+            urls.append(self._extract_url(agency_data))
+
+        if inactive_agencies:
+            logging.info(
+                f"Filtered {len(inactive_agencies)} inactive agencies: "
+                f"{', '.join(sorted(inactive_agencies))}"
+            )
+
+        return urls
+
+    def _extract_url(self, agency_data: str | dict[str, Any]) -> str:
+        """
+        Extract URL from agency data (supports both formats).
+
+        :param agency_data: Either a URL string or dict with 'url' key.
+        :return: The URL string.
+        """
+        if isinstance(agency_data, str):
+            return agency_data
+        return str(agency_data["url"])
+
+    def _is_agency_inactive(self, agency_key: str, agency_data: str | dict[str, Any]) -> bool:
+        """
+        Check if agency is inactive.
+
+        :param agency_key: Agency identifier for logging.
+        :param agency_data: Either a URL string or dict with 'active' key.
+        :return: True if agency should be skipped.
+        """
+        # Legacy format (string) - always active
+        if isinstance(agency_data, str):
+            return False
+
+        # New format - check 'active' field (defaults to True if missing)
+        is_active = agency_data.get("active", True)
+
+        if not is_active:
+            reason = agency_data.get("disabled_reason", "No reason provided")
+            logging.debug(f"Skipping inactive agency '{agency_key}': {reason}")
+
+        return not is_active
 
     def run_scraper(
         self,
-        agencies: List[str],
+        agencies: list[str],
         min_date: str,
         max_date: str,
         sequential: bool,
@@ -93,17 +146,13 @@ class ScrapeManager:
                 # Load all agency URLs if agencies list is None or empty
                 all_urls = self._load_urls_from_yaml("site_urls.yaml")
 
-            webscrapers = [
-                WebScraper(min_date, url, max_date=max_date) for url in all_urls
-            ]
+            webscrapers = [WebScraper(min_date, url, max_date=max_date) for url in all_urls]
 
             if sequential:
                 for scraper in webscrapers:
                     scraped_data = scraper.scrape_news()
                     if scraped_data:
-                        logging.info(
-                            f"Appending news for {scraper.agency} to HF dataset."
-                        )
+                        logging.info(f"Appending news for {scraper.agency} to HF dataset.")
                         self._process_and_upload_data(scraped_data, allow_update)
                     else:
                         logging.info(f"No news found for {scraper.agency}.")
@@ -134,7 +183,7 @@ class ScrapeManager:
         new_data = self._preprocess_data(new_data)
         self.dataset_manager.insert(new_data, allow_update=allow_update)
 
-    def _preprocess_data(self, data: List[Dict[str, str]]) -> OrderedDict:
+    def _preprocess_data(self, data: list[dict[str, str]]) -> OrderedDict:
         """
         Preprocess data by:z
         - Adding the unique_id column.
@@ -152,9 +201,7 @@ class ScrapeManager:
             )
 
         # Convert to columnar format
-        column_data = {
-            key: [item.get(key, None) for item in data] for key in data[0].keys()
-        }
+        column_data = {key: [item.get(key, None) for item in data] for key in data[0].keys()}
 
         # Reorder columns
         ordered_column_data = OrderedDict()
@@ -176,9 +223,7 @@ class ScrapeManager:
 
         return ordered_column_data
 
-    def _generate_unique_id(
-        self, agency: str, published_at_value: str, title: str
-    ) -> str:
+    def _generate_unique_id(self, agency: str, published_at_value: str, title: str) -> str:
         """
         Generate a unique identifier based on the agency, published_at, and title.
 
@@ -192,5 +237,5 @@ class ScrapeManager:
             if isinstance(published_at_value, date)
             else str(published_at_value)
         )
-        hash_input = f"{agency}_{date_str}_{title}".encode("utf-8")
+        hash_input = f"{agency}_{date_str}_{title}".encode()
         return hashlib.md5(hash_input).hexdigest()

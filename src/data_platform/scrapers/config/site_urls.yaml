@@ -35,7 +35,11 @@ agencies:
   cetene: https://www.gov.br/cetene/pt-br/assuntos/noticias
   cgu: https://www.gov.br/cgu/pt-br/assuntos/noticias/ultimas-noticias
   cidades: https://www.gov.br/cidades/pt-br/assuntos/noticias-1
-  # cisc: https://www.gov.br/pt-br/noticias
+  cisc:
+    url: https://www.gov.br/pt-br/noticias
+    active: false
+    disabled_reason: "URL generica, nao especifica da agencia"
+    disabled_date: "2025-01-15"
   cnen: https://www.gov.br/cnen/pt-br/assunto/ultimas-noticias
   cnpq: https://www.gov.br/cnpq/pt-br/assuntos/noticias
   coaf: https://www.gov.br/coaf/pt-br/assuntos/noticias/ultimas-noticias
@@ -74,7 +78,10 @@ agencies:
   hfa: https://www.gov.br/hfa/pt-br/noticias?b_start:int=0
   ibama: https://www.gov.br/ibama/pt-br/assuntos/noticias/2025
   ibc: https://www.gov.br/ibc/pt-br/assuntos/noticias
-  # ibde: https://www.gov.br/ibde/pt-br/assuntos/noticias
+  ibde:
+    url: https://www.gov.br/ibde/pt-br/assuntos/noticias
+    active: false
+    disabled_date: "2025-01-15"
   ibict: https://www.gov.br/ibict/pt-br/colecoes/colecao-de-todas-as-noticias-do-site
   icmbio: https://www.gov.br/icmbio/pt-br/assuntos/noticias/ultimas-noticias
   iec: https://www.gov.br/iec/pt-br/assuntos/noticias
@@ -94,7 +101,11 @@ agencies:
   insa: https://www.gov.br/insa/pt-br/assuntos/noticias
   inss: https://www.gov.br/inss/pt-br/noticias/ultimas-noticias
   int: https://www.gov.br/int/pt-br/assuntos/noticias
-  # investidor: https://www.gov.br/pt-br/noticias
+  investidor:
+    url: https://www.gov.br/pt-br/noticias
+    active: false
+    disabled_reason: "URL generica"
+    disabled_date: "2025-01-15"
   iphan: https://www.gov.br/iphan/pt-br/assuntos/noticias
   ird: https://www.gov.br/ird/pt-br/assuntos/noticias
   iti: https://www.gov.br/iti/pt-br/assuntos/noticias/indice-de-noticias/
@@ -135,11 +146,18 @@ agencies:
   # DEPRECATED: Use transferegov (linha 161) - URL duplicada removida em resolução da Issue #59
   pncp: https://www.gov.br/pncp/pt-br/central-de-conteudo/noticias
   portos-e-aeroportos: https://www.gov.br/portos-e-aeroportos/pt-br/assuntos/noticias
-  # povosindigenas: https://www.gov.br/povosindigenas/pt-br/assuntos/noticias
+  povosindigenas:
+    url: https://www.gov.br/povosindigenas/pt-br/assuntos/noticias
+    active: false
+    disabled_date: "2025-01-15"
   previc: https://www.gov.br/previc/pt-br/noticias
   previdencia: https://www.gov.br/previdencia/pt-br/noticias
   prf: https://www.gov.br/prf/pt-br/noticias/nacionais
-  # produtividade-e-comercio-exterior: https://www.gov.br/pt-br/noticias
+  produtividade-e-comercio-exterior:
+    url: https://www.gov.br/pt-br/noticias
+    active: false
+    disabled_reason: "URL generica"
+    disabled_date: "2025-01-15"
   propriedade-intelectual: https://www.gov.br/propriedade-intelectual/pt-br/assuntos/noticias
   receitafederal: https://www.gov.br/receitafederal/pt-br/assuntos/noticias
   reconstrucaors: https://www.gov.br/reconstrucaors/pt-br/acompanhe-a-reconstrucao/noticias
@@ -150,7 +168,10 @@ agencies:
   senappen: https://www.gov.br/senappen/pt-br/assuntos/noticias
   servicoscompartilhados: https://www.gov.br/servicoscompartilhados/pt-br/acesso-a-informacao/noticias
   servidor: https://www.gov.br/servidor/pt-br/assuntos/noticias
-  # siscomex: https://www.gov.br/siscomex/pt-br/noticias
+  siscomex:
+    url: https://www.gov.br/siscomex/pt-br/noticias
+    active: false
+    disabled_date: "2025-01-15"
   sri: https://www.gov.br/sri/pt-br/noticias/mais-noticias/ultimas-noticias
   sudam: https://www.gov.br/sudam/pt-br/noticias-1
   sudeco: https://www.gov.br/sudeco/pt-br/assuntos/noticias
