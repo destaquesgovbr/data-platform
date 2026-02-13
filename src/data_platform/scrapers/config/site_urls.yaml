@@ -400,7 +400,6 @@ agencies:
   planejamento:
     url: https://www.gov.br/planejamento/pt-br/assuntos/noticias
     active: true
-  # plataformamaisbrasil removido - URL duplicada de transferegov (Issue #59)
   pncp:
     url: https://www.gov.br/pncp/pt-br/central-de-conteudo/noticias
     active: true
