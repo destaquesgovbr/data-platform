@@ -24,12 +24,12 @@ class TestLoadUrlsFromYaml:
     def test_load_all_urls(self, ebc_scrape_manager: EBCScrapeManager) -> None:
         """Test loading all URLs from YAML."""
         yaml_content = {
-            "sources": {
-                "agencia_brasil": {
+            "agencies": {
+                "agencia-brasil": {
                     "url": "https://agenciabrasil.ebc.com.br/ultimas",
                     "active": True,
                 },
-                "memoria_ebc": {"url": "https://memoria.ebc.com.br/noticias", "active": True},
+                "memoria-ebc": {"url": "https://memoria.ebc.com.br/noticias", "active": True},
             }
         }
         with patch("builtins.open", mock_open(read_data=yaml.dump(yaml_content))):
@@ -39,30 +39,30 @@ class TestLoadUrlsFromYaml:
         assert "https://agenciabrasil.ebc.com.br/ultimas" in urls
         assert "https://memoria.ebc.com.br/noticias" in urls
 
-    def test_load_single_source(self, ebc_scrape_manager: EBCScrapeManager) -> None:
-        """Test loading single source URL."""
+    def test_load_single_agency(self, ebc_scrape_manager: EBCScrapeManager) -> None:
+        """Test loading single agency URL."""
         yaml_content = {
-            "sources": {
-                "agencia_brasil": {
+            "agencies": {
+                "agencia-brasil": {
                     "url": "https://agenciabrasil.ebc.com.br/ultimas",
                     "active": True,
                 },
             }
         }
         with patch("builtins.open", mock_open(read_data=yaml.dump(yaml_content))):
-            urls = ebc_scrape_manager._load_urls_from_yaml("ebc_urls.yaml", source="agencia_brasil")
+            urls = ebc_scrape_manager._load_urls_from_yaml("ebc_urls.yaml", agency="agencia-brasil")
 
         assert urls == ["https://agenciabrasil.ebc.com.br/ultimas"]
 
     def test_load_all_urls_filters_inactive(self, ebc_scrape_manager: EBCScrapeManager) -> None:
-        """Test that inactive sources are filtered out."""
+        """Test that inactive agencies are filtered out."""
         yaml_content = {
-            "sources": {
-                "agencia_brasil": {
+            "agencies": {
+                "agencia-brasil": {
                     "url": "https://agenciabrasil.ebc.com.br/ultimas",
                     "active": True,
                 },
-                "memoria_ebc": {"url": "https://memoria.ebc.com.br/noticias", "active": False},
+                "memoria-ebc": {"url": "https://memoria.ebc.com.br/noticias", "active": False},
             }
         }
         with patch("builtins.open", mock_open(read_data=yaml.dump(yaml_content))):
@@ -77,8 +77,8 @@ class TestLoadUrlsFromYaml:
     ) -> None:
         """Test that missing 'active' field defaults to True."""
         yaml_content = {
-            "sources": {
-                "agencia_brasil": {
+            "agencies": {
+                "agencia-brasil": {
                     "url": "https://agenciabrasil.ebc.com.br/ultimas"
                 },  # no 'active' key
             }
@@ -88,28 +88,28 @@ class TestLoadUrlsFromYaml:
 
         assert len(urls) == 1
 
-    # --- Single Source Lookup Tests ---
+    # --- Single Agency Lookup Tests ---
 
-    def test_load_single_inactive_source_raises_error(
+    def test_load_single_inactive_agency_raises_error(
         self, ebc_scrape_manager: EBCScrapeManager
     ) -> None:
-        """Test that requesting an inactive source raises ValueError."""
+        """Test that requesting an inactive agency raises ValueError."""
         yaml_content = {
-            "sources": {
-                "memoria_ebc": {"url": "https://memoria.ebc.com.br/noticias", "active": False},
+            "agencies": {
+                "memoria-ebc": {"url": "https://memoria.ebc.com.br/noticias", "active": False},
             }
         }
         with patch("builtins.open", mock_open(read_data=yaml.dump(yaml_content))):
-            with pytest.raises(ValueError, match="Source 'memoria_ebc' is inactive"):
-                ebc_scrape_manager._load_urls_from_yaml("ebc_urls.yaml", source="memoria_ebc")
+            with pytest.raises(ValueError, match="Agency 'memoria-ebc' is inactive"):
+                ebc_scrape_manager._load_urls_from_yaml("ebc_urls.yaml", agency="memoria-ebc")
 
-    def test_load_nonexistent_source_raises_error(
+    def test_load_nonexistent_agency_raises_error(
         self, ebc_scrape_manager: EBCScrapeManager
     ) -> None:
-        """Test that requesting unknown source raises ValueError."""
+        """Test that requesting unknown agency raises ValueError."""
         yaml_content = {
-            "sources": {
-                "agencia_brasil": {
+            "agencies": {
+                "agencia-brasil": {
                     "url": "https://agenciabrasil.ebc.com.br/ultimas",
                     "active": True,
                 }
@@ -117,21 +117,21 @@ class TestLoadUrlsFromYaml:
         }
         with patch("builtins.open", mock_open(read_data=yaml.dump(yaml_content))):
             with pytest.raises(ValueError, match="not found"):
-                ebc_scrape_manager._load_urls_from_yaml("ebc_urls.yaml", source="unknown")
+                ebc_scrape_manager._load_urls_from_yaml("ebc_urls.yaml", agency="unknown")
 
     # --- Logging Tests ---
 
-    def test_logs_filtered_sources(
+    def test_logs_filtered_agencies(
         self, ebc_scrape_manager: EBCScrapeManager, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test that filtered sources are logged."""
+        """Test that filtered agencies are logged."""
         yaml_content = {
-            "sources": {
-                "agencia_brasil": {
+            "agencies": {
+                "agencia-brasil": {
                     "url": "https://agenciabrasil.ebc.com.br/ultimas",
                     "active": True,
                 },
-                "memoria_ebc": {"url": "https://memoria.ebc.com.br/noticias", "active": False},
+                "memoria-ebc": {"url": "https://memoria.ebc.com.br/noticias", "active": False},
                 "tvbrasil": {"url": "https://tvbrasil.ebc.com.br/noticias", "active": False},
             }
         }
@@ -139,8 +139,8 @@ class TestLoadUrlsFromYaml:
             with caplog.at_level(logging.INFO):
                 ebc_scrape_manager._load_urls_from_yaml("ebc_urls.yaml")
 
-        assert "Filtered 2 inactive sources" in caplog.text
-        assert "memoria_ebc" in caplog.text
+        assert "Filtered 2 inactive agencies" in caplog.text
+        assert "memoria-ebc" in caplog.text
         assert "tvbrasil" in caplog.text
 
 
@@ -164,8 +164,8 @@ class TestExtractUrl:
         assert result == "https://example.com"
 
 
-class TestIsSourceInactive:
-    """Tests for _is_source_inactive helper method."""
+class TestIsAgencyInactive:
+    """Tests for _is_agency_inactive helper method."""
 
     @pytest.fixture  # type: ignore[untyped-decorator]
     def ebc_scrape_manager(self) -> EBCScrapeManager:
@@ -174,16 +174,16 @@ class TestIsSourceInactive:
     def test_active_true_is_not_inactive(self, ebc_scrape_manager: EBCScrapeManager) -> None:
         """Test that active=True returns False (not inactive)."""
         data = {"url": "https://example.com", "active": True}
-        assert ebc_scrape_manager._is_source_inactive("agencia_brasil", data) is False
+        assert ebc_scrape_manager._is_agency_inactive("agencia-brasil", data) is False
 
     def test_active_false_is_inactive(self, ebc_scrape_manager: EBCScrapeManager) -> None:
         """Test that active=False returns True (is inactive)."""
         data = {"url": "https://example.com", "active": False}
-        assert ebc_scrape_manager._is_source_inactive("memoria_ebc", data) is True
+        assert ebc_scrape_manager._is_agency_inactive("memoria-ebc", data) is True
 
     def test_missing_active_defaults_to_not_inactive(
         self, ebc_scrape_manager: EBCScrapeManager
     ) -> None:
         """Test that missing active field defaults to active (not inactive)."""
         data = {"url": "https://example.com"}
-        assert ebc_scrape_manager._is_source_inactive("agencia_brasil", data) is False
+        assert ebc_scrape_manager._is_agency_inactive("agencia-brasil", data) is False

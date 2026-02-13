@@ -37,75 +37,75 @@ class EBCScrapeManager:
         """
         self.dataset_manager = storage  # Keep attribute name for compatibility
 
-    def _load_urls_from_yaml(self, file_name: str, source: str | None = None) -> list[str]:
+    def _load_urls_from_yaml(self, file_name: str, agency: str | None = None) -> list[str]:
         """
         Load URLs from a YAML file located in the same directory as this script.
 
         Expected format:
-            source_key:
+            agency_key:
               url: str
               active: bool  # optional, defaults to True
               disabled_reason: str  # optional
               disabled_date: str  # optional
 
         :param file_name: The name of the YAML file.
-        :param source: Specific source key to filter URLs. If None, load all active URLs.
+        :param agency: Specific agency key to filter URLs. If None, load all active URLs.
         :return: A list of URLs.
         """
         script_dir = os.path.dirname(os.path.abspath(__file__))
         file_path = os.path.join(script_dir, "config", file_name)
 
         with open(file_path) as f:
-            sources = yaml.safe_load(f)["sources"]
+            agencies = yaml.safe_load(f)["agencies"]
 
-        if source:
-            if source not in sources:
-                raise ValueError(f"Source '{source}' not found in the YAML file.")
-            source_data = sources[source]
-            if self._is_source_inactive(source, source_data):
-                raise ValueError(f"Source '{source}' is inactive.")
-            return [self._extract_url(source_data)]
+        if agency:
+            if agency not in agencies:
+                raise ValueError(f"Agency '{agency}' not found in the YAML file.")
+            agency_data = agencies[agency]
+            if self._is_agency_inactive(agency, agency_data):
+                raise ValueError(f"Agency '{agency}' is inactive.")
+            return [self._extract_url(agency_data)]
 
-        # Load all active sources
+        # Load all active agencies
         urls = []
-        inactive_sources = []
+        inactive_agencies = []
 
-        for source_key, source_data in sources.items():
-            if self._is_source_inactive(source_key, source_data):
-                inactive_sources.append(source_key)
+        for agency_key, agency_data in agencies.items():
+            if self._is_agency_inactive(agency_key, agency_data):
+                inactive_agencies.append(agency_key)
                 continue
-            urls.append(self._extract_url(source_data))
+            urls.append(self._extract_url(agency_data))
 
-        if inactive_sources:
+        if inactive_agencies:
             logging.info(
-                f"Filtered {len(inactive_sources)} inactive sources: "
-                f"{', '.join(sorted(inactive_sources))}"
+                f"Filtered {len(inactive_agencies)} inactive agencies: "
+                f"{', '.join(sorted(inactive_agencies))}"
             )
 
         return urls
 
-    def _extract_url(self, source_data: dict[str, Any]) -> str:
+    def _extract_url(self, agency_data: dict[str, Any]) -> str:
         """
-        Extract URL from source data.
+        Extract URL from agency data.
 
-        :param source_data: Dict with 'url' key.
+        :param agency_data: Dict with 'url' key.
         :return: The URL string.
         """
-        return str(source_data["url"])
+        return str(agency_data["url"])
 
-    def _is_source_inactive(self, source_key: str, source_data: dict[str, Any]) -> bool:
+    def _is_agency_inactive(self, agency_key: str, agency_data: dict[str, Any]) -> bool:
         """
-        Check if source is inactive.
+        Check if agency is inactive.
 
-        :param source_key: Source identifier for logging.
-        :param source_data: Dict with optional 'active' key.
-        :return: True if source should be skipped.
+        :param agency_key: Agency identifier for logging.
+        :param agency_data: Dict with optional 'active' key.
+        :return: True if agency should be skipped.
         """
-        is_active = source_data.get("active", True)
+        is_active = agency_data.get("active", True)
 
         if not is_active:
-            reason = source_data.get("disabled_reason", "No reason provided")
-            logging.debug(f"Skipping inactive source '{source_key}': {reason}")
+            reason = agency_data.get("disabled_reason", "No reason provided")
+            logging.debug(f"Skipping inactive agency '{agency_key}': {reason}")
 
         return not is_active
 
@@ -115,7 +115,7 @@ class EBCScrapeManager:
         max_date: str,
         sequential: bool,
         allow_update: bool = False,
-        sources: list[str] | None = None,
+        agencies: list[str] | None = None,
     ):
         """
         Executes the EBC web scraping process for the given date range.
@@ -124,20 +124,20 @@ class EBCScrapeManager:
         :param max_date: The maximum date for filtering news.
         :param sequential: Whether to scrape sequentially (True) or in bulk (False).
         :param allow_update: If True, overwrite existing entries in the dataset.
-        :param sources: A list of source names to scrape news from. If None, all active sources are scraped.
+        :param agencies: A list of agency names to scrape news from. If None, all active agencies are scraped.
         """
         try:
             all_urls = []
-            # Load URLs for each source in the list
-            if sources:
-                for source in sources:
+            # Load URLs for each agency in the list
+            if agencies:
+                for agency in agencies:
                     try:
-                        urls = self._load_urls_from_yaml("ebc_urls.yaml", source)
+                        urls = self._load_urls_from_yaml("ebc_urls.yaml", agency)
                         all_urls.extend(urls)
                     except ValueError as e:
-                        logging.warning(f"Skipping source '{source}': {e}")
+                        logging.warning(f"Skipping agency '{agency}': {e}")
             else:
-                # Load all source URLs if sources list is None or empty
+                # Load all agency URLs if agencies list is None or empty
                 all_urls = self._load_urls_from_yaml("ebc_urls.yaml")
 
             webscrapers = [EBCWebScraper(min_date, url, max_date=max_date) for url in all_urls]

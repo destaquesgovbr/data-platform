@@ -1,24 +1,13 @@
-# Fontes EBC (Agência Brasil, TV Brasil)
-# Cada entrada é uma URL de índice que lista múltiplas notícias
-#
-# Campos:
-#   url: URL da página de índice de notícias (obrigatório)
-#   active: Se deve ser processada (default: true)
-#   disabled_reason: Motivo da desativação (opcional)
-#   disabled_date: Data da desativação YYYY-MM-DD (opcional)
-#   description: Descrição da fonte (opcional)
-
-sources:
-  memoria_ebc:
+agencies:
+  memoria-ebc:
     url: https://memoria.ebc.com.br/noticias
     active: false
     disabled_reason: "Site fora do ar (502 Bad Gateway) - issue #50"
     disabled_date: "2026-02-12"
 
-  agencia_brasil:
+  agencia-brasil:
     url: https://agenciabrasil.ebc.com.br/ultimas
     active: true
-    description: "Portal Agência Brasil - notícias atuais"
 
   # tvbrasil:
   #   url: https://tvbrasil.ebc.com.br/noticias
