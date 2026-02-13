@@ -128,6 +128,59 @@ def ebc_scraper() -> EBCWebScraper:
     return EBCWebScraper(min_date="2026-01-01", base_url="https://agenciabrasil.ebc.com.br/ultimas")
 
 
+@pytest.fixture
+def tvbrasil_scraper() -> EBCWebScraper:
+    """EBCWebScraper instance for TV Brasil testing."""
+    return EBCWebScraper(min_date="2026-01-01", base_url="https://tvbrasil.ebc.com.br/noticias")
+
+
+@pytest.fixture
+def tvbrasil_index_html() -> str:
+    """Sample TV Brasil index page HTML with view-ultimas structure."""
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head><title>Notícias | TV Brasil</title></head>
+    <body>
+        <div class="view view-ultimas view-id-ultimas">
+            <div class="view-content row isoGrid isoRebuild">
+                <div class="isoGrid-item cmpGeneric col-lg-4">
+                    <div class="bgWhite full shadow">
+                        <h4 class="headband txtNoticias">notícias</h4>
+                        <h3 class="heading">
+                            <a href="/caminhos-da-reportagem/2026/02/test-article-1">
+                                Test Article 1
+                            </a>
+                        </h3>
+                    </div>
+                </div>
+                <div class="isoGrid-item cmpGeneric col-lg-4">
+                    <div class="bgWhite full shadow">
+                        <h4 class="headband txtCultura">cultura</h4>
+                        <h3 class="heading">
+                            <a href="/reporter-brasil/2026/02/test-article-2">
+                                Test Article 2
+                            </a>
+                        </h3>
+                    </div>
+                </div>
+                <div class="isoGrid-item cmpGeneric col-lg-4">
+                    <div class="bgWhite full shadow">
+                        <h4 class="headband txtEsportes">esporte</h4>
+                        <h3 class="heading">
+                            <a href="/stadium/2026/02/test-article-3">
+                                Test Article 3
+                            </a>
+                        </h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+
 # =============================================================================
 # Tests for EBCWebScraper
 # =============================================================================
@@ -214,6 +267,68 @@ class TestEBCWebScraper:
 
             assert "editorial_lead" in result
             assert result["editorial_lead"] == "Caminhos da Reportagem"
+
+    def test_scrape_index_page_tvbrasil_strategy3(
+        self,
+        tvbrasil_scraper: EBCWebScraper,
+        tvbrasil_index_html: str,
+    ) -> None:
+        """scrape_index_page extracts URLs from TV Brasil view-ultimas structure (Strategy 3)."""
+        with patch.object(tvbrasil_scraper, "fetch_page") as mock_fetch:
+            mock_response = MagicMock()
+            mock_response.content = tvbrasil_index_html.encode("utf-8")
+            mock_fetch.return_value = mock_response
+
+            result = tvbrasil_scraper.scrape_index_page("https://tvbrasil.ebc.com.br/noticias")
+
+            assert len(result) == 3
+            assert "https://tvbrasil.ebc.com.br/caminhos-da-reportagem/2026/02/test-article-1" in result
+            assert "https://tvbrasil.ebc.com.br/reporter-brasil/2026/02/test-article-2" in result
+            assert "https://tvbrasil.ebc.com.br/stadium/2026/02/test-article-3" in result
+
+    def test_scrape_index_page_tvbrasil_converts_relative_urls(
+        self,
+        tvbrasil_scraper: EBCWebScraper,
+        tvbrasil_index_html: str,
+    ) -> None:
+        """scrape_index_page converts relative URLs to absolute for TV Brasil."""
+        with patch.object(tvbrasil_scraper, "fetch_page") as mock_fetch:
+            mock_response = MagicMock()
+            mock_response.content = tvbrasil_index_html.encode("utf-8")
+            mock_fetch.return_value = mock_response
+
+            result = tvbrasil_scraper.scrape_index_page("https://tvbrasil.ebc.com.br/noticias")
+
+            # All URLs should be absolute (start with https://)
+            for url in result:
+                assert url.startswith("https://tvbrasil.ebc.com.br/")
+
+    def test_scrape_index_page_tvbrasil_no_duplicates(
+        self,
+        tvbrasil_scraper: EBCWebScraper,
+    ) -> None:
+        """scrape_index_page avoids duplicate URLs for TV Brasil."""
+        html_with_duplicates = """
+        <html>
+        <body>
+            <div class="view view-ultimas">
+                <h3 class="heading"><a href="/test-article">Article</a></h3>
+                <h3 class="heading"><a href="/test-article">Article (duplicate)</a></h3>
+                <h3 class="heading"><a href="/other-article">Other Article</a></h3>
+            </div>
+        </body>
+        </html>
+        """
+        with patch.object(tvbrasil_scraper, "fetch_page") as mock_fetch:
+            mock_response = MagicMock()
+            mock_response.content = html_with_duplicates.encode("utf-8")
+            mock_fetch.return_value = mock_response
+
+            result = tvbrasil_scraper.scrape_index_page("https://tvbrasil.ebc.com.br/noticias")
+
+            assert len(result) == 2  # Duplicate should be filtered
+            assert "https://tvbrasil.ebc.com.br/test-article" in result
+            assert "https://tvbrasil.ebc.com.br/other-article" in result
 
 
 # =============================================================================

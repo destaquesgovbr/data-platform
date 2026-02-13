@@ -9,7 +9,6 @@ agencies:
     url: https://agenciabrasil.ebc.com.br/ultimas
     active: true
 
-  # tvbrasil:
-  #   url: https://tvbrasil.ebc.com.br/noticias
-  #   active: false
-  #   disabled_reason: "Estrutura HTML diferente, requer adaptação específica"
+  tvbrasil:
+    url: https://tvbrasil.ebc.com.br/noticias
+    active: true

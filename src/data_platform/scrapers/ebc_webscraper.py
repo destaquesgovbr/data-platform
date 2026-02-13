@@ -210,7 +210,7 @@ class EBCWebScraper:
     def scrape_index_page(self, url: str) -> list[str]:
         """
         Scrape a single index page to extract news URLs.
-        Supports both agenciabrasil.ebc.com.br and memoria.ebc.com.br structures.
+        Supports agenciabrasil.ebc.com.br, memoria.ebc.com.br, and tvbrasil.ebc.com.br structures.
 
         :param url: The URL of the index page to scrape.
         :return: List of news URLs found on the page.
@@ -262,6 +262,29 @@ class EBCWebScraper:
                 except Exception as e:
                     logging.error(f"Error processing div {i}: {e}")
                     continue
+
+            if news_urls:
+                return news_urls
+
+        # Strategy 3: tvbrasil.ebc.com.br structure (view-ultimas class with h3.heading links)
+        view_ultimas = soup.find("div", class_="view-ultimas")
+        if view_ultimas:
+            base_domain = self._get_base_domain()
+            seen_urls = set()
+
+            # Find links inside h3.heading
+            heading_links = view_ultimas.find_all("h3", class_="heading")
+            for heading in heading_links:
+                link = heading.find("a")
+                if link:
+                    href = link.get("href", "").strip()
+                    if href:
+                        # Convert relative URL to absolute
+                        if href.startswith("/"):
+                            href = f"{base_domain}{href}"
+                        if href not in seen_urls:
+                            seen_urls.add(href)
+                            news_urls.append(href)
 
             if news_urls:
                 return news_urls
