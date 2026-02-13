@@ -13,8 +13,8 @@ Commands:
 - typesense-delete: Delete a Typesense collection
 - typesense-list: List all Typesense collections
 """
+
 import logging
-from typing import Optional
 
 import typer
 from dotenv import load_dotenv
@@ -23,22 +23,19 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 app = typer.Typer(
     name="data-platform",
-    help="Data platform for DestaquesGovBr - scraping, enrichment, and storage"
+    help="Data platform for DestaquesGovBr - scraping, enrichment, and storage",
 )
 
 
 @app.command()
 def scrape(
     start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
-    agencies: Optional[str] = typer.Option(None, help="Comma-separated agency codes"),
+    end_date: str | None = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    agencies: str | None = typer.Option(None, help="Comma-separated agency codes"),
     allow_update: bool = typer.Option(False, help="Allow updating existing records"),
     sequential: bool = typer.Option(True, help="Process agencies sequentially"),
 ) -> None:
@@ -52,13 +49,7 @@ def scrape(
     manager = ScrapeManager(storage)
     agency_list = agencies.split(",") if agencies else None
 
-    manager.run_scraper(
-        agency_list,
-        start_date,
-        end_date or start_date,
-        sequential,
-        allow_update
-    )
+    manager.run_scraper(agency_list, start_date, end_date or start_date, sequential, allow_update)
 
     logging.info("Scraping completed")
 
@@ -66,7 +57,8 @@ def scrape(
 @app.command("scrape-ebc")
 def scrape_ebc(
     start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    end_date: str | None = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    agencies: str | None = typer.Option(None, help="Comma-separated agency codes"),
     allow_update: bool = typer.Option(False, help="Allow updating existing records"),
     sequential: bool = typer.Option(True, help="Process sequentially"),
 ) -> None:
@@ -78,12 +70,14 @@ def scrape_ebc(
 
     storage = StorageAdapter()
     manager = EBCScrapeManager(storage)
+    agency_list = agencies.split(",") if agencies else None
 
     manager.run_scraper(
         start_date,
         end_date or start_date,
         sequential,
-        allow_update
+        allow_update,
+        agencies=agency_list,
     )
 
     logging.info("EBC scraping completed")
@@ -92,10 +86,11 @@ def scrape_ebc(
 @app.command("upload-cogfy")
 def upload_cogfy(
     start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    end_date: str | None = typer.Option(None, help="End date (YYYY-MM-DD)"),
 ) -> None:
     """Upload news to Cogfy for AI enrichment."""
     import os
+
     from data_platform.cogfy.upload_manager import UploadToCogfyManager
 
     server_url = os.getenv("COGFY_SERVER_URL", "https://api.cogfy.com/")
@@ -112,7 +107,7 @@ def upload_cogfy(
 @app.command()
 def enrich(
     start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    end_date: str | None = typer.Option(None, help="End date (YYYY-MM-DD)"),
 ) -> None:
     """Enrich news with AI-generated themes from Cogfy."""
     from data_platform.cogfy.enrichment_manager import EnrichmentManager
@@ -139,15 +134,18 @@ def sync_hf() -> None:
 @app.command()
 def migrate(
     batch_size: int = typer.Option(1000, help="Batch size for migration"),
-    max_records: Optional[int] = typer.Option(None, help="Max records to migrate (for testing)"),
+    max_records: int | None = typer.Option(None, help="Max records to migrate (for testing)"),
 ) -> None:
     """Migrate data from HuggingFace to PostgreSQL."""
     import sys
+
     sys.path.insert(0, str(__file__).replace("src/data_platform/cli.py", "scripts"))
 
     from scripts.migrate_hf_to_postgres import main as migrate_main
 
-    logging.info(f"Starting HF to PostgreSQL migration (batch_size={batch_size}, max_records={max_records})")
+    logging.info(
+        f"Starting HF to PostgreSQL migration (batch_size={batch_size}, max_records={max_records})"
+    )
 
     migrate_main(batch_size=batch_size, max_records=max_records)
 
@@ -157,9 +155,9 @@ def migrate(
 @app.command("generate-embeddings")
 def generate_embeddings(
     start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    end_date: str | None = typer.Option(None, help="End date (YYYY-MM-DD)"),
     batch_size: int = typer.Option(100, help="Batch size for processing"),
-    max_records: Optional[int] = typer.Option(None, help="Max records to process (for testing)"),
+    max_records: int | None = typer.Option(None, help="Max records to process (for testing)"),
 ) -> None:
     """
     Generate semantic embeddings for news articles.
@@ -174,10 +172,7 @@ def generate_embeddings(
 
     generator = EmbeddingGenerator()
     stats = generator.generate_embeddings(
-        start_date=start_date,
-        end_date=end_date,
-        batch_size=batch_size,
-        max_records=max_records
+        start_date=start_date, end_date=end_date, batch_size=batch_size, max_records=max_records
     )
 
     logging.info(
@@ -189,10 +184,10 @@ def generate_embeddings(
 @app.command("sync-typesense")
 def sync_typesense(
     start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    end_date: str | None = typer.Option(None, help="End date (YYYY-MM-DD)"),
     full_sync: bool = typer.Option(False, help="Force full sync (overwrite existing)"),
     batch_size: int = typer.Option(1000, help="Batch size for Typesense upsert"),
-    max_records: Optional[int] = typer.Option(None, help="Max records to sync (for testing)"),
+    max_records: int | None = typer.Option(None, help="Max records to sync (for testing)"),
 ) -> None:
     """
     Sync news from PostgreSQL to Typesense.
