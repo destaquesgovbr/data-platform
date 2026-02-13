@@ -27,7 +27,41 @@ def normalize_url(url: str) -> str:
     return url.rstrip("/").lower()
 
 
-def find_duplicate_urls(agencies_config: dict[str, str]) -> list[tuple[str, list[str]]]:
+def _extract_url(agency_data: Any) -> str | None:
+    """
+    Extrai URL do dado da agência, suportando formatos antigo e novo.
+
+    Args:
+        agency_data: String (formato antigo) ou dict com campo 'url' (formato novo)
+
+    Returns:
+        URL extraída ou None se não encontrada
+    """
+    if isinstance(agency_data, str):
+        return agency_data
+    if isinstance(agency_data, dict) and "url" in agency_data:
+        return agency_data["url"]
+    return None
+
+
+def _is_agency_active(agency_data: Any) -> bool:
+    """
+    Verifica se agência está ativa.
+
+    Args:
+        agency_data: String (formato antigo, sempre ativa) ou dict com campo 'active'
+
+    Returns:
+        True se agência está ativa, False caso contrário
+    """
+    if isinstance(agency_data, str):
+        return True  # Formato antigo: sempre ativa
+    if isinstance(agency_data, dict):
+        return agency_data.get("active", True)  # Default: ativa
+    return False
+
+
+def find_duplicate_urls(agencies_config: dict[str, Any]) -> list[tuple[str, list[str]]]:
     """
     Encontra todas as URLs duplicadas e suas agências associadas.
 
@@ -41,7 +75,14 @@ def find_duplicate_urls(agencies_config: dict[str, str]) -> list[tuple[str, list
     # Mapa de URL normalizada -> lista de agências que usam essa URL
     url_to_agencies: dict[str, list[str]] = {}
 
-    for agency_key, url in agencies_config.items():
+    for agency_key, agency_data in agencies_config.items():
+        # Ignora agências inativas
+        if not _is_agency_active(agency_data):
+            continue
+
+        # Extrai URL do formato antigo ou novo
+        url = _extract_url(agency_data)
+
         # Ignora entradas comentadas (valor None) ou vazias
         if url is None or not url:
             continue
@@ -57,7 +98,7 @@ def find_duplicate_urls(agencies_config: dict[str, str]) -> list[tuple[str, list
     return duplicates
 
 
-def validate_no_duplicate_urls(agencies_config: dict[str, str]) -> list[str]:
+def validate_no_duplicate_urls(agencies_config: dict[str, Any]) -> list[str]:
     """
     Valida que não há URLs duplicadas entre agências.
 
@@ -83,7 +124,7 @@ def validate_no_duplicate_urls(agencies_config: dict[str, str]) -> list[str]:
     return errors
 
 
-def load_site_urls_config(config_path: Path | None = None) -> dict[str, str]:
+def load_site_urls_config(config_path: Path | None = None) -> dict[str, Any]:
     """
     Carrega configuração de site_urls.yaml.
 
@@ -92,7 +133,8 @@ def load_site_urls_config(config_path: Path | None = None) -> dict[str, str]:
                      relativo a este módulo
 
     Returns:
-        Dicionário {agency_key: url} da seção 'agencies'
+        Dicionário {agency_key: agency_data} da seção 'agencies'.
+        agency_data pode ser string (formato antigo) ou dict com 'url' (formato novo)
 
     Raises:
         FileNotFoundError: Se o arquivo não existir
@@ -104,7 +146,7 @@ def load_site_urls_config(config_path: Path | None = None) -> dict[str, str]:
         module_dir = Path(__file__).parent
         config_path = module_dir / "site_urls.yaml"
 
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     if not isinstance(config, dict) or "agencies" not in config:
@@ -115,9 +157,7 @@ def load_site_urls_config(config_path: Path | None = None) -> dict[str, str]:
 
     agencies = config["agencies"]
     if not isinstance(agencies, dict):
-        raise TypeError(
-            f"Seção 'agencies' deve ser um dicionário. Encontrado: {type(agencies)}"
-        )
+        raise TypeError(f"Seção 'agencies' deve ser um dicionário. Encontrado: {type(agencies)}")
 
     return agencies
 
