@@ -10,5 +10,5 @@ agencies:
     active: true
 
   tvbrasil:
-    url: https://tvbrasil.ebc.com.br/noticias
+    url: https://tvbrasil.ebc.com.br/ultimas
     active: true

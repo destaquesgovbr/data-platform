@@ -5,7 +5,7 @@ Este teste executa o fluxo completo end-to-end:
 1. Limpeza de BDs (PostgreSQL + Typesense)
 2. Criação de schema e dados mestre (agencies, themes)
 3. Scraping Gov.br (MEC, GESTAO, CGU) - 20 a 23/12/2025
-3b. Scraping EBC (Agencia Brasil) - 19/02/2026
+3b. Scraping EBC (Agencia Brasil, TVBrasil) - 19/02/2026
 4. Upload para Cogfy (AI enrichment)
 5. Enrich com temas do Cogfy
 6. Geração de embeddings via API Cloud Run
@@ -401,23 +401,22 @@ def test_02a_scrape_govbr(docker_services: None, env_vars: None) -> None:
     for date, count in results:
         print(f"   {date}: {count} notícias")
 
-    print("\n✅ FASE 2 COMPLETA: Scraping finalizado")
+    print("\n✅ FASE 2a COMPLETA: Scraping finalizado")
 
 
 def test_02b_scrape_ebc(docker_services: None, env_vars: None) -> None:
     """
-    FASE 2b: Scraping de noticias EBC (Agencia Brasil).
+    FASE 2b: Scraping de noticias EBC (Agencia Brasil, TVBrasil).
 
     Nota: EBC scraping e mais lento que gov.br porque visita cada pagina de artigo.
-    Para evitar timeout, usamos apenas 1 dia e 1 agencia.
+    Para evitar timeout, usamos apenas 1 dia e 2 agencias.
     """
     print("\n" + "=" * 70)
-    print("FASE 2b: Scraping EBC (agencia-brasil)")
+    print("FASE 2b: Scraping EBC (agencia-brasil, tvbrasil)")
     print("=" * 70)
 
     # EBC scraping visita cada pagina de artigo, entao e mais lento.
     # Usamos EBC_DATE (data recente) para evitar timeout ao paginar.
-    # TV Brasil tem bug de parsing de data, entao testamos apenas agencia-brasil.
     run_cli_command(
         [
             "scrape-ebc",
@@ -426,11 +425,11 @@ def test_02b_scrape_ebc(docker_services: None, env_vars: None) -> None:
             "--end-date",
             EBC_DATE,
             "--agencies",
-            "agencia-brasil",
+            EBC_AGENCIES,
             "--allow-update",
             "--sequential",
         ],
-        f"Scraping noticias EBC (agencia-brasil, {EBC_DATE})",
+        f"Scraping noticias EBC (agencia-brasil e tvbrasil {EBC_DATE})",
     )
 
     # Validar que noticias EBC foram inseridas
@@ -438,11 +437,11 @@ def test_02b_scrape_ebc(docker_services: None, env_vars: None) -> None:
     cur = conn.cursor()
 
     # Contar noticias EBC (agency_key usa underscore: agencia_brasil)
-    cur.execute("SELECT COUNT(*) FROM news WHERE agency_key = 'agencia_brasil'")
-    agencia_brasil_count = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM news WHERE agency_key IN ('agencia_brasil', 'tvbrasil')")
+    ebc_count = cur.fetchone()[0]
 
-    assert agencia_brasil_count > 0, "Nenhuma noticia EBC foi scraped"
-    print(f"\n📰 Total de noticias Agencia Brasil scraped: {agencia_brasil_count}")
+    assert ebc_count > 0, "Nenhuma noticia EBC foi scraped"
+    print(f"\n📰 Total de noticias EBC scraped: {ebc_count}")
 
     cur.close()
     conn.close()
