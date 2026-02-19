@@ -3,8 +3,7 @@ import logging
 import random
 import re
 import time
-from datetime import date, datetime, timezone, timedelta
-from typing import Dict, List, Optional, Tuple
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 from bs4 import BeautifulSoup
@@ -12,15 +11,13 @@ from markdownify import markdownify as md
 from retry import retry
 
 # Set up logging configuration
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 SLEEP_TIME_INTERVAL = (0.5, 1.5)
 
 
 class WebScraper:
-    def __init__(self, min_date: str, base_url: str, max_date: Optional[str] = None):
+    def __init__(self, min_date: str, base_url: str, max_date: str | None = None):
         """
         Initialize the scraper with minimum and maximum dates, and base URL.
 
@@ -45,7 +42,7 @@ class WebScraper:
         """
         return self.base_url.split("/")[3]
 
-    def scrape_news(self) -> List[Dict[str, str]]:
+    def scrape_news(self) -> list[dict[str, str]]:
         """
         Scrape news from the website until the min_date is reached.
         If the agency's URL consistently fails, skip it.
@@ -62,9 +59,7 @@ class WebScraper:
 
                 # If no items were found, break the loop to avoid infinite requests
                 if items_per_page == 0:
-                    logging.info(
-                        f"No more news items found for {self.agency}. Stopping."
-                    )
+                    logging.info(f"No more news items found for {self.agency}. Stopping.")
                     break
 
                 if not should_continue:
@@ -81,9 +76,7 @@ class WebScraper:
                 break
 
             except requests.exceptions.RequestException as e:
-                logging.error(
-                    f"Skipping agency {self.agency} due to network error: {str(e)}"
-                )
+                logging.error(f"Skipping agency {self.agency} due to network error: {str(e)}")
                 break
 
         return self.news_data
@@ -95,7 +88,7 @@ class WebScraper:
         backoff=3,
         jitter=(1, 3),
     )
-    def fetch_page(self, url: str) -> Optional[requests.Response]:
+    def fetch_page(self, url: str) -> requests.Response | None:
         """
         Fetch the page content from the given URL with retry logic.
         If the request fails permanently, return None.
@@ -116,7 +109,7 @@ class WebScraper:
             logging.error(f"Request failed for {url}: {e}")
             return None
 
-    def scrape_page(self, page_url: str) -> Tuple[bool, int]:
+    def scrape_page(self, page_url: str) -> tuple[bool, int]:
         """
         Scrape a single page of news with logic to skip pages where news is newer than max_date.
         If the request fails, return (False, 0).
@@ -152,9 +145,7 @@ class WebScraper:
         last_news_item = news_items[-1]
         last_news_date = self.extract_date(last_news_item)
         if not last_news_date:
-            logging.warning(
-                "Could not extract date from last news item; processing page."
-            )
+            logging.warning("Could not extract date from last news item; processing page.")
         elif self.max_date and last_news_date > self.max_date:
             logging.info(
                 f"Last news date {last_news_date} is newer than max_date {self.max_date}. Skipping page."
@@ -187,9 +178,7 @@ class WebScraper:
 
         if news_date:
             if news_date < self.min_date:
-                logging.info(
-                    f"Stopping scrape. Found news older than min_date: {news_date}"
-                )
+                logging.info(f"Stopping scrape. Found news older than min_date: {news_date}")
                 return False  # Stop processing items
             if self.max_date and news_date > self.max_date:
                 logging.info(
@@ -201,13 +190,37 @@ class WebScraper:
         tags_from_listing = self.extract_tags(item)
 
         # Get article content and metadata (tags, editorial_lead, subtitle, category from article page)
-        content, image_url, published_dt, updated_dt, tags_from_article, editorial_lead, subtitle, category_from_article = self.get_article_content(url)
+        (
+            content,
+            image_url,
+            published_dt,
+            updated_dt,
+            tags_from_article,
+            editorial_lead,
+            subtitle,
+            category_from_article,
+        ) = self.get_article_content(url)
+
+        # Fallback: use listing page date if article page datetime extraction failed
+        if not published_dt and news_date:
+            brasilia_tz = timezone(timedelta(hours=-3))
+            published_dt = datetime.combine(news_date, datetime.min.time()).replace(
+                tzinfo=brasilia_tz
+            )
+            logging.warning(
+                f"Using listing page date as fallback for {url} "
+                f"(article page datetime extraction failed)"
+            )
 
         # Use tags from article page if found, otherwise use from listing
         final_tags = tags_from_article if tags_from_article else tags_from_listing
 
         # Use category from listing if found, otherwise use from article page
-        final_category = category_from_listing if category_from_listing != "No Category" else (category_from_article or category_from_listing)
+        final_category = (
+            category_from_listing
+            if category_from_listing != "No Category"
+            else (category_from_article or category_from_listing)
+        )
 
         logging.info(f"Retrieved article: {news_date} - {url}\n")
 
@@ -230,7 +243,7 @@ class WebScraper:
 
         return True  # Continue processing items
 
-    def extract_title_and_url(self, item) -> Tuple[str, str]:
+    def extract_title_and_url(self, item) -> tuple[str, str]:
         """
         Extract the title and URL from a news item.
 
@@ -268,7 +281,7 @@ class WebScraper:
 
         return category_tag.get_text().strip() if category_tag else "No Category"
 
-    def extract_date(self, item) -> Optional[date]:
+    def extract_date(self, item) -> date | None:
         """
         Extract the date from a news item using multiple strategies.
 
@@ -285,7 +298,7 @@ class WebScraper:
 
         return result.date()
 
-    def extract_date_1(self, item) -> Optional[datetime]:
+    def extract_date_1(self, item) -> datetime | None:
         """
         Extract the date from a news item using the first strategy.
 
@@ -306,7 +319,7 @@ class WebScraper:
                     return None
         return None
 
-    def extract_date_2(self, item) -> Optional[datetime]:
+    def extract_date_2(self, item) -> datetime | None:
         """
         Extract the date from a news item using the second strategy.
 
@@ -328,7 +341,7 @@ class WebScraper:
             logging.warning(f"Date format not recognized: {date_str}")
             return None
 
-    def extract_tags(self, item) -> List[str]:
+    def extract_tags(self, item) -> list[str]:
         """
         Extract the tags from a news item in the listing page.
         NOTE: This method rarely finds tags as they're usually only in the article page.
@@ -350,7 +363,7 @@ class WebScraper:
 
         return []
 
-    def _extract_tags_from_article_page(self, soup) -> List[str]:
+    def _extract_tags_from_article_page(self, soup) -> list[str]:
         """
         Extract tags from the individual article page.
         Tags are usually found as links with 'origem=keyword' in the href.
@@ -360,7 +373,7 @@ class WebScraper:
         """
         try:
             # Look for links with origem=keyword parameter (standard gov.br structure)
-            tag_links = soup.find_all('a', href=lambda href: href and 'origem=keyword' in href)
+            tag_links = soup.find_all("a", href=lambda href: href and "origem=keyword" in href)
 
             if tag_links:
                 tags = [link.get_text().strip() for link in tag_links if link.get_text().strip()]
@@ -368,9 +381,9 @@ class WebScraper:
                 return tags
 
             # Fallback: look for keyword section
-            keywords_section = soup.find('div', class_='keywords')
+            keywords_section = soup.find("div", class_="keywords")
             if keywords_section:
-                tag_links = keywords_section.find_all('a')
+                tag_links = keywords_section.find_all("a")
                 tags = [link.get_text().strip() for link in tag_links if link.get_text().strip()]
                 return tags
 
@@ -379,7 +392,7 @@ class WebScraper:
 
         return []
 
-    def _extract_editorial_lead(self, article_body) -> Optional[str]:
+    def _extract_editorial_lead(self, article_body) -> str | None:
         """
         Extract editorial lead/kicker (e.g., "COP30 E O BRASIL") from article.
         This is typically formatted text that provides context, often found in SECOM articles.
@@ -389,7 +402,7 @@ class WebScraper:
         """
         try:
             # SECOM structure: <p class="nitfSubtitle">
-            nitf_subtitle = article_body.find('p', class_='nitfSubtitle')
+            nitf_subtitle = article_body.find("p", class_="nitfSubtitle")
             if nitf_subtitle:
                 text = nitf_subtitle.get_text().strip()
                 if text:
@@ -397,7 +410,7 @@ class WebScraper:
                     return text
 
             # Alternative: look for first <strong> or <p> with all caps short text
-            first_p = article_body.find('p')
+            first_p = article_body.find("p")
             if first_p:
                 text = first_p.get_text().strip()
                 # Check if it's short (< 50 chars) and mostly uppercase
@@ -409,7 +422,7 @@ class WebScraper:
 
         return None
 
-    def _extract_subtitle(self, article_body) -> Optional[str]:
+    def _extract_subtitle(self, article_body) -> str | None:
         """
         Extract subtitle/lead from article (descriptive text that complements the title).
         Typically formatted as <p class="discreet"> or similar.
@@ -419,7 +432,7 @@ class WebScraper:
         """
         try:
             # Look for paragraph with class "discreet" (common pattern)
-            discreet_p = article_body.find('p', class_='discreet')
+            discreet_p = article_body.find("p", class_="discreet")
             if discreet_p:
                 text = discreet_p.get_text().strip()
                 if text:
@@ -427,7 +440,7 @@ class WebScraper:
                     return text
 
             # Alternative: look for <p class="description">
-            description_p = article_body.find('p', class_='description')
+            description_p = article_body.find("p", class_="description")
             if description_p:
                 text = description_p.get_text().strip()
                 if text:
@@ -438,7 +451,7 @@ class WebScraper:
 
         return None
 
-    def _extract_category_from_article_page(self, soup) -> Optional[str]:
+    def _extract_category_from_article_page(self, soup) -> str | None:
         """
         Extract category from individual article page (fallback when not found in listing).
 
@@ -448,25 +461,25 @@ class WebScraper:
         try:
             # Look for breadcrumb or category indicators
             # Pattern 1: Look in portal-breadcrumbs
-            breadcrumbs = soup.find('nav', class_='portal-breadcrumbs')
+            breadcrumbs = soup.find("nav", class_="portal-breadcrumbs")
             if breadcrumbs:
-                links = breadcrumbs.find_all('a')
+                links = breadcrumbs.find_all("a")
                 if len(links) >= 2:  # Skip first (usually "Home")
                     category = links[1].get_text().strip()
-                    if category and category.lower() not in ['home', 'início']:
+                    if category and category.lower() not in ["home", "início"]:
                         return category
 
             # Pattern 2: Look for category in metadata
-            category_meta = soup.find('meta', attrs={'name': 'category'})
-            if category_meta and category_meta.get('content'):
-                return category_meta.get('content').strip()
+            category_meta = soup.find("meta", attrs={"name": "category"})
+            if category_meta and category_meta.get("content"):
+                return category_meta.get("content").strip()
 
         except Exception as e:
             logging.debug(f"Error extracting category from article page: {e}")
 
         return None
 
-    def _extract_datetime_from_jsonld(self, soup) -> Optional[datetime]:
+    def _extract_datetime_from_jsonld(self, soup) -> datetime | None:
         """
         Extract datetime from JSON-LD NewsArticle schema.
         This is the most reliable method as JSON-LD is structured and standardized.
@@ -476,7 +489,7 @@ class WebScraper:
         """
         try:
             # Find all script tags with type application/ld+json
-            script_tags = soup.find_all('script', type='application/ld+json')
+            script_tags = soup.find_all("script", type="application/ld+json")
 
             for script in script_tags:
                 try:
@@ -490,8 +503,8 @@ class WebScraper:
 
                     # Look for NewsArticle type
                     for item in items:
-                        if item.get('@type') == 'NewsArticle' and 'datePublished' in item:
-                            date_str = item['datePublished']
+                        if item.get("@type") == "NewsArticle" and "datePublished" in item:
+                            date_str = item["datePublished"]
                             # Parse ISO 8601 format: 2025-11-17T19:24:43-03:00
                             return datetime.fromisoformat(date_str)
 
@@ -504,7 +517,7 @@ class WebScraper:
 
         return None
 
-    def _extract_updated_datetime_from_jsonld(self, soup) -> Optional[datetime]:
+    def _extract_updated_datetime_from_jsonld(self, soup) -> datetime | None:
         """
         Extract update datetime from JSON-LD NewsArticle schema.
 
@@ -512,7 +525,7 @@ class WebScraper:
         :return: datetime object with timezone or None if not found.
         """
         try:
-            script_tags = soup.find_all('script', type='application/ld+json')
+            script_tags = soup.find_all("script", type="application/ld+json")
 
             for script in script_tags:
                 try:
@@ -524,8 +537,8 @@ class WebScraper:
                         items = [data]
 
                     for item in items:
-                        if item.get('@type') == 'NewsArticle' and 'dateModified' in item:
-                            date_str = item['dateModified']
+                        if item.get("@type") == "NewsArticle" and "dateModified" in item:
+                            date_str = item["dateModified"]
                             return datetime.fromisoformat(date_str)
 
                 except (json.JSONDecodeError, KeyError, ValueError) as e:
@@ -537,12 +550,40 @@ class WebScraper:
 
         return None
 
-    def _extract_datetime_from_text(self, soup) -> Tuple[Optional[datetime], Optional[datetime]]:
+    @staticmethod
+    def _parse_datetime_from_text(text: str, brasilia_tz: timezone) -> datetime | None:
+        """
+        Try to parse a datetime from a text string using known gov.br patterns.
+
+        :param text: Text to parse (e.g., "10/02/2026 17h05" or "17/11/2025 - 18:58").
+        :param brasilia_tz: Timezone object for Brasília (UTC-3).
+        :return: datetime object or None if no pattern matched.
+        """
+        # Pattern 1: DD/MM/YYYY HH:MMh (e.g., "17/11/2025 19h24")
+        match = re.search(r"(\d{2})/(\d{2})/(\d{4})\s+(\d{1,2})h(\d{2})", text)
+        if match:
+            day, month, year, hour, minute = match.groups()
+            return datetime(
+                int(year), int(month), int(day), int(hour), int(minute), tzinfo=brasilia_tz
+            )
+
+        # Pattern 2: DD/MM/YYYY - HH:MM (e.g., "17/11/2025 - 18:58")
+        match = re.search(r"(\d{2})/(\d{2})/(\d{4})\s*-\s*(\d{1,2}):(\d{2})", text)
+        if match:
+            day, month, year, hour, minute = match.groups()
+            return datetime(
+                int(year), int(month), int(day), int(hour), int(minute), tzinfo=brasilia_tz
+            )
+
+        return None
+
+    def _extract_datetime_from_text(self, soup) -> tuple[datetime | None, datetime | None]:
         """
         Parse datetime from text patterns like "Publicado em DD/MM/YYYY HH:MMh".
-        Handles multiple formats:
-        - DD/MM/YYYY HH:MMh (standard gov.br format, e.g., "17/11/2025 19h24")
-        - DD/MM/YYYY - HH:MM (EBC format, e.g., "17/11/2025 - 18:58")
+        Handles multiple formats and HTML structures:
+        - Gov.br structure: <span class="documentPublished"><span>Publicado em</span><span class="value">DD/MM/YYYY HHhMM</span></span>
+        - Inline text: "Publicado em DD/MM/YYYY HH:MMh"
+        - EBC format: "Publicado em DD/MM/YYYY - HH:MM"
 
         :param soup: BeautifulSoup object of the article page.
         :return: Tuple of (published_datetime, updated_datetime). Either can be None.
@@ -552,68 +593,52 @@ class WebScraper:
         brasilia_tz = timezone(timedelta(hours=-3))
 
         try:
-            # Search for text containing "Publicado em" or "publicado em"
-            text_elements = soup.find_all(string=re.compile(r'[Pp]ublicado em', re.IGNORECASE))
+            # Strategy A: Gov.br HTML structure with separate spans
+            # <span class="documentPublished"><span>Publicado em</span><span class="value">10/02/2026 17h05</span></span>
+            doc_published = soup.find("span", class_="documentPublished")
+            if doc_published:
+                value_span = doc_published.find("span", class_="value")
+                if value_span:
+                    published_dt = self._parse_datetime_from_text(
+                        value_span.get_text().strip(), brasilia_tz
+                    )
+
+            doc_modified = soup.find("span", class_="documentModified")
+            if doc_modified:
+                value_span = doc_modified.find("span", class_="value")
+                if value_span:
+                    updated_dt = self._parse_datetime_from_text(
+                        value_span.get_text().strip(), brasilia_tz
+                    )
+
+            if published_dt:
+                return published_dt, updated_dt
+
+            # Strategy B: Inline text containing "Publicado em DD/MM/YYYY..."
+            text_elements = soup.find_all(string=re.compile(r"[Pp]ublicado em", re.IGNORECASE))
 
             for elem in text_elements:
                 text = elem.strip()
-
-                # Pattern 1: DD/MM/YYYY HH:MMh (e.g., "Publicado em 17/11/2025 19h24")
-                match = re.search(r'(\d{2})/(\d{2})/(\d{4})\s+(\d{1,2})h(\d{2})', text)
-                if match:
-                    day, month, year, hour, minute = match.groups()
-                    published_dt = datetime(
-                        int(year), int(month), int(day),
-                        int(hour), int(minute),
-                        tzinfo=brasilia_tz
-                    )
-                    break
-
-                # Pattern 2: DD/MM/YYYY - HH:MM (e.g., "Publicado em 17/11/2025 - 18:58")
-                match = re.search(r'(\d{2})/(\d{2})/(\d{4})\s*-\s*(\d{1,2}):(\d{2})', text)
-                if match:
-                    day, month, year, hour, minute = match.groups()
-                    published_dt = datetime(
-                        int(year), int(month), int(day),
-                        int(hour), int(minute),
-                        tzinfo=brasilia_tz
-                    )
+                published_dt = self._parse_datetime_from_text(text, brasilia_tz)
+                if published_dt:
                     break
 
             # Search for "Atualizado em" or "atualizado em"
-            text_elements = soup.find_all(string=re.compile(r'[Aa]tualizado em', re.IGNORECASE))
+            if not updated_dt:
+                text_elements = soup.find_all(string=re.compile(r"[Aa]tualizado em", re.IGNORECASE))
 
-            for elem in text_elements:
-                text = elem.strip()
-
-                # Pattern 1: DD/MM/YYYY HH:MMh
-                match = re.search(r'(\d{2})/(\d{2})/(\d{4})\s+(\d{1,2})h(\d{2})', text)
-                if match:
-                    day, month, year, hour, minute = match.groups()
-                    updated_dt = datetime(
-                        int(year), int(month), int(day),
-                        int(hour), int(minute),
-                        tzinfo=brasilia_tz
-                    )
-                    break
-
-                # Pattern 2: DD/MM/YYYY - HH:MM
-                match = re.search(r'(\d{2})/(\d{2})/(\d{4})\s*-\s*(\d{1,2}):(\d{2})', text)
-                if match:
-                    day, month, year, hour, minute = match.groups()
-                    updated_dt = datetime(
-                        int(year), int(month), int(day),
-                        int(hour), int(minute),
-                        tzinfo=brasilia_tz
-                    )
-                    break
+                for elem in text_elements:
+                    text = elem.strip()
+                    updated_dt = self._parse_datetime_from_text(text, brasilia_tz)
+                    if updated_dt:
+                        break
 
         except Exception as e:
             logging.debug(f"Error extracting datetime from text: {e}")
 
         return published_dt, updated_dt
 
-    def extract_published_datetime(self, url: str) -> Tuple[Optional[datetime], Optional[datetime]]:
+    def extract_published_datetime(self, url: str) -> tuple[datetime | None, datetime | None]:
         """
         Extract published and updated datetimes from article page.
         Uses multiple extraction strategies with priority:
@@ -629,7 +654,7 @@ class WebScraper:
             if not response:
                 return None, None
 
-            soup = BeautifulSoup(response.content, 'html.parser')
+            soup = BeautifulSoup(response.content, "html.parser")
 
             # Strategy 1: Try JSON-LD first (most reliable)
             published_dt = self._extract_datetime_from_jsonld(soup)
@@ -654,7 +679,18 @@ class WebScraper:
             logging.error(f"Error extracting datetime from {url}: {str(e)}")
             return None, None
 
-    def get_article_content(self, url: str) -> Tuple[str, Optional[str], Optional[datetime], Optional[datetime], List[str], Optional[str], Optional[str], Optional[str]]:
+    def get_article_content(
+        self, url: str
+    ) -> tuple[
+        str,
+        str | None,
+        datetime | None,
+        datetime | None,
+        list[str],
+        str | None,
+        str | None,
+        str | None,
+    ]:
         """
         Get the content of a news article from its URL, converting the HTML to Markdown
         to preserve formatting, links, and media references. Extracts metadata including
@@ -670,7 +706,7 @@ class WebScraper:
             if not response:
                 return "Error retrieving content", None, None, None, [], None, None, None
 
-            soup = BeautifulSoup(response.content, 'html.parser')
+            soup = BeautifulSoup(response.content, "html.parser")
             article_body = soup.find("div", id="content")
 
             if article_body is None:
@@ -686,11 +722,16 @@ class WebScraper:
             # Extract image before cleaning
             image_url = self._extract_image_url(article_body)
 
-            # Extract datetimes
-            published_dt, updated_dt = self.extract_published_datetime(url)
+            # Extract datetimes from already-fetched soup (avoid redundant HTTP request)
+            published_dt = self._extract_datetime_from_jsonld(soup)
+            updated_dt = self._extract_updated_datetime_from_jsonld(soup)
+            if not published_dt:
+                published_dt, updated_dt = self._extract_datetime_from_text(soup)
 
             # Clean HTML with validation (pass editorial_lead and subtitle for removal)
-            cleaned_html = self._clean_html_with_validation(article_body, url, editorial_lead, subtitle)
+            cleaned_html = self._clean_html_with_validation(
+                article_body, url, editorial_lead, subtitle
+            )
 
             # Convert to markdown and clean
             content = md(str(cleaned_html))
@@ -698,9 +739,27 @@ class WebScraper:
 
             # Final validation
             if not self._validate_final_content(cleaned_content, url):
-                return "Error retrieving content", None, None, None, tags, editorial_lead, subtitle, category
+                return (
+                    "Error retrieving content",
+                    None,
+                    None,
+                    None,
+                    tags,
+                    editorial_lead,
+                    subtitle,
+                    category,
+                )
 
-            return cleaned_content, image_url, published_dt, updated_dt, tags, editorial_lead, subtitle, category
+            return (
+                cleaned_content,
+                image_url,
+                published_dt,
+                updated_dt,
+                tags,
+                editorial_lead,
+                subtitle,
+                category,
+            )
 
         except Exception as e:
             logging.error(f"Error retrieving content from {url}: {str(e)}")
@@ -726,7 +785,7 @@ class WebScraper:
 
         return article_body
 
-    def _extract_image_url(self, article_body) -> Optional[str]:
+    def _extract_image_url(self, article_body) -> str | None:
         """
         Extract the first image URL from article body.
 
@@ -736,7 +795,9 @@ class WebScraper:
         first_img = article_body.find("img")
         return first_img["src"] if first_img else None
 
-    def _clean_html_with_validation(self, article_body, url: str, editorial_lead: Optional[str] = None, subtitle: Optional[str] = None):
+    def _clean_html_with_validation(
+        self, article_body, url: str, editorial_lead: str | None = None, subtitle: str | None = None
+    ):
         """
         Clean HTML content with validation and fallback mechanism.
 
@@ -774,10 +835,7 @@ class WebScraper:
         :param html_element: BeautifulSoup element
         :return: Dictionary with 'paragraphs' and 'length' keys
         """
-        return {
-            'paragraphs': len(html_element.find_all('p')),
-            'length': len(str(html_element))
-        }
+        return {"paragraphs": len(html_element.find_all("p")), "length": len(str(html_element))}
 
     def _is_over_cleaned(self, original_stats: dict, cleaned_stats: dict) -> bool:
         """
@@ -788,10 +846,12 @@ class WebScraper:
         :return: True if over-cleaned, False otherwise
         """
         paragraph_threshold = 0.2  # Keep at least 20% of paragraphs
-        length_threshold = 0.1     # Keep at least 10% of content length
+        length_threshold = 0.1  # Keep at least 10% of content length
 
-        paragraphs_ok = cleaned_stats['paragraphs'] >= original_stats['paragraphs'] * paragraph_threshold
-        length_ok = cleaned_stats['length'] >= original_stats['length'] * length_threshold
+        paragraphs_ok = (
+            cleaned_stats["paragraphs"] >= original_stats["paragraphs"] * paragraph_threshold
+        )
+        length_ok = cleaned_stats["length"] >= original_stats["length"] * length_threshold
 
         return not (paragraphs_ok and length_ok)
 
@@ -814,7 +874,9 @@ class WebScraper:
 
         return True
 
-    def _clean_html_content(self, article_body, editorial_lead: Optional[str] = None, subtitle: Optional[str] = None):
+    def _clean_html_content(
+        self, article_body, editorial_lead: str | None = None, subtitle: str | None = None
+    ):
         """
         Clean HTML content by removing junk elements like sharing buttons,
         metadata, social media links, and other non-content elements.
@@ -826,31 +888,31 @@ class WebScraper:
         :return: Cleaned BeautifulSoup element
         """
         # Make a copy to avoid modifying the original
-        cleaned_body = BeautifulSoup(str(article_body), 'html.parser')
+        cleaned_body = BeautifulSoup(str(article_body), "html.parser")
 
         # Remove title (H1) as it's already extracted separately
-        h1_tags = cleaned_body.find_all('h1')
+        h1_tags = cleaned_body.find_all("h1")
         for h1 in h1_tags:
             h1.decompose()
 
         # Remove editorial leads/kickers (already extracted separately)
-        for p in cleaned_body.find_all('p', class_='nitfSubtitle'):
+        for p in cleaned_body.find_all("p", class_="nitfSubtitle"):
             p.decompose()
 
         # Remove breadcrumb/section navigation
-        for p in cleaned_body.find_all('p', class_='section'):
+        for p in cleaned_body.find_all("p", class_="section"):
             p.decompose()
 
         # Remove subtitle/lead (already extracted separately)
-        for p in cleaned_body.find_all('p', class_='discreet'):
+        for p in cleaned_body.find_all("p", class_="discreet"):
             p.decompose()
 
-        for p in cleaned_body.find_all('p', class_='description'):
+        for p in cleaned_body.find_all("p", class_="description"):
             p.decompose()
 
         # Remove editorial lead text if provided (for cases where it's not in a specific class)
         if editorial_lead:
-            for p in cleaned_body.find_all('p'):
+            for p in cleaned_body.find_all("p"):
                 text = p.get_text().strip()
                 if text == editorial_lead:
                     p.decompose()
@@ -858,7 +920,7 @@ class WebScraper:
 
         # Remove subtitle text if provided (for cases where it's not in a specific class)
         if subtitle:
-            for p in cleaned_body.find_all('p'):
+            for p in cleaned_body.find_all("p"):
                 text = p.get_text().strip()
                 if text == subtitle:
                     p.decompose()
@@ -874,7 +936,7 @@ class WebScraper:
         self._remove_contact_elements(cleaned_body)
 
         # Remove script tags
-        scripts = cleaned_body.find_all('script')
+        scripts = cleaned_body.find_all("script")
         for script in scripts:
             script.decompose()
 
@@ -889,15 +951,15 @@ class WebScraper:
         :return: Minimally cleaned BeautifulSoup element
         """
         # Make a copy to avoid modifying the original
-        cleaned_body = BeautifulSoup(str(article_body), 'html.parser')
+        cleaned_body = BeautifulSoup(str(article_body), "html.parser")
 
         # Remove only the most obvious junk
         # Remove title (H1) as it's already extracted separately
-        for h1 in cleaned_body.find_all('h1'):
+        for h1 in cleaned_body.find_all("h1"):
             h1.decompose()
 
         # Remove script tags
-        for script in cleaned_body.find_all('script'):
+        for script in cleaned_body.find_all("script"):
             script.decompose()
 
         # Remove sharing buttons (this is safe and important)
@@ -923,7 +985,13 @@ class WebScraper:
                 pass
 
         # Remove social media links by domain
-        social_domains = ["facebook.com", "twitter.com", "linkedin.com", "whatsapp.com", "api.whatsapp.com"]
+        social_domains = [
+            "facebook.com",
+            "twitter.com",
+            "linkedin.com",
+            "whatsapp.com",
+            "api.whatsapp.com",
+        ]
         for domain in social_domains:
             links = soup.find_all("a", href=lambda href: href and domain in href)
             for link in links:
@@ -935,7 +1003,9 @@ class WebScraper:
         # Remove elements with social-related classes
         social_classes = ["social-links", "share", "sharing", "social-media"]
         for class_name in social_classes:
-            elements = soup.find_all(class_=lambda c: c and any(social in str(c).lower() for social in [class_name]))
+            elements = soup.find_all(
+                class_=lambda c: c and any(social in str(c).lower() for social in [class_name])
+            )
             for elem in elements:
                 try:
                     elem.decompose()
@@ -954,7 +1024,7 @@ class WebScraper:
             elements = soup.find_all(string=lambda text: text and keyword in text)
             for elem in elements:
                 try:
-                    if elem.parent and elem.parent.name in ['p', 'div', 'span']:
+                    if elem.parent and elem.parent.name in ["p", "div", "span"]:
                         elem.parent.decompose()
                 except AttributeError:
                     pass
@@ -973,18 +1043,36 @@ class WebScraper:
         # Only remove if it's actually a metadata label, not part of article content
 
         # Remove elements with metadata-specific classes
-        metadata_classes = ["keywords", "category", "tags", "metadata", "article-tags",
-                           "article-category", "post-tags", "post-category", "documentTags"]
+        metadata_classes = [
+            "keywords",
+            "category",
+            "tags",
+            "metadata",
+            "article-tags",
+            "article-category",
+            "post-tags",
+            "post-category",
+            "documentTags",
+        ]
         for class_name in metadata_classes:
-            elements = soup.find_all(class_=lambda c: c and class_name in str(c).lower() if c else False)
+            elements = soup.find_all(
+                class_=lambda c: c and class_name in str(c).lower() if c else False
+            )
             for elem in elements:
                 elem.decompose()
 
         # Look for specific label elements (safer than searching all text)
-        for label in soup.find_all('label'):
+        for label in soup.find_all("label"):
             label_text = label.get_text().strip()
             # Only match if the ENTIRE text is the keyword (not part of a sentence)
-            if label_text.lower() in ['categoria', 'categoria:', 'tags', 'tags:', 'palavras-chave', 'palavras-chave:']:
+            if label_text.lower() in [
+                "categoria",
+                "categoria:",
+                "tags",
+                "tags:",
+                "palavras-chave",
+                "palavras-chave:",
+            ]:
                 # Remove the label and its immediate parent if it's a small container
                 parent = label.parent
                 if parent:
@@ -998,11 +1086,11 @@ class WebScraper:
 
         # Look for "Categoria:" or "Tags:" at the start of small paragraphs/divs
         # This is safer than searching all text
-        for elem in soup.find_all(['p', 'div', 'span']):
+        for elem in soup.find_all(["p", "div", "span"]):
             elem_text = elem.get_text().strip()
             # Match only if it starts with the keyword and is short (likely metadata)
             if elem_text and len(elem_text) < 150:
-                if elem_text.lower().startswith(('categoria:', 'tags:', 'palavras-chave:')):
+                if elem_text.lower().startswith(("categoria:", "tags:", "palavras-chave:")):
                     elem.decompose()
 
     def _remove_contact_elements(self, soup):
@@ -1013,9 +1101,13 @@ class WebScraper:
         """
         # Remove assessoria/communication elements
         contact_keywords = [
-            "Assessoria de Comunicação", "Assessoria de Imprensa",
-            "assessoria de comunicação", "assessoria de imprensa",
-            "ascom@", "comunicacao@", "imprensa@"
+            "Assessoria de Comunicação",
+            "Assessoria de Imprensa",
+            "assessoria de comunicação",
+            "assessoria de imprensa",
+            "ascom@",
+            "comunicacao@",
+            "imprensa@",
         ]
 
         for keyword in contact_keywords:
@@ -1028,7 +1120,11 @@ class WebScraper:
                     pass
 
         # Remove phone numbers (pattern: (XX) XXXX-XXXX)
-        phone_elements = soup.find_all(string=lambda text: text and re.search(r'\(\d{2}\)\s*\d{4}[-\s]?\d{4}', text) if text else False)
+        phone_elements = soup.find_all(
+            string=lambda text: text and re.search(r"\(\d{2}\)\s*\d{4}[-\s]?\d{4}", text)
+            if text
+            else False
+        )
         for elem in phone_elements:
             try:
                 if elem.parent:
@@ -1037,12 +1133,22 @@ class WebScraper:
                 pass
 
         # Remove social media handles (like @minaseenergia, facebook.com/xxx)
-        social_handles = soup.find_all(string=lambda text: text and any(
-            pattern in text.lower() for pattern in [
-                "facebook.com/", "twitter.com/", "instagram.com/",
-                "linkedin.com/", "youtube.com/", "flickr.com/"
-            ]
-        ) if text else False)
+        social_handles = soup.find_all(
+            string=lambda text: text
+            and any(
+                pattern in text.lower()
+                for pattern in [
+                    "facebook.com/",
+                    "twitter.com/",
+                    "instagram.com/",
+                    "linkedin.com/",
+                    "youtube.com/",
+                    "flickr.com/",
+                ]
+            )
+            if text
+            else False
+        )
 
         for elem in social_handles:
             try:
@@ -1061,7 +1167,7 @@ class WebScraper:
         if not content:
             return content
 
-        lines = content.split('\n')
+        lines = content.split("\n")
         cleaned_lines = []
 
         # Track if we've found the main content start
@@ -1079,7 +1185,7 @@ class WebScraper:
                 continue
 
             # Remove title lines with "===" patterns (markdown headers from HTML conversion)
-            if re.match(r'^=+$', line_stripped):
+            if re.match(r"^=+$", line_stripped):
                 continue
 
             # Start including content after we find a meaningful line
@@ -1090,10 +1196,10 @@ class WebScraper:
                 cleaned_lines.append(line)
 
         # Join lines and clean up excessive whitespace
-        cleaned_content = '\n'.join(cleaned_lines)
+        cleaned_content = "\n".join(cleaned_lines)
 
         # Remove multiple consecutive empty lines
-        cleaned_content = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned_content)
+        cleaned_content = re.sub(r"\n\s*\n\s*\n", "\n\n", cleaned_content)
 
         # Remove leading/trailing whitespace
         cleaned_content = cleaned_content.strip()
@@ -1115,35 +1221,31 @@ class WebScraper:
         # Junk patterns
         junk_patterns = [
             # Navigation/breadcrumb
-            r'^notícias?$',
-            r'^home\s*$',
-            r'^voltar\s*$',
-
+            r"^notícias?$",
+            r"^home\s*$",
+            r"^voltar\s*$",
             # Social media text
-            r'compartilhe',
-            r'facebook\.com',
-            r'twitter\.com',
-            r'linkedin\.com',
-            r'whatsapp\.com',
-            r'instagram\.com',
-            r'youtube\.com',
-
+            r"compartilhe",
+            r"facebook\.com",
+            r"twitter\.com",
+            r"linkedin\.com",
+            r"whatsapp\.com",
+            r"instagram\.com",
+            r"youtube\.com",
             # Metadata
-            r'^publicado em',
-            r'^atualizado em',
-            r'^categoria',
-            r'^tags?:',
-
+            r"^publicado em",
+            r"^atualizado em",
+            r"^categoria",
+            r"^tags?:",
             # Contact info
-            r'assessoria',
-            r'comunicação',
-            r'imprensa',
-            r'ascom@',
-            r'\(\d{2}\)\s*\d{4}[-\s]?\d{4}',  # Phone numbers
-
+            r"assessoria",
+            r"comunicação",
+            r"imprensa",
+            r"ascom@",
+            r"\(\d{2}\)\s*\d{4}[-\s]?\d{4}",  # Phone numbers
             # Copy link text
-            r'copiar para área de transferência',
-            r'copiar link',
+            r"copiar para área de transferência",
+            r"copiar link",
         ]
 
         for pattern in junk_patterns:
@@ -1164,8 +1266,6 @@ class WebScraper:
         # Find the first title occurrence, marked by "=====" or "# Title"
         for i, line in enumerate(lines):
             if re.match(r"^=+$", line.strip()) or line.startswith("# "):
-                return "\n".join(
-                    lines[i - 1 :]
-                )  # Keep the title and everything after it
+                return "\n".join(lines[i - 1 :])  # Keep the title and everything after it
 
         return content  # If no title is found, return as-is
