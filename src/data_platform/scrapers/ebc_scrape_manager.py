@@ -62,7 +62,7 @@ class EBCScrapeManager:
 
             if scraped_data:
                 logging.info(f"Successfully scraped {len(scraped_data)} articles from EBC")
-                logging.info("Processing and uploading EBC news to HF dataset.")
+                logging.info("Processing and uploading EBC news to storage backend.")
                 self._process_and_upload_data(scraped_data, allow_update)
             else:
                 logging.info("No EBC news found for the specified date range.")
