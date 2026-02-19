@@ -3,15 +3,14 @@ import logging
 import os
 from collections import OrderedDict
 from datetime import date
-from typing import Any, Dict, List
+from typing import Any
 
 import yaml
+
 from data_platform.scrapers.webscraper import WebScraper
 
 # Set up logging configuration
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
 class ScrapeManager:
@@ -39,7 +38,7 @@ class ScrapeManager:
         """
         self.dataset_manager = storage  # Keep attribute name for compatibility
 
-    def _load_urls_from_yaml(self, file_name: str, agency: str = None) -> List[str]:
+    def _load_urls_from_yaml(self, file_name: str, agency: str = None) -> list[str]:
         """
         Load URLs from a YAML file located in the same directory as this script.
 
@@ -50,7 +49,7 @@ class ScrapeManager:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         file_path = os.path.join(script_dir, "config", file_name)
 
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             agencies = yaml.safe_load(f)["agencies"]
 
         if agency:
@@ -63,7 +62,7 @@ class ScrapeManager:
 
     def run_scraper(
         self,
-        agencies: List[str],
+        agencies: list[str],
         min_date: str,
         max_date: str,
         sequential: bool,
@@ -93,17 +92,13 @@ class ScrapeManager:
                 # Load all agency URLs if agencies list is None or empty
                 all_urls = self._load_urls_from_yaml("site_urls.yaml")
 
-            webscrapers = [
-                WebScraper(min_date, url, max_date=max_date) for url in all_urls
-            ]
+            webscrapers = [WebScraper(min_date, url, max_date=max_date) for url in all_urls]
 
             if sequential:
                 for scraper in webscrapers:
                     scraped_data = scraper.scrape_news()
                     if scraped_data:
-                        logging.info(
-                            f"Appending news for {scraper.agency} to HF dataset."
-                        )
+                        logging.info(f"Appending news for {scraper.agency} to storage backend.")
                         self._process_and_upload_data(scraped_data, allow_update)
                     else:
                         logging.info(f"No news found for {scraper.agency}.")
@@ -117,7 +112,7 @@ class ScrapeManager:
                         logging.info(f"No news found for {scraper.agency}.")
 
                 if all_news_data:
-                    logging.info("Appending all collected news to HF dataset.")
+                    logging.info("Appending all collected news to storage backend.")
                     self._process_and_upload_data(all_news_data, allow_update)
                 else:
                     logging.info("No news found for any agency.")
@@ -134,7 +129,7 @@ class ScrapeManager:
         new_data = self._preprocess_data(new_data)
         self.dataset_manager.insert(new_data, allow_update=allow_update)
 
-    def _preprocess_data(self, data: List[Dict[str, str]]) -> OrderedDict:
+    def _preprocess_data(self, data: list[dict[str, str]]) -> OrderedDict:
         """
         Preprocess data by:z
         - Adding the unique_id column.
@@ -152,9 +147,7 @@ class ScrapeManager:
             )
 
         # Convert to columnar format
-        column_data = {
-            key: [item.get(key, None) for item in data] for key in data[0].keys()
-        }
+        column_data = {key: [item.get(key, None) for item in data] for key in data[0].keys()}
 
         # Reorder columns
         ordered_column_data = OrderedDict()
@@ -176,9 +169,7 @@ class ScrapeManager:
 
         return ordered_column_data
 
-    def _generate_unique_id(
-        self, agency: str, published_at_value: str, title: str
-    ) -> str:
+    def _generate_unique_id(self, agency: str, published_at_value: str, title: str) -> str:
         """
         Generate a unique identifier based on the agency, published_at, and title.
 
@@ -192,5 +183,5 @@ class ScrapeManager:
             if isinstance(published_at_value, date)
             else str(published_at_value)
         )
-        hash_input = f"{agency}_{date_str}_{title}".encode("utf-8")
+        hash_input = f"{agency}_{date_str}_{title}".encode()
         return hashlib.md5(hash_input).hexdigest()

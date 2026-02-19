@@ -26,14 +26,14 @@ load_dotenv()
 
 class EnrichmentManager:
     """
-    Manager class for enriching HuggingFace dataset with AI-generated data from Cogfy.
+    Manager class for enriching dataset with AI-generated data from Cogfy.
 
     This class handles the process of:
-    1. Loading the HuggingFace dataset
+    1. Loading the dataset from storage backend
     2. Querying Cogfy for enrichment data (themes L1/L2/L3 and summary from AI inference)
     3. Determining the most specific theme available
     4. Updating the dataset with enriched information
-    5. Pushing the updated dataset back to HuggingFace
+    5. Pushing the updated dataset back to storage backend
     """
 
     def __init__(self, server_url: str = "https://api.cogfy.com/", collection_name: str = "noticiasgovbr-all-news"):
@@ -903,7 +903,7 @@ class EnrichmentManager:
         force_update: bool = False
     ) -> None:
         """
-        Main method to enrich the HuggingFace dataset with theme information from Cogfy.
+        Main method to enrich the dataset with theme information from Cogfy.
 
         Args:
             start_date: Start date for filtering records (inclusive)
@@ -964,7 +964,7 @@ class EnrichmentManager:
 
         # Upload the enriched dataset
         if successful_updates > 0:
-            logging.info("Uploading enriched dataset to HuggingFace...")
+            logging.info("Uploading enriched dataset to storage backend...")
             final_df = self._merge_with_full_dataset(df, start_date, end_date)
             self._upload_enriched_dataset(final_df)
             logging.info("Dataset uploaded successfully")
@@ -975,7 +975,7 @@ class EnrichmentManager:
 def main():
     """Main entry point for the dataset enrichment script."""
     parser = argparse.ArgumentParser(
-        description='Enrich HuggingFace dataset with AI-generated data from Cogfy (themes + summary)'
+        description='Enrich dataset with AI-generated data from Cogfy (themes + summary)'
     )
     parser.add_argument(
         '--start-date',
