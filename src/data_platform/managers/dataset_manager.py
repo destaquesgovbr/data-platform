@@ -1,16 +1,13 @@
 import logging
 import os
-import tempfile
 import shutil
 from pathlib import Path
 from typing import Optional, OrderedDict
 
 import pandas as pd
-import requests
 from datasets import Dataset, load_dataset
 from datasets.exceptions import DatasetNotFoundError
-from huggingface_hub import HfApi, get_token
-from retry import retry
+from huggingface_hub import get_token
 
 DATASET_PATH = "nitaibezerra/govbrnews"  # The main dataset
 REDUCED_DATASET_PATH = (
@@ -29,7 +26,6 @@ class DatasetManager:
 
     def __init__(self):
         self.dataset_path = DATASET_PATH
-        self.api = HfApi()
         self.token = get_token() or os.getenv("HF_TOKEN")
         if not self.token:
             raise ValueError(
@@ -269,18 +265,14 @@ class DatasetManager:
 
     def _push_dataset_and_csvs(self, dataset: Dataset):
         """
-        Push the HF Dataset to the Hub and generate CSV variants for easy download.
-        Additionally, push a reduced version of the dataset (govbrnews-small) containing only
-        'published_at', 'agency', 'title', and 'url' columns.
+        Push the HF Dataset to the Hub and push a reduced version
+        containing only 'published_at', 'agency', 'title', and 'url' columns.
         """
         # Convert the dataset to a Pandas DataFrame once
         df = dataset.to_pandas()
 
         self._push_dataset_to_hub(dataset)
         self._push_reduced_dataset(df)
-        # self._push_global_csv(dataset)
-        # self._push_csvs_by_agency(df)
-        # self._push_csvs_by_year(df)
 
     def _push_dataset_to_hub(self, dataset: Dataset):
         """
@@ -288,102 +280,6 @@ class DatasetManager:
         """
         dataset.push_to_hub(self.dataset_path, private=False)
         logging.info(f"Dataset pushed to Hugging Face Hub at {self.dataset_path}.")
-
-    def _push_global_csv(self, dataset: Dataset):
-        """
-        Save the entire dataset as a single CSV file and upload it.
-        """
-        self._save_and_upload_csv(dataset, file_name="govbr_news_dataset.csv")
-
-    def _push_csvs_by_agency(self, df: pd.DataFrame):
-        """
-        Split the dataset by 'agency' and upload CSV files for each agency.
-
-        :param df: The Pandas DataFrame representation of the full dataset.
-        """
-        self._push_csvs_by_group(df, group_by_column="agency", subfolder="agencies")
-
-    def _push_csvs_by_year(self, df: pd.DataFrame):
-        """
-        Split the dataset by year (derived from 'published_at') and upload CSV files for each year.
-
-        :param df: The Pandas DataFrame representation of the full dataset.
-        """
-        self._push_csvs_by_group(df, group_by_column="year", subfolder="years")
-
-    def _push_csvs_by_group(
-        self, df: pd.DataFrame, group_by_column: str, subfolder: str = ""
-    ):
-        """
-        Split the dataset by a specified column (e.g., 'agency' or 'year') and upload CSV files
-        for each distinct group in that column.
-
-        :param df: The Pandas DataFrame representation of the full dataset.
-        :param group_by_column: Column name to group by (e.g., 'agency' or 'year').
-        :param subfolder: Optional subfolder in the repository to place the CSV file.
-        """
-        # If grouping by 'year', ensure the column is extracted from 'published_at'
-        if group_by_column == "year":
-            df["year"] = df["published_at"].apply(
-                lambda x: x.year if hasattr(x, "year") else None
-            )
-
-        groups = df.groupby(group_by_column)
-        for group_name, group_df in groups:
-            file_name = f"{group_name}_news_dataset.csv"
-            temp_dataset = Dataset.from_pandas(group_df.reset_index(drop=True))
-
-            self._save_and_upload_csv(temp_dataset, file_name, subfolder=subfolder)
-            logging.info(
-                f"CSV for '{group_name}' uploaded under '{subfolder}' directory."
-            )
-
-    @retry(
-        exceptions=requests.exceptions.RequestException,
-        tries=5,
-        delay=2,
-        backoff=3,
-        jitter=(1, 3),
-    )
-    def _upload_file(self, path_or_fileobj, path_in_repo, repo_id):
-        """
-        Low-level file upload helper to the Hugging Face Hub with retry logic.
-        """
-        self.api.upload_file(
-            path_or_fileobj=path_or_fileobj,
-            path_in_repo=path_in_repo,
-            repo_id=repo_id,
-            repo_type="dataset",
-            token=self.token,
-        )
-
-    def _save_and_upload_csv(
-        self, dataset: Dataset, file_name: str, subfolder: str = ""
-    ):
-        """
-        Save a dataset to a CSV file and upload it to the Hugging Face dataset repository.
-
-        :param dataset: The dataset to save and upload.
-        :param file_name: The name of the CSV file.
-        :param subfolder: Optional subfolder in the repository to place the CSV file.
-        """
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            csv_file_path = os.path.join(tmp_dir, file_name)
-            dataset.to_csv(csv_file_path)
-            logging.info(f"Temporary CSV file created at {csv_file_path}")
-
-            # Define the destination path for the CSV in the repository
-            if subfolder:
-                path_in_repo = f"{subfolder}/{file_name}"
-            else:
-                path_in_repo = file_name
-
-            # Upload the file to the Hugging Face repository
-            self._upload_file(csv_file_path, path_in_repo, self.dataset_path)
-
-            logging.info(
-                f"CSV file '{file_name}' uploaded to the Hugging Face repository at '{path_in_repo}'."
-            )
 
     def _push_reduced_dataset(self, df: pd.DataFrame):
         """
