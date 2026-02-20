@@ -417,7 +417,7 @@ class EBCWebScraper:
                 self._scrape_tvbrasil_content(soup, news_data)
             else:
                 # Original Agência Brasil scraping strategy
-                news_data["agency"] = "agencia_brasil"
+                news_data["agency"] = "agencia-brasil"
                 self._scrape_agencia_brasil_content(soup, news_data)
 
             # If JSON-LD didn't work, try parsing from the date field extracted by scrape methods
@@ -620,6 +620,6 @@ class EBCWebScraper:
             date_part = date_str.strip().split(" - ")[0]
             # Parse the date part (DD/MM/YYYY)
             return datetime.strptime(date_part, "%d/%m/%Y").date()
-        except:
+        except Exception:
             logging.warning(f"Could not parse date '{date_str}'")
             return None

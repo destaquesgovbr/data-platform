@@ -436,8 +436,7 @@ def test_02b_scrape_ebc(docker_services: None, env_vars: None) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Contar noticias EBC (agency_key usa underscore: agencia_brasil)
-    cur.execute("SELECT COUNT(*) FROM news WHERE agency_key IN ('agencia_brasil', 'tvbrasil')")
+    cur.execute("SELECT COUNT(*) FROM news WHERE agency_key IN ('agencia-brasil', 'tvbrasil')")
     ebc_count = cur.fetchone()[0]
 
     assert ebc_count > 0, "Nenhuma noticia EBC foi scraped"
@@ -712,12 +711,11 @@ def test_07_validate_final_state(docker_services: None, env_vars: None) -> None:
     for agency, count in by_agency:
         print(f"   {agency}: {count} notícias")
 
-    # EBC statistics (agency_key usa underscore: agencia_brasil, tvbrasil)
-    ebc_total = sum(c for a, c in by_agency if a in ("agencia_brasil", "tvbrasil"))
+    ebc_total = sum(c for a, c in by_agency if a in ("agencia-brasil", "tvbrasil"))
     if ebc_total > 0:
         print(f"\n📺 EBC (total: {ebc_total}):")
         for agency, count in by_agency:
-            if agency in ("agencia_brasil", "tvbrasil"):
+            if agency in ("agencia-brasil", "tvbrasil"):
                 print(f"   {agency}: {count} notícias")
 
     print("\n🔍 TYPESENSE:")

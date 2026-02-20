@@ -206,15 +206,14 @@ O scraper EBC (Agência Brasil, TV Brasil) usa `src/data_platform/scrapers/confi
 **Formato**:
 
 ```yaml
-sources:
+agencies:
   # Fonte ativa
-  agencia_brasil:
+  agencia-brasil:
     url: https://agenciabrasil.ebc.com.br/ultimas
     active: true
-    description: "Portal Agência Brasil - notícias atuais"
 
   # Fonte desabilitada
-  memoria_ebc:
+  memoria-ebc:
     url: https://memoria.ebc.com.br/noticias
     active: false
     disabled_reason: "Site fora do ar (502 Bad Gateway)"
@@ -228,7 +227,6 @@ sources:
 | `active` | bool | Não | `true` | Se deve ser processada |
 | `disabled_reason` | string | Não | - | Motivo da desativação |
 | `disabled_date` | string | Não | - | Data da desativação (YYYY-MM-DD) |
-| `description` | string | Não | - | Descrição da fonte |
 
 ---
 

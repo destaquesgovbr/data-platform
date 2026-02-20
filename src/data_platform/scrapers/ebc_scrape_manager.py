@@ -204,7 +204,7 @@ class EBCScrapeManager:
             published_dt = item.get("published_datetime")
             updated_datetime = item.get("updated_datetime")
 
-            # Use the agency from the scraped data (either 'agencia_brasil' or 'tvbrasil')
+            # Use the agency from the scraped data (either 'agencia-brasil' or 'tvbrasil')
             # Fallback to 'ebc' if not specified
             agency = item.get("agency", "ebc")
 

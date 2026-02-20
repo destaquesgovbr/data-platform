@@ -181,7 +181,7 @@ class ScrapeManager:
 
     def _preprocess_data(self, data: list[dict[str, str]]) -> OrderedDict:
         """
-        Preprocess data by:z
+        Preprocess data by:
         - Adding the unique_id column.
         - Reordering columns.
 

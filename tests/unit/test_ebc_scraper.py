@@ -282,7 +282,10 @@ class TestEBCWebScraper:
             result = tvbrasil_scraper.scrape_index_page("https://tvbrasil.ebc.com.br/noticias")
 
             assert len(result) == 3
-            assert "https://tvbrasil.ebc.com.br/caminhos-da-reportagem/2026/02/test-article-1" in result
+            assert (
+                "https://tvbrasil.ebc.com.br/caminhos-da-reportagem/2026/02/test-article-1"
+                in result
+            )
             assert "https://tvbrasil.ebc.com.br/reporter-brasil/2026/02/test-article-2" in result
             assert "https://tvbrasil.ebc.com.br/stadium/2026/02/test-article-3" in result
 
@@ -389,7 +392,7 @@ class TestEBCScrapeManager:
                 "content": "Test content here.",
                 "image": "",
                 "video_url": "",
-                "agency": "agencia_brasil",
+                "agency": "agencia-brasil",
                 "error": "",
             }
         ]
@@ -414,7 +417,7 @@ class TestEBCScrapeManager:
                 "content": "Test content here.",
                 "image": "",
                 "video_url": "",
-                "agency": "agencia_brasil",
+                "agency": "agencia-brasil",
                 "error": "",
             }
         ]
