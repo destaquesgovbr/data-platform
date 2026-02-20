@@ -4,7 +4,8 @@ Teste de integração completo do pipeline data-platform.
 Este teste executa o fluxo completo end-to-end:
 1. Limpeza de BDs (PostgreSQL + Typesense)
 2. Criação de schema e dados mestre (agencies, themes)
-3. Scraping (MEC, GESTAO, CGU) - 20 a 23/12/2025
+3. Scraping Gov.br (MEC, GESTAO, CGU) - 20 a 23/12/2025
+3b. Scraping EBC (Agencia Brasil, TVBrasil) - 19/02/2026
 4. Upload para Cogfy (AI enrichment)
 5. Enrich com temas do Cogfy
 6. Geração de embeddings via API Cloud Run
@@ -39,6 +40,11 @@ DATABASE_URL = os.getenv(
 START_DATE = "2025-12-20"
 END_DATE = "2025-12-23"
 AGENCIES = "mec,gestao,cgu"
+
+# EBC usa data diferente porque o scraper e mais lento (visita cada pagina de artigo)
+# e datas antigas causam timeout ao paginar ate encontrar artigos no periodo
+EBC_DATE = "2026-02-19"
+EBC_AGENCIES = "agencia-brasil,tvbrasil"
 
 # Typesense
 TYPESENSE_HOST = "localhost"
@@ -348,7 +354,7 @@ def test_01_populate_master_data(docker_services: None, env_vars: None) -> None:
     print("\n✅ FASE 1 COMPLETA: Dados mestre carregados")
 
 
-def test_02_scrape_govbr(docker_services: None, env_vars: None) -> None:
+def test_02a_scrape_govbr(docker_services: None, env_vars: None) -> None:
     """
     FASE 2: Scraping de notícias gov.br (MEC, GESTAO, CGU).
     """
@@ -395,7 +401,51 @@ def test_02_scrape_govbr(docker_services: None, env_vars: None) -> None:
     for date, count in results:
         print(f"   {date}: {count} notícias")
 
-    print("\n✅ FASE 2 COMPLETA: Scraping finalizado")
+    print("\n✅ FASE 2a COMPLETA: Scraping finalizado")
+
+
+def test_02b_scrape_ebc(docker_services: None, env_vars: None) -> None:
+    """
+    FASE 2b: Scraping de noticias EBC (Agencia Brasil, TVBrasil).
+
+    Nota: EBC scraping e mais lento que gov.br porque visita cada pagina de artigo.
+    Para evitar timeout, usamos apenas 1 dia e 2 agencias.
+    """
+    print("\n" + "=" * 70)
+    print("FASE 2b: Scraping EBC (agencia-brasil, tvbrasil)")
+    print("=" * 70)
+
+    # EBC scraping visita cada pagina de artigo, entao e mais lento.
+    # Usamos EBC_DATE (data recente) para evitar timeout ao paginar.
+    run_cli_command(
+        [
+            "scrape-ebc",
+            "--start-date",
+            EBC_DATE,
+            "--end-date",
+            EBC_DATE,
+            "--agencies",
+            EBC_AGENCIES,
+            "--allow-update",
+            "--sequential",
+        ],
+        f"Scraping noticias EBC (agencia-brasil e tvbrasil {EBC_DATE})",
+    )
+
+    # Validar que noticias EBC foram inseridas
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT COUNT(*) FROM news WHERE agency_key IN ('agencia-brasil', 'tvbrasil')")
+    ebc_count = cur.fetchone()[0]
+
+    assert ebc_count > 0, "Nenhuma noticia EBC foi scraped"
+    print(f"\n📰 Total de noticias EBC scraped: {ebc_count}")
+
+    cur.close()
+    conn.close()
+
+    print("\n✅ FASE 2b COMPLETA: Scraping EBC finalizado")
 
 
 def test_03_upload_cogfy(docker_services: None, env_vars: None) -> None:
@@ -661,6 +711,13 @@ def test_07_validate_final_state(docker_services: None, env_vars: None) -> None:
     for agency, count in by_agency:
         print(f"   {agency}: {count} notícias")
 
+    ebc_total = sum(c for a, c in by_agency if a in ("agencia-brasil", "tvbrasil"))
+    if ebc_total > 0:
+        print(f"\n📺 EBC (total: {ebc_total}):")
+        for agency, count in by_agency:
+            if agency in ("agencia-brasil", "tvbrasil"):
+                print(f"   {agency}: {count} notícias")
+
     print("\n🔍 TYPESENSE:")
     # Testar acesso ao Typesense
     try:
@@ -680,7 +737,8 @@ def test_07_validate_final_state(docker_services: None, env_vars: None) -> None:
     print("\n⏱️  PERÍODO TESTADO:")
     print(f"   Início: {START_DATE}")
     print(f"   Fim: {END_DATE}")
-    print(f"   Agencies: {AGENCIES}")
+    print(f"   Gov.br agencies: {AGENCIES}")
+    print(f"   EBC agencies: {EBC_AGENCIES}")
 
     print("\n" + "=" * 70)
     print("✅ BATERIA DE TESTES COMPLETA!")

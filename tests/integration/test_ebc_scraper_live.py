@@ -12,13 +12,10 @@ Run with:
 Note: These tests require network access and may be slow.
 """
 
-from typing import Optional
-
 import pytest
 import requests
 
 from data_platform.scrapers.ebc_webscraper import EBCWebScraper
-
 
 # =============================================================================
 # Configuration
@@ -46,7 +43,7 @@ AGENCIABRASIL_TEST_URLS = [
 # =============================================================================
 
 
-def find_working_url(urls: list[str], timeout: int = 10) -> Optional[str]:
+def find_working_url(urls: list[str], timeout: int = 10) -> str | None:
     """
     Find first URL that returns 200 status.
 
@@ -75,7 +72,7 @@ def find_working_url(urls: list[str], timeout: int = 10) -> Optional[str]:
 @pytest.fixture(scope="module")
 def ebc_scraper() -> EBCWebScraper:
     """EBCWebScraper instance for integration testing."""
-    return EBCWebScraper(min_date="2020-01-01")
+    return EBCWebScraper(min_date="2020-01-01", base_url="https://agenciabrasil.ebc.com.br/ultimas")
 
 
 @pytest.fixture(scope="module")
@@ -89,7 +86,7 @@ def network_available() -> bool:
 
 
 @pytest.fixture(scope="module")
-def tvbrasil_url(network_available: bool) -> Optional[str]:
+def tvbrasil_url(network_available: bool) -> str | None:
     """Find a working TV Brasil URL."""
     if not network_available:
         return None
@@ -97,7 +94,7 @@ def tvbrasil_url(network_available: bool) -> Optional[str]:
 
 
 @pytest.fixture(scope="module")
-def agenciabrasil_url(network_available: bool) -> Optional[str]:
+def agenciabrasil_url(network_available: bool) -> str | None:
     """Find a working Agencia Brasil URL."""
     if not network_available:
         return None
@@ -117,7 +114,7 @@ class TestTVBrasilLive:
         self,
         ebc_scraper: EBCWebScraper,
         network_available: bool,
-        tvbrasil_url: Optional[str],
+        tvbrasil_url: str | None,
     ) -> None:
         """Verify TV Brasil HTML structure hasn't changed."""
         if not network_available:
@@ -135,7 +132,7 @@ class TestTVBrasilLive:
         self,
         ebc_scraper: EBCWebScraper,
         network_available: bool,
-        tvbrasil_url: Optional[str],
+        tvbrasil_url: str | None,
     ) -> None:
         """Verify editorial_lead is extracted from TV Brasil."""
         if not network_available:
@@ -155,7 +152,7 @@ class TestTVBrasilLive:
         self,
         ebc_scraper: EBCWebScraper,
         network_available: bool,
-        tvbrasil_url: Optional[str],
+        tvbrasil_url: str | None,
     ) -> None:
         """Verify source field is empty for TV Brasil."""
         if not network_available:
@@ -174,7 +171,7 @@ class TestTVBrasilLive:
         self,
         ebc_scraper: EBCWebScraper,
         network_available: bool,
-        tvbrasil_url: Optional[str],
+        tvbrasil_url: str | None,
     ) -> None:
         """Verify content is extracted from TV Brasil."""
         if not network_available:
@@ -202,7 +199,7 @@ class TestAgenciaBrasilLive:
         self,
         ebc_scraper: EBCWebScraper,
         network_available: bool,
-        agenciabrasil_url: Optional[str],
+        agenciabrasil_url: str | None,
     ) -> None:
         """Verify Agencia Brasil HTML structure hasn't changed."""
         if not network_available:
@@ -220,7 +217,7 @@ class TestAgenciaBrasilLive:
         self,
         ebc_scraper: EBCWebScraper,
         network_available: bool,
-        agenciabrasil_url: Optional[str],
+        agenciabrasil_url: str | None,
     ) -> None:
         """Verify Agencia Brasil has no editorial_lead."""
         if not network_available:
@@ -239,7 +236,7 @@ class TestAgenciaBrasilLive:
         self,
         ebc_scraper: EBCWebScraper,
         network_available: bool,
-        agenciabrasil_url: Optional[str],
+        agenciabrasil_url: str | None,
     ) -> None:
         """Verify Agencia Brasil has source/author field."""
         if not network_available:
@@ -258,7 +255,7 @@ class TestAgenciaBrasilLive:
         self,
         ebc_scraper: EBCWebScraper,
         network_available: bool,
-        agenciabrasil_url: Optional[str],
+        agenciabrasil_url: str | None,
     ) -> None:
         """Verify content is extracted from Agencia Brasil."""
         if not network_available:
@@ -276,7 +273,7 @@ class TestAgenciaBrasilLive:
         self,
         ebc_scraper: EBCWebScraper,
         network_available: bool,
-        agenciabrasil_url: Optional[str],
+        agenciabrasil_url: str | None,
     ) -> None:
         """Verify published_datetime is extracted from Agencia Brasil."""
         if not network_available:

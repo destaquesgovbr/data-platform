@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from data_platform.scrapers.config.validators import (
+    _extract_url,
     find_duplicate_urls,
     load_site_urls_config,
     normalize_url,
@@ -247,9 +248,7 @@ class TestSiteUrlsConfigIntegrity:
             )
             for error in errors:
                 error_msg += f"  - {error}\n"
-            error_msg += (
-                "\nPor favor, corrija o arquivo removendo as entradas duplicadas."
-            )
+            error_msg += "\nPor favor, corrija o arquivo removendo as entradas duplicadas."
             pytest.fail(error_msg)
 
         # Se passou, não há duplicatas
@@ -270,7 +269,9 @@ class TestSiteUrlsConfigIntegrity:
 
         assert len(active_agencies) > 0, "Nenhuma agência ativa encontrada"
 
-        for agency_key, url in active_agencies.items():
+        for agency_key, agency_data in active_agencies.items():
+            url = _extract_url(agency_data)
+            assert url is not None, f"URL da agência '{agency_key}' não encontrada"
             assert isinstance(url, str), f"URL da agência '{agency_key}' não é string"
             assert url.strip() != "", f"URL da agência '{agency_key}' está vazia"
             assert url.startswith("http"), f"URL da agência '{agency_key}' não começa com http"

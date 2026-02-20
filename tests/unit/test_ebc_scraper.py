@@ -9,15 +9,14 @@ These tests ensure that:
 """
 
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from bs4 import BeautifulSoup
 
-from data_platform.scrapers.ebc_webscraper import EBCWebScraper
 from data_platform.scrapers.ebc_scrape_manager import EBCScrapeManager
-
+from data_platform.scrapers.ebc_webscraper import EBCWebScraper
 
 # =============================================================================
 # Fixtures
@@ -84,49 +83,102 @@ def agenciabrasil_html() -> str:
 
 
 @pytest.fixture
-def empty_tvbrasil_news_data() -> Dict[str, Any]:
+def empty_tvbrasil_news_data() -> dict[str, Any]:
     """Empty news_data dictionary for TV Brasil tests."""
     return {
-        'title': '',
-        'url': 'https://tvbrasil.ebc.com.br/test',
-        'source': '',
-        'date': '',
-        'published_datetime': None,
-        'updated_datetime': None,
-        'tags': [],
-        'editorial_lead': '',
-        'content': '',
-        'image': '',
-        'video_url': '',
-        'agency': '',
-        'error': '',
+        "title": "",
+        "url": "https://tvbrasil.ebc.com.br/test",
+        "source": "",
+        "date": "",
+        "published_datetime": None,
+        "updated_datetime": None,
+        "tags": [],
+        "editorial_lead": "",
+        "content": "",
+        "image": "",
+        "video_url": "",
+        "agency": "",
+        "error": "",
     }
 
 
 @pytest.fixture
-def empty_agenciabrasil_news_data() -> Dict[str, Any]:
+def empty_agenciabrasil_news_data() -> dict[str, Any]:
     """Empty news_data dictionary for Agencia Brasil tests."""
     return {
-        'title': '',
-        'url': 'https://agenciabrasil.ebc.com.br/test',
-        'source': '',
-        'date': '',
-        'published_datetime': None,
-        'updated_datetime': None,
-        'tags': [],
-        'editorial_lead': '',
-        'content': '',
-        'image': '',
-        'video_url': '',
-        'agency': '',
-        'error': '',
+        "title": "",
+        "url": "https://agenciabrasil.ebc.com.br/test",
+        "source": "",
+        "date": "",
+        "published_datetime": None,
+        "updated_datetime": None,
+        "tags": [],
+        "editorial_lead": "",
+        "content": "",
+        "image": "",
+        "video_url": "",
+        "agency": "",
+        "error": "",
     }
 
 
 @pytest.fixture
 def ebc_scraper() -> EBCWebScraper:
     """EBCWebScraper instance for testing."""
-    return EBCWebScraper(min_date="2026-01-01")
+    return EBCWebScraper(min_date="2026-01-01", base_url="https://agenciabrasil.ebc.com.br/ultimas")
+
+
+@pytest.fixture
+def tvbrasil_scraper() -> EBCWebScraper:
+    """EBCWebScraper instance for TV Brasil testing."""
+    return EBCWebScraper(min_date="2026-01-01", base_url="https://tvbrasil.ebc.com.br/noticias")
+
+
+@pytest.fixture
+def tvbrasil_index_html() -> str:
+    """Sample TV Brasil index page HTML with view-ultimas structure."""
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head><title>Notícias | TV Brasil</title></head>
+    <body>
+        <div class="view view-ultimas view-id-ultimas">
+            <div class="view-content row isoGrid isoRebuild">
+                <div class="isoGrid-item cmpGeneric col-lg-4">
+                    <div class="bgWhite full shadow">
+                        <h4 class="headband txtNoticias">notícias</h4>
+                        <h3 class="heading">
+                            <a href="/caminhos-da-reportagem/2026/02/test-article-1">
+                                Test Article 1
+                            </a>
+                        </h3>
+                    </div>
+                </div>
+                <div class="isoGrid-item cmpGeneric col-lg-4">
+                    <div class="bgWhite full shadow">
+                        <h4 class="headband txtCultura">cultura</h4>
+                        <h3 class="heading">
+                            <a href="/reporter-brasil/2026/02/test-article-2">
+                                Test Article 2
+                            </a>
+                        </h3>
+                    </div>
+                </div>
+                <div class="isoGrid-item cmpGeneric col-lg-4">
+                    <div class="bgWhite full shadow">
+                        <h4 class="headband txtEsportes">esporte</h4>
+                        <h3 class="heading">
+                            <a href="/stadium/2026/02/test-article-3">
+                                Test Article 3
+                            </a>
+                        </h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
 
 
 # =============================================================================
@@ -141,64 +193,64 @@ class TestEBCWebScraper:
         self,
         ebc_scraper: EBCWebScraper,
         tvbrasil_html: str,
-        empty_tvbrasil_news_data: Dict[str, Any],
+        empty_tvbrasil_news_data: dict[str, Any],
     ) -> None:
         """TV Brasil extracts editorial_lead from h4 with link."""
-        soup = BeautifulSoup(tvbrasil_html, 'html.parser')
+        soup = BeautifulSoup(tvbrasil_html, "html.parser")
         news_data = empty_tvbrasil_news_data.copy()
 
         ebc_scraper._scrape_tvbrasil_content(soup, news_data)
 
-        assert news_data['editorial_lead'] == 'Caminhos da Reportagem'
-        assert news_data['source'] == ''
-        assert news_data['title'] == 'Foz do Iguacu: crimes na fronteira mais movimentada do Brasil'
+        assert news_data["editorial_lead"] == "Caminhos da Reportagem"
+        assert news_data["source"] == ""
+        assert news_data["title"] == "Foz do Iguacu: crimes na fronteira mais movimentada do Brasil"
 
     def test_tvbrasil_extracts_editorial_lead_without_link(
         self,
         ebc_scraper: EBCWebScraper,
         tvbrasil_html_no_link: str,
-        empty_tvbrasil_news_data: Dict[str, Any],
+        empty_tvbrasil_news_data: dict[str, Any],
     ) -> None:
         """TV Brasil extracts editorial_lead from h4 without link."""
-        soup = BeautifulSoup(tvbrasil_html_no_link, 'html.parser')
+        soup = BeautifulSoup(tvbrasil_html_no_link, "html.parser")
         news_data = empty_tvbrasil_news_data.copy()
 
         ebc_scraper._scrape_tvbrasil_content(soup, news_data)
 
-        assert news_data['editorial_lead'] == 'Repórter Brasil'
-        assert news_data['source'] == ''
+        assert news_data["editorial_lead"] == "Repórter Brasil"
+        assert news_data["source"] == ""
 
     def test_tvbrasil_source_is_empty(
         self,
         ebc_scraper: EBCWebScraper,
         tvbrasil_html: str,
-        empty_tvbrasil_news_data: Dict[str, Any],
+        empty_tvbrasil_news_data: dict[str, Any],
     ) -> None:
         """TV Brasil source field is empty after extraction."""
-        soup = BeautifulSoup(tvbrasil_html, 'html.parser')
+        soup = BeautifulSoup(tvbrasil_html, "html.parser")
         news_data = empty_tvbrasil_news_data.copy()
-        news_data['source'] = 'should_be_cleared'
+        news_data["source"] = "should_be_cleared"
 
         ebc_scraper._scrape_tvbrasil_content(soup, news_data)
 
-        assert news_data['source'] == ''
+        assert news_data["source"] == ""
 
     def test_agencia_brasil_editorial_lead_is_empty(
         self,
         ebc_scraper: EBCWebScraper,
         agenciabrasil_html: str,
-        empty_agenciabrasil_news_data: Dict[str, Any],
+        empty_agenciabrasil_news_data: dict[str, Any],
     ) -> None:
         """Agencia Brasil doesn't extract editorial_lead."""
-        soup = BeautifulSoup(agenciabrasil_html, 'html.parser')
+        soup = BeautifulSoup(agenciabrasil_html, "html.parser")
         news_data = empty_agenciabrasil_news_data.copy()
 
         ebc_scraper._scrape_agencia_brasil_content(soup, news_data)
 
         # Agencia Brasil doesn't set editorial_lead, so it should remain empty
-        assert news_data['editorial_lead'] == ''
+        assert news_data["editorial_lead"] == ""
         # But it should extract source/author
-        assert news_data['source'] == 'Agencia Brasil'
+        assert news_data["source"] == "Agencia Brasil"
 
     def test_scrape_news_page_includes_editorial_lead_field(
         self,
@@ -206,15 +258,80 @@ class TestEBCWebScraper:
         tvbrasil_html: str,
     ) -> None:
         """scrape_news_page returns dict with editorial_lead field."""
-        with patch.object(ebc_scraper, 'fetch_page') as mock_fetch:
+        with patch.object(ebc_scraper, "fetch_page") as mock_fetch:
             mock_response = MagicMock()
-            mock_response.content = tvbrasil_html.encode('utf-8')
+            mock_response.content = tvbrasil_html.encode("utf-8")
             mock_fetch.return_value = mock_response
 
-            result = ebc_scraper.scrape_news_page('https://tvbrasil.ebc.com.br/test')
+            result = ebc_scraper.scrape_news_page("https://tvbrasil.ebc.com.br/test")
 
-            assert 'editorial_lead' in result
-            assert result['editorial_lead'] == 'Caminhos da Reportagem'
+            assert "editorial_lead" in result
+            assert result["editorial_lead"] == "Caminhos da Reportagem"
+
+    def test_scrape_index_page_tvbrasil_strategy3(
+        self,
+        tvbrasil_scraper: EBCWebScraper,
+        tvbrasil_index_html: str,
+    ) -> None:
+        """scrape_index_page extracts URLs from TV Brasil view-ultimas structure (Strategy 3)."""
+        with patch.object(tvbrasil_scraper, "fetch_page") as mock_fetch:
+            mock_response = MagicMock()
+            mock_response.content = tvbrasil_index_html.encode("utf-8")
+            mock_fetch.return_value = mock_response
+
+            result = tvbrasil_scraper.scrape_index_page("https://tvbrasil.ebc.com.br/noticias")
+
+            assert len(result) == 3
+            assert (
+                "https://tvbrasil.ebc.com.br/caminhos-da-reportagem/2026/02/test-article-1"
+                in result
+            )
+            assert "https://tvbrasil.ebc.com.br/reporter-brasil/2026/02/test-article-2" in result
+            assert "https://tvbrasil.ebc.com.br/stadium/2026/02/test-article-3" in result
+
+    def test_scrape_index_page_tvbrasil_converts_relative_urls(
+        self,
+        tvbrasil_scraper: EBCWebScraper,
+        tvbrasil_index_html: str,
+    ) -> None:
+        """scrape_index_page converts relative URLs to absolute for TV Brasil."""
+        with patch.object(tvbrasil_scraper, "fetch_page") as mock_fetch:
+            mock_response = MagicMock()
+            mock_response.content = tvbrasil_index_html.encode("utf-8")
+            mock_fetch.return_value = mock_response
+
+            result = tvbrasil_scraper.scrape_index_page("https://tvbrasil.ebc.com.br/noticias")
+
+            # All URLs should be absolute (start with https://)
+            for url in result:
+                assert url.startswith("https://tvbrasil.ebc.com.br/")
+
+    def test_scrape_index_page_tvbrasil_no_duplicates(
+        self,
+        tvbrasil_scraper: EBCWebScraper,
+    ) -> None:
+        """scrape_index_page avoids duplicate URLs for TV Brasil."""
+        html_with_duplicates = """
+        <html>
+        <body>
+            <div class="view view-ultimas">
+                <h3 class="heading"><a href="/test-article">Article</a></h3>
+                <h3 class="heading"><a href="/test-article">Article (duplicate)</a></h3>
+                <h3 class="heading"><a href="/other-article">Other Article</a></h3>
+            </div>
+        </body>
+        </html>
+        """
+        with patch.object(tvbrasil_scraper, "fetch_page") as mock_fetch:
+            mock_response = MagicMock()
+            mock_response.content = html_with_duplicates.encode("utf-8")
+            mock_fetch.return_value = mock_response
+
+            result = tvbrasil_scraper.scrape_index_page("https://tvbrasil.ebc.com.br/noticias")
+
+            assert len(result) == 2  # Duplicate should be filtered
+            assert "https://tvbrasil.ebc.com.br/test-article" in result
+            assert "https://tvbrasil.ebc.com.br/other-article" in result
 
 
 # =============================================================================
@@ -239,100 +356,98 @@ class TestEBCScrapeManager:
         """editorial_lead is passed through to converted format."""
         ebc_data = [
             {
-                'title': 'Test Article',
-                'url': 'https://tvbrasil.ebc.com.br/test',
-                'source': '',
-                'date': '02/02/2026 - 23:00',
-                'published_datetime': datetime(2026, 2, 2, 23, 0),
-                'updated_datetime': None,
-                'tags': ['fronteira', 'crime'],
-                'editorial_lead': 'Caminhos da Reportagem',
-                'content': 'Test content here.',
-                'image': '',
-                'video_url': '',
-                'agency': 'tvbrasil',
-                'error': '',
+                "title": "Test Article",
+                "url": "https://tvbrasil.ebc.com.br/test",
+                "source": "",
+                "date": "02/02/2026 - 23:00",
+                "published_datetime": datetime(2026, 2, 2, 23, 0),
+                "updated_datetime": None,
+                "tags": ["fronteira", "crime"],
+                "editorial_lead": "Caminhos da Reportagem",
+                "content": "Test content here.",
+                "image": "",
+                "video_url": "",
+                "agency": "tvbrasil",
+                "error": "",
             }
         ]
 
         result = manager._convert_ebc_to_govbr_format(ebc_data)
 
         assert len(result) == 1
-        assert result[0]['editorial_lead'] == 'Caminhos da Reportagem'
+        assert result[0]["editorial_lead"] == "Caminhos da Reportagem"
 
     def test_convert_handles_empty_editorial_lead(self, manager: EBCScrapeManager) -> None:
         """Empty editorial_lead becomes None in converted format."""
         ebc_data = [
             {
-                'title': 'Test Article',
-                'url': 'https://agenciabrasil.ebc.com.br/test',
-                'source': 'Agencia Brasil',
-                'date': '15/01/2026 - 14:30',
-                'published_datetime': datetime(2026, 1, 15, 14, 30),
-                'updated_datetime': None,
-                'tags': [],
-                'editorial_lead': '',  # Empty for Agencia Brasil
-                'content': 'Test content here.',
-                'image': '',
-                'video_url': '',
-                'agency': 'agencia_brasil',
-                'error': '',
+                "title": "Test Article",
+                "url": "https://agenciabrasil.ebc.com.br/test",
+                "source": "Agencia Brasil",
+                "date": "15/01/2026 - 14:30",
+                "published_datetime": datetime(2026, 1, 15, 14, 30),
+                "updated_datetime": None,
+                "tags": [],
+                "editorial_lead": "",  # Empty for Agencia Brasil
+                "content": "Test content here.",
+                "image": "",
+                "video_url": "",
+                "agency": "agencia-brasil",
+                "error": "",
             }
         ]
 
         result = manager._convert_ebc_to_govbr_format(ebc_data)
 
         assert len(result) == 1
-        assert result[0]['editorial_lead'] is None
+        assert result[0]["editorial_lead"] is None
 
     def test_convert_handles_missing_editorial_lead(self, manager: EBCScrapeManager) -> None:
         """Missing editorial_lead key becomes None in converted format."""
         ebc_data = [
             {
-                'title': 'Test Article',
-                'url': 'https://agenciabrasil.ebc.com.br/test',
-                'source': 'Agencia Brasil',
-                'date': '15/01/2026 - 14:30',
-                'published_datetime': datetime(2026, 1, 15, 14, 30),
-                'updated_datetime': None,
-                'tags': [],
+                "title": "Test Article",
+                "url": "https://agenciabrasil.ebc.com.br/test",
+                "source": "Agencia Brasil",
+                "date": "15/01/2026 - 14:30",
+                "published_datetime": datetime(2026, 1, 15, 14, 30),
+                "updated_datetime": None,
+                "tags": [],
                 # No editorial_lead key at all
-                'content': 'Test content here.',
-                'image': '',
-                'video_url': '',
-                'agency': 'agencia_brasil',
-                'error': '',
+                "content": "Test content here.",
+                "image": "",
+                "video_url": "",
+                "agency": "agencia-brasil",
+                "error": "",
             }
         ]
 
         result = manager._convert_ebc_to_govbr_format(ebc_data)
 
         assert len(result) == 1
-        assert result[0]['editorial_lead'] is None
+        assert result[0]["editorial_lead"] is None
 
-    def test_preprocess_includes_editorial_lead_in_columns(
-        self, manager: EBCScrapeManager
-    ) -> None:
+    def test_preprocess_includes_editorial_lead_in_columns(self, manager: EBCScrapeManager) -> None:
         """editorial_lead is included in preprocessed column data."""
         data = [
             {
-                'title': 'Test Article',
-                'url': 'https://tvbrasil.ebc.com.br/test',
-                'published_at': datetime(2026, 2, 2, 23, 0),
-                'updated_datetime': None,
-                'category': 'Noticias',
-                'tags': [],
-                'editorial_lead': 'Caminhos da Reportagem',
-                'subtitle': None,
-                'content': 'Test content.',
-                'image': '',
-                'video_url': '',
-                'agency': 'tvbrasil',
-                'extracted_at': datetime.now(),
+                "title": "Test Article",
+                "url": "https://tvbrasil.ebc.com.br/test",
+                "published_at": datetime(2026, 2, 2, 23, 0),
+                "updated_datetime": None,
+                "category": "Noticias",
+                "tags": [],
+                "editorial_lead": "Caminhos da Reportagem",
+                "subtitle": None,
+                "content": "Test content.",
+                "image": "",
+                "video_url": "",
+                "agency": "tvbrasil",
+                "extracted_at": datetime.now(),
             }
         ]
 
         result = manager._preprocess_data(data)
 
-        assert 'editorial_lead' in result
-        assert result['editorial_lead'][0] == 'Caminhos da Reportagem'
+        assert "editorial_lead" in result
+        assert result["editorial_lead"][0] == "Caminhos da Reportagem"

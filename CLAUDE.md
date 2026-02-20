@@ -171,6 +171,63 @@ pip install -e .
 poetry run pytest
 ```
 
+### Configuração de URLs do Scraper
+
+O scraper usa `src/data_platform/scrapers/config/site_urls.yaml` para definir quais agências serão processadas.
+
+**Formato**:
+
+```yaml
+# Agência ativa
+mec:
+  url: https://www.gov.br/mec/pt-br/assuntos/noticias
+  active: true
+
+# Agência desabilitada
+cisc:
+  url: https://www.gov.br/pt-br/noticias
+  active: false
+  disabled_reason: "URL generica, nao especifica da agencia"
+  disabled_date: "2025-01-15"
+```
+
+**Campos**:
+| Campo | Tipo | Obrigatório | Default | Descrição |
+|-------|------|-------------|---------|-----------|
+| `url` | string | Sim | - | URL da página de notícias |
+| `active` | bool | Não | `true` | Se deve ser processada |
+| `disabled_reason` | string | Não | - | Motivo da desativação |
+| `disabled_date` | string | Não | - | Data da desativação (YYYY-MM-DD) |
+
+### Configuração de URLs do EBC Scraper
+
+O scraper EBC (Agência Brasil, TV Brasil) usa `src/data_platform/scrapers/config/ebc_urls.yaml` para definir quais fontes serão processadas.
+
+**Formato**:
+
+```yaml
+agencies:
+  # Fonte ativa
+  agencia-brasil:
+    url: https://agenciabrasil.ebc.com.br/ultimas
+    active: true
+
+  # Fonte desabilitada
+  memoria-ebc:
+    url: https://memoria.ebc.com.br/noticias
+    active: false
+    disabled_reason: "Site fora do ar (502 Bad Gateway)"
+    disabled_date: "2026-02-12"
+```
+
+**Campos**:
+| Campo | Tipo | Obrigatório | Default | Descrição |
+|-------|------|-------------|---------|-----------|
+| `url` | string | Sim | - | URL da página de índice de notícias |
+| `active` | bool | Não | `true` | Se deve ser processada |
+| `disabled_reason` | string | Não | - | Motivo da desativação |
+| `disabled_date` | string | Não | - | Data da desativação (YYYY-MM-DD) |
+
 ---
 
 ## Typesense
