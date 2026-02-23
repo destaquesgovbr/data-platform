@@ -1,0 +1,8 @@
+# Subset para teste incremental (Passo 6 do plano de migração)
+# Após validação, restaurar arquivo completo de scrapers/config/site_urls.yaml
+agencies:
+  fazenda: https://www.gov.br/fazenda/pt-br/assuntos/noticias
+  mds: https://www.gov.br/mds/pt-br/noticias-e-conteudos/desenvolvimento-social/noticias-desenvolvimento-social
+  mec: https://www.gov.br/mec/pt-br/assuntos/noticias
+  planalto: https://www.gov.br/planalto/pt-br/acompanhe-o-planalto/noticias
+  saude: https://www.gov.br/saude/pt-br/assuntos/noticias

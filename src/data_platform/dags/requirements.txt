@@ -6,3 +6,6 @@
 huggingface-hub==0.27.0
 pyarrow>=14.0.0
 requests>=2.31.0
+
+# Scraper dependencies (data-platform package installed via git)
+data-platform @ git+https://github.com/destaquesgovbr/data-platform.git
