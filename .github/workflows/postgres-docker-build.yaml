@@ -40,3 +40,4 @@ jobs:
           # 2) Push both tags
           docker push ghcr.io/destaquesgovbr/data-platform:latest
           docker push ghcr.io/destaquesgovbr/data-platform:${{ github.sha }}
+

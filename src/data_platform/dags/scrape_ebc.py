@@ -1,9 +1,11 @@
-"""DAG para scraping de notícias EBC (Agência Brasil, TV Brasil)."""
+"""DAG para scraping de notícias EBC (Agência Brasil, TV Brasil) via Cloud Run API."""
+import logging
 import os
 from datetime import datetime, timedelta
 
 from airflow.decorators import dag, task
-from airflow.providers.postgres.hooks.postgres import PostgresHook
+
+logger = logging.getLogger(__name__)
 
 
 @dag(
@@ -25,20 +27,34 @@ def scrape_ebc_dag():
 
     @task
     def scrape_ebc(logical_date=None):
-        """Scrape notícias EBC e insere no PostgreSQL."""
-        hook = PostgresHook(postgres_conn_id="postgres_default")
-        os.environ["DATABASE_URL"] = hook.get_uri()
-        os.environ["STORAGE_BACKEND"] = "postgres"
+        """Chama Scraper API no Cloud Run para scraping EBC."""
+        import google.auth.transport.requests
+        import google.oauth2.id_token
+        import httpx
 
-        from data_platform.managers import StorageAdapter
-        from data_platform.scrapers.ebc_scrape_manager import EBCScrapeManager
+        scraper_api_url = os.environ["SCRAPER_API_URL"]
+
+        auth_req = google.auth.transport.requests.Request()
+        token = google.oauth2.id_token.fetch_id_token(auth_req, scraper_api_url)
 
         min_date = (logical_date - timedelta(hours=1)).strftime("%Y-%m-%d")
         max_date = logical_date.strftime("%Y-%m-%d")
 
-        storage = StorageAdapter()
-        manager = EBCScrapeManager(storage)
-        manager.run_scraper(min_date, max_date, sequential=True)
+        logger.info(f"Calling scraper API for EBC: {min_date} to {max_date}")
+
+        response = httpx.post(
+            f"{scraper_api_url}/scrape/ebc",
+            json={
+                "start_date": min_date,
+                "end_date": max_date,
+                "allow_update": False,
+                "sequential": True,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=900.0,
+        )
+        response.raise_for_status()
+        logger.info(f"Scraper API response: {response.json()}")
 
     scrape_ebc()
 
