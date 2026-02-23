@@ -9,6 +9,9 @@ on:
       - main
     paths:
       - 'src/data_platform/dags/**'
+      - 'src/data_platform/scrapers/**'
+      - 'src/data_platform/managers/**'
+      - 'src/data_platform/models/**'
   workflow_dispatch:
     inputs:
       test_connections:
@@ -134,6 +137,16 @@ jobs:
           else
             echo "No requirements.txt found, skipping dependency update"
           fi
+
+      - name: Deploy data_platform source to plugins/
+        run: |
+          # Composer plugins/ dir is on PYTHONPATH, making data_platform importable
+          PLUGINS_BUCKET=$(echo "${{ steps.composer.outputs.dags_bucket }}" | sed 's|/dags$|/plugins|')
+          echo "Syncing data_platform source to $PLUGINS_BUCKET/data_platform/..."
+          gsutil -m rsync -r \
+            src/data_platform/ $PLUGINS_BUCKET/data_platform/ \
+            -x "dags/.*|__pycache__/.*|\.pyc$"
+          echo "Source code deployed to plugins!"
 
       - name: Deploy DAGs to GCS
         run: |

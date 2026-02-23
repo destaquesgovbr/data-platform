@@ -7,5 +7,12 @@ huggingface-hub==0.27.0
 pyarrow>=14.0.0
 requests>=2.31.0
 
-# Scraper dependencies (data-platform package installed via git)
-data-platform @ git+https://github.com/destaquesgovbr/data-platform.git
+# Scraper dependencies (código fonte é deployado via plugins/ no workflow)
+# Abaixo estão apenas as dependências pip que os scrapers precisam
+beautifulsoup4>=4.12.3
+retry>=0.9.2
+markdownify>=0.14.1
+markdown>=3.7
+pyyaml>=6.0.2
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
