@@ -68,7 +68,7 @@ class ScrapeManager:
         max_date: str,
         sequential: bool,
         allow_update: bool = False,
-    ):
+    ) -> dict:
         """
         Executes the web scraping process for the given agencies, date range,
         and whether the scraping should happen sequentially or in bulk.
@@ -78,7 +78,12 @@ class ScrapeManager:
         :param max_date: The maximum date for filtering news.
         :param sequential: Whether to scrape sequentially (True) or in bulk (False).
         :param allow_update: If True, overwrite existing entries in the dataset.
+        :return: Dict with metrics: articles_scraped, articles_saved, agencies_processed.
         """
+        articles_scraped = 0
+        articles_saved = 0
+        agencies_processed = []
+
         try:
             all_urls = []
             # Load URLs for each agency in the list
@@ -104,7 +109,10 @@ class ScrapeManager:
                         logging.info(
                             f"Appending news for {scraper.agency} to HF dataset."
                         )
-                        self._process_and_upload_data(scraped_data, allow_update)
+                        articles_scraped += len(scraped_data)
+                        saved = self._process_and_upload_data(scraped_data, allow_update) or 0
+                        articles_saved += saved
+                        agencies_processed.append(scraper.agency)
                     else:
                         logging.info(f"No news found for {scraper.agency}.")
             else:
@@ -113,16 +121,24 @@ class ScrapeManager:
                     scraped_data = scraper.scrape_news()
                     if scraped_data:
                         all_news_data.extend(scraped_data)
+                        agencies_processed.append(scraper.agency)
                     else:
                         logging.info(f"No news found for {scraper.agency}.")
 
                 if all_news_data:
                     logging.info("Appending all collected news to HF dataset.")
-                    self._process_and_upload_data(all_news_data, allow_update)
+                    articles_scraped = len(all_news_data)
+                    articles_saved = self._process_and_upload_data(all_news_data, allow_update) or 0
                 else:
                     logging.info("No news found for any agency.")
         except ValueError as e:
             logging.error(e)
+
+        return {
+            "articles_scraped": articles_scraped,
+            "articles_saved": articles_saved,
+            "agencies_processed": agencies_processed,
+        }
 
     def _process_and_upload_data(self, new_data, allow_update: bool):
         """
@@ -132,7 +148,7 @@ class ScrapeManager:
         :param allow_update: If True, overwrite existing entries in the dataset.
         """
         new_data = self._preprocess_data(new_data)
-        self.dataset_manager.insert(new_data, allow_update=allow_update)
+        return self.dataset_manager.insert(new_data, allow_update=allow_update)
 
     def _preprocess_data(self, data: List[Dict[str, str]]) -> OrderedDict:
         """

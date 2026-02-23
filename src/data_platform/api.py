@@ -40,6 +40,9 @@ class ScrapeResponse(BaseModel):
     status: str
     start_date: str
     end_date: str
+    articles_scraped: int = 0
+    articles_saved: int = 0
+    agencies_processed: list[str] = []
     message: str
 
 
@@ -59,7 +62,7 @@ def scrape_agencies(req: ScrapeAgenciesRequest):
     try:
         storage = StorageAdapter()
         manager = ScrapeManager(storage)
-        manager.run_scraper(
+        metrics = manager.run_scraper(
             agencies=req.agencies,
             min_date=req.start_date,
             max_date=end,
@@ -74,6 +77,9 @@ def scrape_agencies(req: ScrapeAgenciesRequest):
         status="completed",
         start_date=req.start_date,
         end_date=end,
+        articles_scraped=metrics["articles_scraped"],
+        articles_saved=metrics["articles_saved"],
+        agencies_processed=metrics["agencies_processed"],
         message="Scraping completed",
     )
 
@@ -89,7 +95,7 @@ def scrape_ebc(req: ScrapeEBCRequest):
     try:
         storage = StorageAdapter()
         manager = EBCScrapeManager(storage)
-        manager.run_scraper(
+        metrics = manager.run_scraper(
             min_date=req.start_date,
             max_date=end,
             sequential=req.sequential,
@@ -103,5 +109,8 @@ def scrape_ebc(req: ScrapeEBCRequest):
         status="completed",
         start_date=req.start_date,
         end_date=end,
+        articles_scraped=metrics["articles_scraped"],
+        articles_saved=metrics["articles_saved"],
+        agencies_processed=["ebc"],
         message="EBC scraping completed",
     )
