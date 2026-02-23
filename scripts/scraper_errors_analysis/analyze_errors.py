@@ -21,6 +21,8 @@ ERROR_PATTERNS = [
     r'HTTP error when accessing (https?://[^\s:]+):\s+(.+?)(?:\s+for url:|$)',
     # Request failed for URL: ERROR_TYPE
     r'Request failed for (https?://[^\s:]+):\s+(.+?)(?:\s+for url:|$)',
+    # Skipping page due to repeated failures: URL
+    r'Skipping page due to repeated failures:\s+(https?://[^\s]+)',
 ]
 
 # Mapeamento de códigos HTTP
@@ -44,7 +46,14 @@ def extract_errors(input_file):
             for pattern in ERROR_PATTERNS:
                 match = re.search(pattern, line)
                 if match:
-                    url, error_type = match.groups()
+                    groups = match.groups()
+                    if len(groups) == 2:
+                        url, error_type = groups
+                    else:
+                        # Padrão com apenas URL (ex: "Skipping page")
+                        url = groups[0]
+                        error_type = "Repeated failures (skipped)"
+
                     url_base = url.split('?')[0]
                     error_type = error_type.strip()
                     url_errors[url_base][error_type] += 1
