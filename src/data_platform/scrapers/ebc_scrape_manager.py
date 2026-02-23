@@ -42,7 +42,7 @@ class EBCScrapeManager:
         max_date: str,
         sequential: bool,
         allow_update: bool = False,
-    ):
+    ) -> dict:
         """
         Executes the EBC web scraping process for the given date range.
 
@@ -50,7 +50,11 @@ class EBCScrapeManager:
         :param max_date: The maximum date for filtering news.
         :param sequential: Whether to process and upload sequentially (always True for EBC since we have only one source).
         :param allow_update: If True, overwrite existing entries in the dataset.
+        :return: Dict with metrics: articles_scraped, articles_saved.
         """
+        articles_scraped = 0
+        articles_saved = 0
+
         try:
             logging.info(f"Starting EBC scraping from {min_date} to {max_date}")
 
@@ -61,15 +65,21 @@ class EBCScrapeManager:
             scraped_data = ebc_scraper.scrape_news()
 
             if scraped_data:
-                logging.info(f"Successfully scraped {len(scraped_data)} articles from EBC")
+                articles_scraped = len(scraped_data)
+                logging.info(f"Successfully scraped {articles_scraped} articles from EBC")
                 logging.info("Processing and uploading EBC news to HF dataset.")
-                self._process_and_upload_data(scraped_data, allow_update)
+                articles_saved = self._process_and_upload_data(scraped_data, allow_update) or 0
             else:
                 logging.info("No EBC news found for the specified date range.")
 
         except Exception as e:
             logging.error(f"Error during EBC scraping: {e}")
             raise
+
+        return {
+            "articles_scraped": articles_scraped,
+            "articles_saved": articles_saved,
+        }
 
     def _process_and_upload_data(self, new_data: List[Dict], allow_update: bool):
         """
@@ -85,7 +95,7 @@ class EBCScrapeManager:
         processed_data = self._preprocess_data(processed_data)
 
         # Insert into dataset
-        self.dataset_manager.insert(processed_data, allow_update=allow_update)
+        return self.dataset_manager.insert(processed_data, allow_update=allow_update)
 
     def _convert_ebc_to_govbr_format(self, ebc_data: List[Dict]) -> List[Dict]:
         """
