@@ -144,8 +144,8 @@ jobs:
           PLUGINS_BUCKET=$(echo "${{ steps.composer.outputs.dags_bucket }}" | sed 's|/dags$|/plugins|')
           echo "Syncing data_platform source to $PLUGINS_BUCKET/data_platform/..."
           gsutil -m rsync -r \
-            src/data_platform/ $PLUGINS_BUCKET/data_platform/ \
-            -x "dags/.*|__pycache__/.*|\.pyc$"
+            -x "dags/.*|__pycache__/.*|\.pyc$" \
+            src/data_platform/ $PLUGINS_BUCKET/data_platform/
           echo "Source code deployed to plugins!"
 
       - name: Deploy DAGs to GCS
