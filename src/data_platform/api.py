@@ -36,6 +36,11 @@ class ScrapeEBCRequest(BaseModel):
     sequential: bool = True
 
 
+class AgencyError(BaseModel):
+    agency: str
+    error: str
+
+
 class ScrapeResponse(BaseModel):
     status: str
     start_date: str
@@ -43,6 +48,7 @@ class ScrapeResponse(BaseModel):
     articles_scraped: int = 0
     articles_saved: int = 0
     agencies_processed: list[str] = []
+    errors: list[AgencyError] = []
     message: str
 
 
@@ -73,14 +79,26 @@ def scrape_agencies(req: ScrapeAgenciesRequest):
         logger.error(f"Scraping failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+    errors = [AgencyError(**e) for e in metrics.get("errors", [])]
+    if errors and not metrics["agencies_processed"]:
+        status = "failed"
+        message = "All agencies failed"
+    elif errors:
+        status = "partial"
+        message = f"Completed with {len(errors)} error(s)"
+    else:
+        status = "completed"
+        message = "Scraping completed"
+
     return ScrapeResponse(
-        status="completed",
+        status=status,
         start_date=req.start_date,
         end_date=end,
         articles_scraped=metrics["articles_scraped"],
         articles_saved=metrics["articles_saved"],
         agencies_processed=metrics["agencies_processed"],
-        message="Scraping completed",
+        errors=errors,
+        message=message,
     )
 
 
@@ -105,12 +123,21 @@ def scrape_ebc(req: ScrapeEBCRequest):
         logger.error(f"EBC scraping failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+    errors = [AgencyError(**e) for e in metrics.get("errors", [])]
+    if errors:
+        status = "failed"
+        message = f"EBC scraping failed: {errors[0].error}"
+    else:
+        status = "completed"
+        message = "EBC scraping completed"
+
     return ScrapeResponse(
-        status="completed",
+        status=status,
         start_date=req.start_date,
         end_date=end,
         articles_scraped=metrics["articles_scraped"],
         articles_saved=metrics["articles_saved"],
-        agencies_processed=["ebc"],
-        message="EBC scraping completed",
+        agencies_processed=["ebc"] if not errors else [],
+        errors=errors,
+        message=message,
     )

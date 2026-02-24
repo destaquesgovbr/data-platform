@@ -6,7 +6,7 @@ from datetime import date
 from typing import Any, Dict, List
 
 import yaml
-from data_platform.scrapers.webscraper import WebScraper
+from data_platform.scrapers.webscraper import ScrapingError, WebScraper
 
 # Set up logging configuration
 logging.basicConfig(
@@ -83,6 +83,7 @@ class ScrapeManager:
         articles_scraped = 0
         articles_saved = 0
         agencies_processed = []
+        errors = []
 
         try:
             all_urls = []
@@ -93,6 +94,7 @@ class ScrapeManager:
                         urls = self._load_urls_from_yaml("site_urls.yaml", agency)
                         all_urls.extend(urls)
                     except ValueError as e:
+                        errors.append({"agency": agency, "error": str(e)})
                         logging.warning(f"Skipping agency '{agency}': {e}")
             else:
                 # Load all agency URLs if agencies list is None or empty
@@ -104,26 +106,42 @@ class ScrapeManager:
 
             if sequential:
                 for scraper in webscrapers:
-                    scraped_data = scraper.scrape_news()
-                    if scraped_data:
-                        logging.info(
-                            f"Appending news for {scraper.agency} to HF dataset."
-                        )
-                        articles_scraped += len(scraped_data)
-                        saved = self._process_and_upload_data(scraped_data, allow_update) or 0
-                        articles_saved += saved
-                        agencies_processed.append(scraper.agency)
-                    else:
-                        logging.info(f"No news found for {scraper.agency}.")
+                    try:
+                        scraped_data = scraper.scrape_news()
+                        if scraped_data:
+                            logging.info(
+                                f"Appending news for {scraper.agency} to HF dataset."
+                            )
+                            articles_scraped += len(scraped_data)
+                            saved = self._process_and_upload_data(scraped_data, allow_update) or 0
+                            articles_saved += saved
+                            agencies_processed.append(scraper.agency)
+                        else:
+                            logging.info(f"No news found for {scraper.agency}.")
+                            agencies_processed.append(scraper.agency)
+                    except ScrapingError as e:
+                        errors.append({"agency": scraper.agency, "error": str(e)})
+                        logging.error(f"Scraping failed for {scraper.agency}: {e}")
+                    except Exception as e:
+                        errors.append({"agency": scraper.agency, "error": str(e)})
+                        logging.error(f"Unexpected error for {scraper.agency}: {e}")
             else:
                 all_news_data = []
                 for scraper in webscrapers:
-                    scraped_data = scraper.scrape_news()
-                    if scraped_data:
-                        all_news_data.extend(scraped_data)
-                        agencies_processed.append(scraper.agency)
-                    else:
-                        logging.info(f"No news found for {scraper.agency}.")
+                    try:
+                        scraped_data = scraper.scrape_news()
+                        if scraped_data:
+                            all_news_data.extend(scraped_data)
+                            agencies_processed.append(scraper.agency)
+                        else:
+                            logging.info(f"No news found for {scraper.agency}.")
+                            agencies_processed.append(scraper.agency)
+                    except ScrapingError as e:
+                        errors.append({"agency": scraper.agency, "error": str(e)})
+                        logging.error(f"Scraping failed for {scraper.agency}: {e}")
+                    except Exception as e:
+                        errors.append({"agency": scraper.agency, "error": str(e)})
+                        logging.error(f"Unexpected error for {scraper.agency}: {e}")
 
                 if all_news_data:
                     logging.info("Appending all collected news to HF dataset.")
@@ -133,11 +151,13 @@ class ScrapeManager:
                     logging.info("No news found for any agency.")
         except ValueError as e:
             logging.error(e)
+            errors.append({"agency": "config", "error": str(e)})
 
         return {
             "articles_scraped": articles_scraped,
             "articles_saved": articles_saved,
             "agencies_processed": agencies_processed,
+            "errors": errors,
         }
 
     def _process_and_upload_data(self, new_data, allow_update: bool):

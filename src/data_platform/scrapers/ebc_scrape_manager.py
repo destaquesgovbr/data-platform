@@ -54,6 +54,7 @@ class EBCScrapeManager:
         """
         articles_scraped = 0
         articles_saved = 0
+        errors = []
 
         try:
             logging.info(f"Starting EBC scraping from {min_date} to {max_date}")
@@ -74,11 +75,12 @@ class EBCScrapeManager:
 
         except Exception as e:
             logging.error(f"Error during EBC scraping: {e}")
-            raise
+            errors.append({"agency": "ebc", "error": str(e)})
 
         return {
             "articles_scraped": articles_scraped,
             "articles_saved": articles_saved,
+            "errors": errors,
         }
 
     def _process_and_upload_data(self, new_data: List[Dict], allow_update: bool):
