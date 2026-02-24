@@ -7,6 +7,7 @@ Cada DAG:
 - Retry: 2x com backoff de 5 min
 - Timeout: 15 min por execução
 """
+import json
 import logging
 import os
 from datetime import datetime, timedelta
@@ -83,7 +84,8 @@ def create_scraper_dag(agency_key: str, agency_url: str):
                 timeout=900.0,
             )
             response.raise_for_status()
-            logger.info(f"Scraper API response: {response.json()}")
+            result = response.json()
+            logger.info("Scraper API response:\n%s", json.dumps(result, indent=2, ensure_ascii=False))
 
         scrape()
 

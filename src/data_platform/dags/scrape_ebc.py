@@ -1,4 +1,5 @@
 """DAG para scraping de notícias EBC (Agência Brasil, TV Brasil) via Cloud Run API."""
+import json
 import logging
 import os
 from datetime import datetime, timedelta
@@ -60,7 +61,8 @@ def scrape_ebc_dag():
             timeout=900.0,
         )
         response.raise_for_status()
-        logger.info(f"Scraper API response: {response.json()}")
+        result = response.json()
+        logger.info("Scraper API response:\n%s", json.dumps(result, indent=2, ensure_ascii=False))
 
     scrape_ebc()
 
