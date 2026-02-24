@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 def scrape_ebc_dag():
 
     @task
-    def scrape_ebc(logical_date=None):
+    def scrape_ebc(**context):
         """Chama Scraper API no Cloud Run para scraping EBC."""
         import google.auth.transport.requests
         import google.oauth2.id_token
@@ -37,6 +37,11 @@ def scrape_ebc_dag():
 
         auth_req = google.auth.transport.requests.Request()
         token = google.oauth2.id_token.fetch_id_token(auth_req, scraper_api_url)
+
+        logical_date = context.get("logical_date") or context.get("execution_date")
+        if logical_date is None:
+            from datetime import datetime as dt
+            logical_date = dt.utcnow()
 
         min_date = (logical_date - timedelta(hours=1)).strftime("%Y-%m-%d")
         max_date = logical_date.strftime("%Y-%m-%d")
