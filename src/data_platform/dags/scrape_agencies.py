@@ -52,8 +52,9 @@ def create_scraper_dag(agency_key: str, agency_url: str):
             import google.auth.transport.requests
             import google.oauth2.id_token
             import httpx
+            from airflow.models import Variable
 
-            scraper_api_url = os.environ["SCRAPER_API_URL"]
+            scraper_api_url = Variable.get("scraper_api_url")
 
             # Token IAM para autenticação no Cloud Run
             auth_req = google.auth.transport.requests.Request()
