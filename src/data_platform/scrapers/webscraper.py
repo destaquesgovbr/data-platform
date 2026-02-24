@@ -32,6 +32,7 @@ ANTI_BOT_INDICATORS = [
 
 class ScrapingError(Exception):
     """Raised when scraping fails for a detectable reason (anti-bot, blocked, etc)."""
+
     pass
 
 
@@ -99,9 +100,7 @@ class WebScraper:
                 raise  # Propagate scraping errors (anti-bot, etc)
 
             except requests.exceptions.RequestException as e:
-                raise ScrapingError(
-                    f"Network error scraping {self.agency}: {str(e)}"
-                ) from e
+                raise ScrapingError(f"Network error scraping {self.agency}: {str(e)}") from e
 
         return self.news_data
 
@@ -150,9 +149,7 @@ class WebScraper:
         try:
             response = self.fetch_page(page_url)
         except requests.exceptions.RequestException as e:
-            raise ScrapingError(
-                f"Failed to fetch page after retries for {self.agency}: {e}"
-            ) from e
+            raise ScrapingError(f"Failed to fetch page after retries for {self.agency}: {e}") from e
 
         # Check for anti-bot blocking
         if self._detect_anti_bot(response):
@@ -684,47 +681,6 @@ class WebScraper:
             logging.debug(f"Error extracting datetime from text: {e}")
 
         return published_dt, updated_dt
-
-    def extract_published_datetime(self, url: str) -> tuple[datetime | None, datetime | None]:
-        """
-        Extract published and updated datetimes from article page.
-        Uses multiple extraction strategies with priority:
-        1. JSON-LD schema (most reliable)
-        2. Text parsing ("Publicado em...")
-        3. Fallback to date at midnight if only date available
-
-        :param url: The URL of the article.
-        :return: Tuple of (published_datetime, updated_datetime). Either can be None.
-        """
-        try:
-            response = self.fetch_page(url)
-            if not response:
-                return None, None
-
-            soup = BeautifulSoup(response.content, "html.parser")
-
-            # Strategy 1: Try JSON-LD first (most reliable)
-            published_dt = self._extract_datetime_from_jsonld(soup)
-            updated_dt = self._extract_updated_datetime_from_jsonld(soup)
-
-            if published_dt:
-                logging.debug(f"Extracted datetime from JSON-LD: {published_dt}")
-                return published_dt, updated_dt
-
-            # Strategy 2: Try text parsing
-            published_dt, updated_dt = self._extract_datetime_from_text(soup)
-
-            if published_dt:
-                logging.debug(f"Extracted datetime from text: {published_dt}")
-                return published_dt, updated_dt
-
-            # No datetime found
-            logging.debug(f"Could not extract datetime from {url}")
-            return None, None
-
-        except Exception as e:
-            logging.error(f"Error extracting datetime from {url}: {str(e)}")
-            return None, None
 
     def get_article_content(
         self, url: str
