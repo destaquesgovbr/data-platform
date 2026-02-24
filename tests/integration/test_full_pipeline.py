@@ -30,6 +30,10 @@ import psycopg2.extensions
 import pytest
 import requests  # type: ignore[import-untyped]
 
+# Skip all tests: scraping was extracted to standalone scraper repo,
+# this end-to-end test needs to be redesigned to seed data independently.
+pytestmark = pytest.mark.skip(reason="Needs redesign after scraper extraction (no local scraping)")
+
 # ==============================================================================
 # CONFIGURAÇÃO
 # ==============================================================================
