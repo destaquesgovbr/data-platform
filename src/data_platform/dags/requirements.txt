@@ -6,3 +6,10 @@
 huggingface-hub==0.27.0
 pyarrow>=14.0.0
 requests>=2.31.0
+
+# Scraper DAGs (chamam Cloud Run API via HTTP, não executam scraper localmente)
+httpx>=0.27.0
+google-auth>=2.29.0
+
+# Config parsing (usado no parse time para gerar DAGs dinâmicas)
+pyyaml>=6.0.2

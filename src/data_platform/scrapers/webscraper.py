@@ -18,6 +18,32 @@ logging.basicConfig(
 
 SLEEP_TIME_INTERVAL = (0.5, 1.5)
 
+# Minimum response size (bytes) that suggests a real page vs an error page
+MIN_REAL_PAGE_SIZE = 5000
+# JS challenge / anti-bot indicators
+ANTI_BOT_INDICATORS = [
+    "challenge-platform",
+    "cf-browser-verification",
+    "jschl_vc",
+    "jschl_answer",
+    "ray_id",
+    "_cf_chl",
+    "Checking your browser",
+    "Just a moment",
+]
+
+
+class ScrapingError(Exception):
+    """Raised when scraping fails for a detectable reason (anti-bot, blocked, etc)."""
+    pass
+
+
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+}
+
 
 class WebScraper:
     def __init__(self, min_date: str, base_url: str, max_date: Optional[str] = None):
@@ -48,9 +74,9 @@ class WebScraper:
     def scrape_news(self) -> List[Dict[str, str]]:
         """
         Scrape news from the website until the min_date is reached.
-        If the agency's URL consistently fails, skip it.
 
         :return: A list of dictionaries containing news data.
+        :raises ScrapingError: If anti-bot blocking or persistent failures are detected.
         """
         current_offset = 0
 
@@ -74,17 +100,13 @@ class WebScraper:
                 current_offset += items_per_page
                 logging.info(f"Moving to next page with offset {current_offset}")
 
-            except requests.exceptions.HTTPError as e:
-                logging.error(
-                    f"Skipping agency {self.agency} due to persistent HTTP error: {str(e)}"
-                )
-                break
+            except ScrapingError:
+                raise  # Propagate scraping errors (anti-bot, etc)
 
             except requests.exceptions.RequestException as e:
-                logging.error(
-                    f"Skipping agency {self.agency} due to network error: {str(e)}"
-                )
-                break
+                raise ScrapingError(
+                    f"Network error scraping {self.agency}: {str(e)}"
+                ) from e
 
         return self.news_data
 
@@ -98,23 +120,26 @@ class WebScraper:
     def fetch_page(self, url: str) -> Optional[requests.Response]:
         """
         Fetch the page content from the given URL with retry logic.
-        If the request fails permanently, return None.
 
         :param url: The URL to fetch.
-        :return: The Response object or None if the request fails.
+        :return: The Response object or None if the request fails after all retries.
         """
-        try:
-            response = requests.get(url, timeout=20)
-            response.raise_for_status()
-            return response
+        response = requests.get(url, headers=DEFAULT_HEADERS, timeout=20)
+        response.raise_for_status()
+        return response
 
-        except requests.exceptions.HTTPError as e:
-            logging.error(f"HTTP error when accessing {url}: {e}")
-            return None
+    def _detect_anti_bot(self, response: requests.Response) -> bool:
+        """
+        Detect if a response is an anti-bot challenge page.
 
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Request failed for {url}: {e}")
-            return None
+        :param response: The HTTP response to check.
+        :return: True if anti-bot blocking is detected.
+        """
+        content = response.text
+        for indicator in ANTI_BOT_INDICATORS:
+            if indicator in content:
+                return True
+        return False
 
     def scrape_page(self, page_url: str) -> Tuple[bool, int]:
         """
@@ -123,13 +148,24 @@ class WebScraper:
 
         :param page_url: The URL of the page to scrape.
         :return: A tuple (continue_scraping, items_per_page).
+        :raises ScrapingError: If anti-bot blocking or unexpected response is detected.
         """
         logging.info(f"Fetching site news list: {page_url}")
 
-        response = self.fetch_page(page_url)
-        if not response:
-            logging.error(f"Skipping page due to repeated failures: {page_url}")
-            return False, 0
+        try:
+            response = self.fetch_page(page_url)
+        except requests.exceptions.RequestException as e:
+            raise ScrapingError(
+                f"Failed to fetch page after retries for {self.agency}: {e}"
+            ) from e
+
+        # Check for anti-bot blocking
+        if self._detect_anti_bot(response):
+            raise ScrapingError(
+                f"Anti-bot protection detected for {self.agency}. "
+                f"The site returned a JS challenge page instead of content. "
+                f"URL: {page_url}"
+            )
 
         soup = BeautifulSoup(response.content, "html.parser")
         news_items = soup.find_all("article", class_="tileItem")
@@ -146,6 +182,15 @@ class WebScraper:
         logging.info(f"Found {items_per_page} news articles on the page")
 
         if items_per_page == 0:
+            # On first page, a large response with 0 articles is suspicious
+            if "b_start" not in page_url or "b_start:int=0" in page_url:
+                response_size = len(response.content)
+                if response_size > MIN_REAL_PAGE_SIZE:
+                    raise ScrapingError(
+                        f"No articles found on first page of {self.agency} but response "
+                        f"was {response_size} bytes. This may indicate anti-bot blocking "
+                        f"or a changed page structure. URL: {page_url}"
+                    )
             return False, 0  # No items to process
 
         # Check the date of the last news item to decide whether to process the page

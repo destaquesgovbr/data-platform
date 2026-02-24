@@ -70,7 +70,7 @@ class PostgresManager:
             PostgreSQL connection string
         """
         # Check for DATABASE_URL environment variable first (for local development)
-        database_url = os.getenv("DATABASE_URL")
+        database_url = os.getenv("DATABASE_URL", "").strip()
         if database_url:
             logger.info("Using DATABASE_URL from environment")
             return database_url

@@ -135,6 +135,18 @@ jobs:
             echo "No requirements.txt found, skipping dependency update"
           fi
 
+      - name: Clean stale plugins
+        run: |
+          # DAGs now call Cloud Run API via HTTP - no local source code needed in plugins/
+          PLUGINS_BUCKET=$(echo "${{ steps.composer.outputs.dags_bucket }}" | sed 's|/dags$|/plugins|')
+          if gsutil ls "$PLUGINS_BUCKET/data_platform/" > /dev/null 2>&1; then
+            echo "Removing stale data_platform code from plugins/..."
+            gsutil -m rm -r "$PLUGINS_BUCKET/data_platform/" || true
+            echo "Stale plugins removed!"
+          else
+            echo "No stale plugins found, skipping cleanup"
+          fi
+
       - name: Deploy DAGs to GCS
         run: |
           echo "Syncing DAGs to ${{ steps.composer.outputs.dags_bucket }}..."
