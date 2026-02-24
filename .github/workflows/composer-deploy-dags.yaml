@@ -9,9 +9,6 @@ on:
       - main
     paths:
       - 'src/data_platform/dags/**'
-      - 'src/data_platform/scrapers/**'
-      - 'src/data_platform/managers/**'
-      - 'src/data_platform/models/**'
   workflow_dispatch:
     inputs:
       test_connections:
@@ -138,15 +135,17 @@ jobs:
             echo "No requirements.txt found, skipping dependency update"
           fi
 
-      - name: Deploy data_platform source to plugins/
+      - name: Clean stale plugins
         run: |
-          # Composer plugins/ dir is on PYTHONPATH, making data_platform importable
+          # DAGs now call Cloud Run API via HTTP - no local source code needed in plugins/
           PLUGINS_BUCKET=$(echo "${{ steps.composer.outputs.dags_bucket }}" | sed 's|/dags$|/plugins|')
-          echo "Syncing data_platform source to $PLUGINS_BUCKET/data_platform/..."
-          gsutil -m rsync -r \
-            -x "dags/.*|__pycache__/.*|\.pyc$" \
-            src/data_platform/ $PLUGINS_BUCKET/data_platform/
-          echo "Source code deployed to plugins!"
+          if gsutil ls "$PLUGINS_BUCKET/data_platform/" > /dev/null 2>&1; then
+            echo "Removing stale data_platform code from plugins/..."
+            gsutil -m rm -r "$PLUGINS_BUCKET/data_platform/" || true
+            echo "Stale plugins removed!"
+          else
+            echo "No stale plugins found, skipping cleanup"
+          fi
 
       - name: Deploy DAGs to GCS
         run: |
