@@ -38,6 +38,9 @@ pydantic-settings = "^2.1.0"
 python-dotenv = "^1.0.0"
 pyyaml = "^6.0.2"
 
+# Retry (used by dataset_manager, enrichment_manager)
+retry = "^0.9.2"
+
 # Utilities
 tqdm = "^4.66.1"
 loguru = "^0.7.2"

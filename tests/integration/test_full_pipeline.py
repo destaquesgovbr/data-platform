@@ -2,13 +2,13 @@
 Teste de integração completo do pipeline data-platform.
 
 Este teste executa o fluxo completo end-to-end:
-1. Limpeza de BDs (PostgreSQL + Typesense)
-2. Criação de schema e dados mestre (agencies, themes)
-3. Scraping (MEC, GESTAO, CGU) - 20 a 23/12/2025
-4. Upload para Cogfy (AI enrichment)
-5. Enrich com temas do Cogfy
-6. Geração de embeddings via API Cloud Run
-7. Carga full no Typesense (com embeddings)
+1. Criação de schema e dados mestre (agencies, themes)
+2. Upload para Cogfy (AI enrichment)
+3. Enrich com temas do Cogfy
+4. Geração de embeddings via API Cloud Run
+5. Carga full no Typesense (com embeddings)
+
+Note: Scraping moved to standalone scraper repo.
 
 Requisitos:
 - Docker containers rodando (PostgreSQL + Typesense)
@@ -38,7 +38,6 @@ DATABASE_URL = os.getenv(
 )
 START_DATE = "2025-12-20"
 END_DATE = "2025-12-23"
-AGENCIES = "mec,gestao,cgu"
 
 # Typesense
 TYPESENSE_HOST = "localhost"
@@ -348,64 +347,14 @@ def test_01_populate_master_data(docker_services: None, env_vars: None) -> None:
     print("\n✅ FASE 1 COMPLETA: Dados mestre carregados")
 
 
-def test_02_scrape_govbr(docker_services: None, env_vars: None) -> None:
+def test_02_upload_cogfy(docker_services: None, env_vars: None) -> None:
     """
-    FASE 2: Scraping de notícias gov.br (MEC, GESTAO, CGU).
-    """
-    print("\n" + "=" * 70)
-    print(f"FASE 2: Scraping gov.br ({AGENCIES})")
-    print("=" * 70)
-
-    run_cli_command(
-        [
-            "scrape",
-            "--start-date",
-            START_DATE,
-            "--end-date",
-            END_DATE,
-            "--agencies",
-            AGENCIES,
-            "--allow-update",
-            "--sequential",
-        ],
-        "Scraping notícias gov.br",
-    )
-
-    # Validar que notícias foram inseridas
-    total_news = count_news()
-    assert total_news > 0, "Nenhuma notícia foi scraped"
-    print(f"\n📰 Total de notícias scraped: {total_news}")
-
-    # Validar datas
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT
-            DATE(published_at) as date,
-            COUNT(*) as count
-        FROM news
-        GROUP BY DATE(published_at)
-        ORDER BY date
-    """)
-    results = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    print("\n📊 Distribuição por data:")
-    for date, count in results:
-        print(f"   {date}: {count} notícias")
-
-    print("\n✅ FASE 2 COMPLETA: Scraping finalizado")
-
-
-def test_03_upload_cogfy(docker_services: None, env_vars: None) -> None:
-    """
-    FASE 3: Upload de notícias para Cogfy (AI enrichment).
+    FASE 2: Upload de notícias para Cogfy (AI enrichment).
 
     Requer COGFY_API_KEY configurado.
     """
     print("\n" + "=" * 70)
-    print("FASE 3: Upload para Cogfy")
+    print("FASE 2: Upload para Cogfy")
     print("=" * 70)
 
     # Verificar que COGFY_API_KEY está configurado
@@ -419,7 +368,7 @@ def test_03_upload_cogfy(docker_services: None, env_vars: None) -> None:
         "Enviando notícias para Cogfy",
     )
 
-    print("\n✅ FASE 3 COMPLETA: Upload para Cogfy finalizado")
+    print("\n✅ FASE 2 COMPLETA: Upload para Cogfy finalizado")
     print(f"\n⏸️  AGUARDANDO: Cogfy processará as notícias (~{COGFY_WAIT_TIME // 60} minutos)")
     print("   O Cogfy usa LLM para classificar temas e gerar resumos...")
 
@@ -433,12 +382,12 @@ def test_03_upload_cogfy(docker_services: None, env_vars: None) -> None:
     print("\n✅ Tempo de espera completo. Prosseguindo para enrich...")
 
 
-def test_04_enrich_themes(docker_services: None, env_vars: None) -> None:
+def test_03_enrich_themes(docker_services: None, env_vars: None) -> None:
     """
-    FASE 4: Enrich com temas classificados pelo Cogfy.
+    FASE 3: Enrich com temas classificados pelo Cogfy.
     """
     print("\n" + "=" * 70)
-    print("FASE 4: Enrich themes (baixar de Cogfy)")
+    print("FASE 3: Enrich themes (baixar de Cogfy)")
     print("=" * 70)
 
     # Verificar que COGFY_API_KEY está configurado
@@ -474,17 +423,17 @@ def test_04_enrich_themes(docker_services: None, env_vars: None) -> None:
 
     assert enriched_count > 0, "Nenhuma notícia foi enriquecida com temas"
 
-    print("\n✅ FASE 4 COMPLETA: Enriquecimento finalizado")
+    print("\n✅ FASE 3 COMPLETA: Enriquecimento finalizado")
 
 
-def test_05_generate_embeddings(docker_services: None, env_vars: None) -> None:
+def test_04_generate_embeddings(docker_services: None, env_vars: None) -> None:
     """
-    FASE 5: Geração de embeddings semânticos via API Cloud Run.
+    FASE 4: Geração de embeddings semânticos via API Cloud Run.
 
     Requer API de embeddings rodando (Cloud Run).
     """
     print("\n" + "=" * 70)
-    print("FASE 5: Geração de embeddings")
+    print("FASE 4: Geração de embeddings")
     print("=" * 70)
 
     run_cli_command(
@@ -519,19 +468,19 @@ def test_05_generate_embeddings(docker_services: None, env_vars: None) -> None:
 
     assert embeddings_count > 0, "Nenhum embedding foi gerado"
 
-    print("\n✅ FASE 5 COMPLETA: Embeddings gerados")
+    print("\n✅ FASE 4 COMPLETA: Embeddings gerados")
 
 
-def test_06_sync_typesense_full(docker_services: None, env_vars: None) -> None:
+def test_05_sync_typesense_full(docker_services: None, env_vars: None) -> None:
     """
-    FASE 6: Sync full para Typesense (com embeddings).
+    FASE 5: Sync full para Typesense (com embeddings).
 
     - Deleta collection 'news' existente
     - Recria collection com schema atualizado
     - Popula com todas as notícias do PostgreSQL
     """
     print("\n" + "=" * 70)
-    print("FASE 6: Sync full Typesense")
+    print("FASE 5: Sync full Typesense")
     print("=" * 70)
 
     # Deletar collection existente
@@ -594,12 +543,12 @@ def test_06_sync_typesense_full(docker_services: None, env_vars: None) -> None:
     )
     print(f"   {result.stdout}")
 
-    print("\n✅ FASE 6 COMPLETA: Typesense populado")
+    print("\n✅ FASE 5 COMPLETA: Typesense populado")
 
 
-def test_07_validate_final_state(docker_services: None, env_vars: None) -> None:
+def test_06_validate_final_state(docker_services: None, env_vars: None) -> None:
     """
-    FASE 7: Validação final do estado completo do sistema.
+    FASE 6: Validação final do estado completo do sistema.
 
     Verifica:
     - PostgreSQL tem notícias com todos os enriquecimentos
@@ -608,7 +557,7 @@ def test_07_validate_final_state(docker_services: None, env_vars: None) -> None:
     - Temas foram enriquecidos
     """
     print("\n" + "=" * 70)
-    print("FASE 7: Validação final")
+    print("FASE 6: Validação final")
     print("=" * 70)
 
     conn = get_db_connection()
@@ -680,7 +629,7 @@ def test_07_validate_final_state(docker_services: None, env_vars: None) -> None:
     print("\n⏱️  PERÍODO TESTADO:")
     print(f"   Início: {START_DATE}")
     print(f"   Fim: {END_DATE}")
-    print(f"   Agencies: {AGENCIES}")
+    print("   Note: Scraping handled by standalone scraper repo")
 
     print("\n" + "=" * 70)
     print("✅ BATERIA DE TESTES COMPLETA!")
@@ -705,12 +654,11 @@ if __name__ == "__main__":
 
     Este script testa o pipeline completo:
     1. Populate master data (agencies, themes)
-    2. Scraping (MEC, GESTAO, CGU)
-    3. Upload para Cogfy
-    4. Enrich themes
-    5. Generate embeddings
-    6. Sync Typesense
-    7. Validação final
+    2. Upload para Cogfy
+    3. Enrich themes
+    4. Generate embeddings
+    5. Sync Typesense
+    6. Validação final
 
     Requisitos:
     - Docker containers rodando
