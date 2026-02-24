@@ -122,19 +122,6 @@ jobs:
           echo "DAGs to be deployed:"
           ls -la ${{ env.DAGS_LOCAL_PATH }}/
 
-      - name: Deploy requirements.txt (if exists)
-        run: |
-          if [ -f "${{ env.DAGS_LOCAL_PATH }}/requirements.txt" ]; then
-            echo "Found requirements.txt, updating Composer environment..."
-            gcloud composer environments update ${{ env.COMPOSER_ENVIRONMENT }} \
-              --location=${{ env.COMPOSER_REGION }} \
-              --update-pypi-packages-from-file=${{ env.DAGS_LOCAL_PATH }}/requirements.txt \
-              || echo "No package changes needed (packages already installed)"
-            echo "Requirements check completed!"
-          else
-            echo "No requirements.txt found, skipping dependency update"
-          fi
-
       - name: Clean stale plugins
         run: |
           # DAGs now call Cloud Run API via HTTP - no local source code needed in plugins/
