@@ -18,6 +18,12 @@ logging.basicConfig(
 
 SLEEP_TIME_INTERVAL = (0.5, 1.5)
 
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+}
+
 
 class WebScraper:
     def __init__(self, min_date: str, base_url: str, max_date: Optional[str] = None):
@@ -104,7 +110,7 @@ class WebScraper:
         :return: The Response object or None if the request fails.
         """
         try:
-            response = requests.get(url, timeout=20)
+            response = requests.get(url, headers=DEFAULT_HEADERS, timeout=20)
             response.raise_for_status()
             return response
 
