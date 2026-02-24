@@ -2,8 +2,6 @@
 Unified CLI for the DestaquesGovBr data platform.
 
 Commands:
-- scrape: Scrape gov.br news from specified agencies
-- scrape-ebc: Scrape EBC (Agencia Brasil, TV Brasil) news
 - upload-cogfy: Upload news to Cogfy for AI enrichment
 - enrich: Enrich news with AI-generated themes from Cogfy
 - sync-hf: Sync PostgreSQL data to HuggingFace
@@ -12,6 +10,8 @@ Commands:
 - sync-typesense: Sync news from PostgreSQL to Typesense
 - typesense-delete: Delete a Typesense collection
 - typesense-list: List all Typesense collections
+
+Note: Scraping commands moved to standalone scraper repo.
 """
 import logging
 from typing import Optional
@@ -30,63 +30,8 @@ logging.basicConfig(
 
 app = typer.Typer(
     name="data-platform",
-    help="Data platform for DestaquesGovBr - scraping, enrichment, and storage"
+    help="Data platform for DestaquesGovBr - enrichment, embeddings, and storage"
 )
-
-
-@app.command()
-def scrape(
-    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
-    agencies: Optional[str] = typer.Option(None, help="Comma-separated agency codes"),
-    allow_update: bool = typer.Option(False, help="Allow updating existing records"),
-    sequential: bool = typer.Option(True, help="Process agencies sequentially"),
-) -> None:
-    """Scrape gov.br news from specified agencies."""
-    from data_platform.managers import StorageAdapter
-    from data_platform.scrapers.scrape_manager import ScrapeManager
-
-    logging.info(f"Starting gov.br scrape from {start_date} to {end_date or start_date}")
-
-    storage = StorageAdapter()
-    manager = ScrapeManager(storage)
-    agency_list = agencies.split(",") if agencies else None
-
-    manager.run_scraper(
-        agency_list,
-        start_date,
-        end_date or start_date,
-        sequential,
-        allow_update
-    )
-
-    logging.info("Scraping completed")
-
-
-@app.command("scrape-ebc")
-def scrape_ebc(
-    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
-    allow_update: bool = typer.Option(False, help="Allow updating existing records"),
-    sequential: bool = typer.Option(True, help="Process sequentially"),
-) -> None:
-    """Scrape EBC (Agencia Brasil, TV Brasil) news."""
-    from data_platform.managers import StorageAdapter
-    from data_platform.scrapers.ebc_scrape_manager import EBCScrapeManager
-
-    logging.info(f"Starting EBC scrape from {start_date} to {end_date or start_date}")
-
-    storage = StorageAdapter()
-    manager = EBCScrapeManager(storage)
-
-    manager.run_scraper(
-        start_date,
-        end_date or start_date,
-        sequential,
-        allow_update
-    )
-
-    logging.info("EBC scraping completed")
 
 
 @app.command("upload-cogfy")
