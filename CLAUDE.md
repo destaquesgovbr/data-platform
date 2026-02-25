@@ -8,34 +8,25 @@
 
 ## O Que É Este Projeto
 
-**Data Platform** é o repositório centralizado para toda a infraestrutura de dados do DestaquesGovBr. Este projeto está em processo de migração do HuggingFace Dataset (usado como banco de dados) para PostgreSQL (Cloud SQL).
+**Data Platform** é o repositório centralizado para enriquecimento, embeddings e armazenamento de dados do DestaquesGovBr.
 
 ### DestaquesGovBr
 
 Plataforma que agrega, enriquece e disponibiliza notícias de ~160 sites governamentais brasileiros (gov.br).
 
-**Pipeline atual**:
+**Pipeline**:
 ```
-Scrapers (Gov.br + EBC)
+Scrapers (repo scraper, via Airflow)
     ↓
-HuggingFace Dataset (nitaibezerra/govbrnews)  ← Fonte de verdade ATUAL
+PostgreSQL (Cloud SQL)  ← Fonte de verdade
     ↓
-Enriquecimento IA (Cogfy) - temas + summaries
+Enriquecimento IA (Cogfy) - temas + summaries  ← data-platform começa aqui
+    ↓
+Embeddings (768-dim)
     ↓
 Indexação (Typesense)
     ↓
-Portal Web (Next.js)
-```
-
-**Pipeline alvo**:
-```
-Scrapers (Gov.br + EBC)
-    ↓
-PostgreSQL (Cloud SQL)  ← Nova fonte de verdade
-    ↓
-Sync diário → HuggingFace (dados abertos)
-    ↓
-Indexação (Typesense)
+Sync → HuggingFace (dados abertos)
     ↓
 Portal Web (Next.js)
 ```
@@ -57,22 +48,26 @@ data-platform/
 │   └── data_platform/
 │       ├── managers/               # Gerenciadores de storage
 │       │   ├── postgres_manager.py
-│       │   ├── dataset_manager.py  (migrado do scraper)
+│       │   ├── dataset_manager.py  # Acesso ao HuggingFace
 │       │   └── storage_adapter.py
+│       ├── cogfy/                  # Integração Cogfy
+│       │   ├── cogfy_manager.py
+│       │   ├── upload_manager.py
+│       │   └── enrichment_manager.py
 │       ├── typesense/              # Módulo Typesense
 │       │   ├── client.py           # Conexão com Typesense
 │       │   ├── collection.py       # Schema da collection
 │       │   ├── indexer.py          # Indexação de documentos
 │       │   └── utils.py            # Utilitários
 │       ├── jobs/                   # Jobs de processamento
-│       │   ├── scraper/
 │       │   ├── enrichment/
+│       │   ├── embeddings/
 │       │   ├── typesense/          # Jobs de sincronização
 │       │   │   ├── sync_job.py     # PG → Typesense
 │       │   │   └── collection_ops.py
 │       │   └── hf_sync/
 │       ├── models/                 # Modelos Pydantic
-│       └── dags/                   # DAGs Airflow (futuro)
+│       └── dags/                   # DAGs Airflow
 ├── tests/
 │   ├── unit/
 │   └── integration/
@@ -147,8 +142,6 @@ Ver plano completo em [_plan/README.md](_plan/README.md).
 ```bash
 # PostgreSQL
 DATABASE_URL=postgresql://user:pass@host:5432/govbrnews
-STORAGE_BACKEND=huggingface  # huggingface | postgres | dual_write
-STORAGE_READ_FROM=huggingface
 
 # HuggingFace
 HF_TOKEN=hf_xxx
@@ -320,7 +313,7 @@ pytest tests/integration/
 |-------------|---------|-----------|
 | **data-platform** | `/destaquesgovbr/data-platform` | Este repo (código Python) |
 | **infra** | `/destaquesgovbr/infra` | Terraform (privado) |
-| **scraper** | `/destaquesgovbr/scraper` | Scrapers atuais (será migrado) |
+| **scraper** | `/destaquesgovbr/scraper` | Scrapers standalone (API + DAGs Airflow) |
 | **portal** | `/destaquesgovbr/portal` | Frontend Next.js |
 | **typesense** | `/destaquesgovbr/typesense` | ~~Loader do Typesense~~ (migrado para data-platform) |
 | **agencies** | `/destaquesgovbr/agencies` | agencies.yaml |
