@@ -16,6 +16,8 @@ Cloud Composer DAGs Bucket
 │   ├── scrape_ebc.py
 │   └── config/
 │       └── site_urls.yaml
+├── activitypub-server/               ← Repo: destaquesgovbr/activitypub-server
+│   └── federation_publish.py
 └── <futuro-repo>/                    ← Qualquer novo repo
     └── ...
 ```
@@ -94,6 +96,7 @@ Para que um novo repositório deploye DAGs no Composer:
 |------|-------------|------|-------|
 | `data-platform` | `data-platform/` | sync_postgres_to_huggingface, test_postgres_connection | `data-platform` |
 | `scraper` | `scraper/` | ~155 scrape_agencies + scrape_ebc | `scraper` |
+| `activitypub-server` | `activitypub-server/` | federation_publish | `activitypub-server` |
 
 ## Migração (fev/2025)
 
