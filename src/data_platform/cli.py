@@ -6,7 +6,6 @@ Commands:
 - enrich: Enrich news with AI-generated themes from Cogfy
 - sync-hf: Sync PostgreSQL data to HuggingFace
 - migrate: Migrate data from HuggingFace to PostgreSQL
-- generate-embeddings: Generate semantic embeddings for news
 - sync-typesense: Sync news from PostgreSQL to Typesense
 - typesense-delete: Delete a Typesense collection
 - typesense-list: List all Typesense collections
@@ -97,38 +96,6 @@ def migrate(
     migrate_main(batch_size=batch_size, max_records=max_records)
 
     logging.info("Migration completed")
-
-
-@app.command("generate-embeddings")
-def generate_embeddings(
-    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
-    batch_size: int = typer.Option(100, help="Batch size for processing"),
-    max_records: Optional[int] = typer.Option(None, help="Max records to process (for testing)"),
-) -> None:
-    """
-    Generate semantic embeddings for news articles.
-
-    Phase 4.7: Only processes 2025 news (have AI-generated summaries from Cogfy).
-    Uses paraphrase-multilingual-mpnet-base-v2 model (768 dimensions).
-    """
-    from data_platform.jobs.embeddings import EmbeddingGenerator
-
-    logging.info(f"Generating embeddings from {start_date} to {end_date or start_date}")
-    logging.info(f"Batch size: {batch_size}, Max records: {max_records or 'unlimited'}")
-
-    generator = EmbeddingGenerator()
-    stats = generator.generate_embeddings(
-        start_date=start_date,
-        end_date=end_date,
-        batch_size=batch_size,
-        max_records=max_records
-    )
-
-    logging.info(
-        f"Embedding generation completed: {stats['successful']} successful, "
-        f"{stats['failed']} failed, {stats['processed']} total"
-    )
 
 
 @app.command("sync-typesense")
