@@ -29,9 +29,6 @@ google-auth = "^2.29.0"
 # Markdown (for enrichment processing)
 markdown = "^3.7"
 
-# Cogfy integration
-algoliasearch = "^4.13.0"
-
 # Configuration
 pydantic = "^2.5.3"
 pydantic-settings = "^2.1.0"
@@ -110,7 +107,6 @@ strict_equality = true
 module = [
     "datasets.*",
     "huggingface_hub.*",
-    "algoliasearch.*",
 ]
 ignore_missing_imports = true
 

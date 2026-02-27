@@ -14,12 +14,6 @@ on:
         description: 'End date (YYYY-MM-DD)'
         required: false
         type: string
-      cogfy_wait_minutes:
-        description: 'Minutes to wait for Cogfy processing (default: 20)'
-        required: false
-        type: string
-        default: '20'
-
 permissions:
   contents: read
   id-token: write
@@ -51,134 +45,8 @@ jobs:
   # scraper and ebc-scraper jobs removed — now handled by Airflow DAGs
   # (155 agency DAGs + 1 EBC DAG running every 15 min via Cloud Run Scraper API)
 
-  upload-to-cogfy:
-    name: Upload to Cogfy
-    runs-on: ubuntu-latest
-    needs: [setup-dates]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          docker system prune -af
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Poetry
-        run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Cache Poetry dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pypoetry
-          key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-poetry-
-
-      - name: Install dependencies
-        run: |
-          poetry install --no-interaction --only main
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
-          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
-
-      - name: Get secrets from Secret Manager
-        id: secrets
-        run: |
-          echo "DATABASE_URL=$(gcloud secrets versions access latest --secret=govbrnews-postgres-connection-string)" >> $GITHUB_OUTPUT
-          echo "HF_TOKEN=$(gcloud secrets versions access latest --secret=hf-token)" >> $GITHUB_OUTPUT
-          echo "COGFY_API_KEY=$(gcloud secrets versions access latest --secret=cogfy-api-key)" >> $GITHUB_OUTPUT
-
-      - name: Upload news to Cogfy
-        env:
-          STORAGE_READ_FROM: postgres
-          DATABASE_URL: ${{ steps.secrets.outputs.DATABASE_URL }}
-          HF_TOKEN: ${{ steps.secrets.outputs.HF_TOKEN }}
-          COGFY_API_KEY: ${{ steps.secrets.outputs.COGFY_API_KEY }}
-        run: |
-          poetry run data-platform upload-cogfy \
-            --start-date "${{ needs.setup-dates.outputs.start_date }}" \
-            --end-date "${{ needs.setup-dates.outputs.end_date }}"
-          echo "Upload to Cogfy completed successfully"
-
-  enrich-themes:
-    name: Enrich Dataset with AI Data
-    runs-on: ubuntu-latest
-    needs: [setup-dates, upload-to-cogfy]
-    steps:
-      - name: Wait for Cogfy processing
-        run: |
-          WAIT_MINUTES=${{ inputs.cogfy_wait_minutes || '20' }}
-          WAIT_SECONDS=$((WAIT_MINUTES * 60))
-          echo "Waiting ${WAIT_MINUTES} minutes for Cogfy to process uploaded data..."
-          echo "This allows time for Cogfy to complete vector embeddings and indexing"
-          sleep ${WAIT_SECONDS}
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          docker system prune -af
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Poetry
-        run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Cache Poetry dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pypoetry
-          key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-poetry-
-
-      - name: Install dependencies
-        run: |
-          poetry install --no-interaction --only main
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
-          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
-
-      - name: Get secrets from Secret Manager
-        id: secrets
-        run: |
-          echo "COGFY_API_KEY=$(gcloud secrets versions access latest --secret=cogfy-api-key)" >> $GITHUB_OUTPUT
-          echo "DATABASE_URL=$(gcloud secrets versions access latest --secret=govbrnews-postgres-connection-string)" >> $GITHUB_OUTPUT
-          echo "HF_TOKEN=$(gcloud secrets versions access latest --secret=hf-token)" >> $GITHUB_OUTPUT
-
-      - name: Enrich dataset with AI-generated data
-        env:
-          COGFY_API_KEY: ${{ steps.secrets.outputs.COGFY_API_KEY }}
-          HF_TOKEN: ${{ steps.secrets.outputs.HF_TOKEN }}
-          STORAGE_BACKEND: postgres
-          STORAGE_READ_FROM: postgres
-          DATABASE_URL: ${{ steps.secrets.outputs.DATABASE_URL }}
-        run: |
-          poetry run data-platform enrich \
-            --start-date "${{ needs.setup-dates.outputs.start_date }}" \
-            --end-date "${{ needs.setup-dates.outputs.end_date }}"
-          echo "Dataset enrichment completed successfully"
+  # upload-to-cogfy and enrich-themes jobs removed — now handled by Airflow DAG
+  # (DAG enrich_news_llm in data-science repo, runs every 10 min via AWS Bedrock)
 
   # generate-embeddings job removed — now handled by Airflow DAG in embeddings repo
   # (DAG generate_embeddings runs daily at 5 AM UTC)
@@ -186,7 +54,7 @@ jobs:
   typesense-sync:
     name: Sync to Typesense
     runs-on: ubuntu-latest
-    needs: [setup-dates, enrich-themes]
+    needs: [setup-dates]
     permissions:
       contents: read
       id-token: write
@@ -265,22 +133,19 @@ jobs:
   pipeline-summary:
     name: Pipeline Summary
     runs-on: ubuntu-latest
-    needs: [setup-dates, upload-to-cogfy, enrich-themes, typesense-sync]
+    needs: [setup-dates, typesense-sync]
     if: always()
     steps:
       - name: Pipeline completion summary
         run: |
           echo "=== News Processing Pipeline Summary ==="
           echo "Date range: ${{ needs.setup-dates.outputs.start_date }} to ${{ needs.setup-dates.outputs.end_date }}"
-          echo "Note: Scraping is handled by Airflow DAGs (Cloud Run Scraper API)"
-          echo "Upload status: ${{ needs.upload-to-cogfy.result }}"
-          echo "Dataset enrichment status: ${{ needs.enrich-themes.result }}"
+          echo "Note: Scraping handled by Airflow DAGs (Cloud Run Scraper API)"
+          echo "Note: LLM enrichment handled by Airflow DAG enrich_news_llm (AWS Bedrock)"
           echo "Typesense sync status: ${{ needs.typesense-sync.result }}"
           echo "============================================"
 
-          if [ "${{ needs.upload-to-cogfy.result }}" = "success" ] && \
-             [ "${{ needs.enrich-themes.result }}" = "success" ] && \
-             [ "${{ needs.typesense-sync.result }}" = "success" ]; then
+          if [ "${{ needs.typesense-sync.result }}" = "success" ]; then
             echo "All pipeline stages completed successfully!"
             exit 0
           else
