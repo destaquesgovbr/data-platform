@@ -77,7 +77,6 @@ jobs:
       - name: Get secrets from Secret Manager
         id: secrets
         run: |
-          echo "COGFY_API_KEY=$(gcloud secrets versions access latest --secret=cogfy-api-key)" >> $GITHUB_OUTPUT
           echo "EMBEDDINGS_API_KEY=$(gcloud secrets versions access latest --secret=embeddings-api-key)" >> $GITHUB_OUTPUT
           echo "EMBEDDINGS_API_URL=https://destaquesgovbr-embeddings-api-990583792367.southamerica-east1.run.app" >> $GITHUB_OUTPUT
 
@@ -114,7 +113,6 @@ jobs:
           TYPESENSE_PROTOCOL: http
           STORAGE_BACKEND: postgres
           STORAGE_READ_FROM: postgres
-          COGFY_API_KEY: ${{ steps.secrets.outputs.COGFY_API_KEY }}
           EMBEDDINGS_API_URL: ${{ steps.secrets.outputs.EMBEDDINGS_API_URL }}
           EMBEDDINGS_API_KEY: ${{ steps.secrets.outputs.EMBEDDINGS_API_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}

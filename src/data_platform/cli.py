@@ -2,8 +2,6 @@
 Unified CLI for the DestaquesGovBr data platform.
 
 Commands:
-- upload-cogfy: Upload news to Cogfy for AI enrichment
-- enrich: Enrich news with AI-generated themes from Cogfy
 - sync-hf: Sync PostgreSQL data to HuggingFace
 - migrate: Migrate data from HuggingFace to PostgreSQL
 - sync-typesense: Sync news from PostgreSQL to Typesense
@@ -11,6 +9,7 @@ Commands:
 - typesense-list: List all Typesense collections
 
 Note: Scraping commands moved to standalone scraper repo.
+Note: Enrichment commands removed — now handled by Airflow DAG enrich_news_llm (data-science repo).
 """
 import logging
 from typing import Optional
@@ -29,44 +28,8 @@ logging.basicConfig(
 
 app = typer.Typer(
     name="data-platform",
-    help="Data platform for DestaquesGovBr - enrichment, embeddings, and storage"
+    help="Data platform for DestaquesGovBr - storage and indexing"
 )
-
-
-@app.command("upload-cogfy")
-def upload_cogfy(
-    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
-) -> None:
-    """Upload news to Cogfy for AI enrichment."""
-    import os
-    from data_platform.cogfy.upload_manager import UploadToCogfyManager
-
-    server_url = os.getenv("COGFY_SERVER_URL", "https://api.cogfy.com/")
-    collection_name = os.getenv("COGFY_COLLECTION_NAME", "noticiasgovbr-all-news")
-
-    logging.info(f"Uploading news to Cogfy from {start_date} to {end_date or start_date}")
-
-    manager = UploadToCogfyManager(server_url, collection_name)
-    manager.upload(start_date=start_date, end_date=end_date or start_date)
-
-    logging.info("Cogfy upload completed")
-
-
-@app.command()
-def enrich(
-    start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
-) -> None:
-    """Enrich news with AI-generated themes from Cogfy."""
-    from data_platform.cogfy.enrichment_manager import EnrichmentManager
-
-    logging.info(f"Enriching news from {start_date} to {end_date or start_date}")
-
-    manager = EnrichmentManager()
-    manager.enrich_dataset_with_themes(start_date=start_date, end_date=end_date or start_date)
-
-    logging.info("Enrichment completed")
 
 
 @app.command("sync-hf")

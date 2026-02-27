@@ -20,7 +20,7 @@ Scrapers (repo scraper, via Airflow)
     ↓
 PostgreSQL (Cloud SQL)  ← Fonte de verdade
     ↓
-Enriquecimento IA (Cogfy) - temas + summaries  ← data-platform começa aqui
+Enriquecimento IA (Bedrock, repo data-science) - temas + summaries
     ↓
 Embeddings (768-dim)
     ↓
@@ -50,10 +50,6 @@ data-platform/
 │       │   ├── postgres_manager.py
 │       │   ├── dataset_manager.py  # Acesso ao HuggingFace
 │       │   └── storage_adapter.py
-│       ├── cogfy/                  # Integração Cogfy
-│       │   ├── cogfy_manager.py
-│       │   ├── upload_manager.py
-│       │   └── enrichment_manager.py
 │       ├── typesense/              # Módulo Typesense
 │       │   ├── client.py           # Conexão com Typesense
 │       │   ├── collection.py       # Schema da collection
@@ -145,10 +141,6 @@ DATABASE_URL=postgresql://user:pass@host:5432/govbrnews
 
 # HuggingFace
 HF_TOKEN=hf_xxx
-
-# Cogfy (enriquecimento)
-COGFY_API_KEY=xxx
-COGFY_COLLECTION_ID=xxx
 ```
 
 ### Instalação
