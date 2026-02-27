@@ -22,8 +22,8 @@ The Data Platform manages the ingestion, storage, and distribution of Brazilian 
 │  └──────────┘      │   ┌──────┐   │      └──────────────┘      │
 │                    │   │ DB   │<──────────────┐                │
 │  ┌──────────┐      │   └──────┘   │      ┌────┴─────────┐      │
-│  │  Cogfy   │─────>│  Enrichment  │      │ HuggingFace  │      │
-│  │  (LLM)   │      │              │      │   Dataset    │      │
+│  │ Bedrock  │─────>│  Enrichment  │      │ HuggingFace  │      │
+│  │  (LLM)   │      │  (Airflow)   │      │   Dataset    │      │
 │  └──────────┘      │   ┌──────┐   │      └──────────────┘      │
 │                    │   │Sync  │───┘                            │
 │                    │   └──────┘   │      ┌──────────────┐      │
@@ -97,10 +97,10 @@ See [Migration Plan](../../_plan/README.md) for details.
 - Identifies duplicates via `unique_id` (MD5)
 - Stores raw news data
 
-**Enrichment Job**
-- Sends news to Cogfy LLM for summarization
-- Classifies into theme taxonomy (3-level hierarchy)
-- Enriches with structured metadata
+**Enrichment Job** (Airflow DAG in data-science repo)
+- Classifies news via AWS Bedrock (Claude 3 Haiku)
+- Assigns theme taxonomy (3-level hierarchy)
+- Generates AI summaries
 
 **HuggingFace Sync Job**
 - Exports PostgreSQL data to HuggingFace Dataset
@@ -206,7 +206,7 @@ See [Database Schema](../database/schema.md) for details.
 
 ### Data Processing
 - **HuggingFace**: datasets, huggingface-hub
-- **LLM**: Cogfy (external service)
+- **LLM**: AWS Bedrock / Claude 3 Haiku (via data-science repo)
 - **Search**: Typesense (external consumer)
 
 ---

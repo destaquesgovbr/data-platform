@@ -115,7 +115,7 @@ The migration from HuggingFace to PostgreSQL is documented in [`_plan/`](../_pla
 
 A data platform aggregating news from ~158 Brazilian government agencies:
 - Scrapes RSS feeds
-- Enriches with AI summaries (Cogfy)
+- Enriches with AI summaries (AWS Bedrock)
 - Classifies into theme taxonomy
 - Distributes via HuggingFace, Typesense, and website
 

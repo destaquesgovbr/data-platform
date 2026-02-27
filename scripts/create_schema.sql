@@ -102,7 +102,7 @@ CREATE TABLE news (
     editorial_lead TEXT,
     subtitle TEXT,
 
-    -- AI-generated content (via Cogfy)
+    -- AI-generated content (via LLM enrichment)
     summary TEXT,
 
     -- Timestamps
@@ -126,7 +126,7 @@ CREATE TABLE news (
 COMMENT ON TABLE news IS 'Main news storage (migrated from HuggingFace Dataset)';
 COMMENT ON COLUMN news.unique_id IS 'MD5(agency + published_at + title)';
 COMMENT ON COLUMN news.most_specific_theme_id IS 'Most granular theme (L3 > L2 > L1)';
-COMMENT ON COLUMN news.summary IS 'AI-generated summary from Cogfy';
+COMMENT ON COLUMN news.summary IS 'AI-generated summary from LLM enrichment';
 COMMENT ON COLUMN news.video_url IS 'Video URL if available';
 COMMENT ON COLUMN news.agency_key IS 'Denormalized agency.key for performance';
 COMMENT ON COLUMN news.agency_name IS 'Denormalized agency.name for performance';
