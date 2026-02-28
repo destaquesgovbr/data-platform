@@ -2,6 +2,7 @@
 Cliente Typesense - Conexão e configuração.
 """
 
+import json
 import logging
 import os
 import time
@@ -10,6 +11,23 @@ import requests
 import typesense
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_write_conn() -> tuple[str | None, str | None, str | None, str]:
+    """Parse TYPESENSE_WRITE_CONN JSON env var (host, port, apiKey, protocol)."""
+    raw = os.getenv("TYPESENSE_WRITE_CONN", "")
+    if not raw:
+        return None, None, None, "http"
+    try:
+        conn = json.loads(raw)
+        return (
+            conn.get("host"),
+            str(conn.get("port", "")),
+            conn.get("apiKey"),
+            conn.get("protocol", "http"),
+        )
+    except (json.JSONDecodeError, TypeError):
+        return None, None, None, "http"
 
 
 def get_client(
@@ -35,11 +53,15 @@ def get_client(
     Raises:
         ValueError: Se api_key não for fornecida
     """
-    host = host or os.getenv("TYPESENSE_HOST", "localhost")
-    port = port or os.getenv("TYPESENSE_PORT", "8108")
-    api_key = api_key or os.getenv(
+    # Try TYPESENSE_WRITE_CONN JSON first, then individual env vars
+    conn_host, conn_port, conn_key, conn_protocol = _parse_write_conn()
+    host = host or conn_host or os.getenv("TYPESENSE_HOST", "localhost")
+    port = port or conn_port or os.getenv("TYPESENSE_PORT", "8108")
+    api_key = api_key or conn_key or os.getenv(
         "TYPESENSE_API_KEY", "govbrnews_api_key_change_in_production"
     )
+    if conn_protocol != "http":
+        protocol = conn_protocol
 
     if not api_key:
         raise ValueError("TYPESENSE_API_KEY deve ser configurada")
