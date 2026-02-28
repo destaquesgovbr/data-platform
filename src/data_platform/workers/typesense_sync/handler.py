@@ -27,7 +27,7 @@ def fetch_news_for_typesense(pg: PostgresManager, unique_id: str) -> dict | None
     conn = pg.get_connection()
     try:
         query = pg._build_typesense_query() + " WHERE n.unique_id = %s"
-        df = pd.read_sql_query(query, pg.engine, params=[unique_id])
+        df = pd.read_sql_query(query, pg.engine, params=(unique_id,))
         if df.empty:
             return None
         return df.iloc[0].to_dict()
