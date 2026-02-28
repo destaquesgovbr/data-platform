@@ -57,6 +57,11 @@ class PostgresManager:
         self._themes_by_id: dict[int, Theme] = {}
         self._cache_loaded = False
 
+    @property
+    def engine(self):
+        """Public access to SQLAlchemy engine for pandas read_sql operations."""
+        return self._engine
+
     def _get_connection_string(self) -> str:
         """
         Get database connection string from environment, Secret Manager, or use localhost.
