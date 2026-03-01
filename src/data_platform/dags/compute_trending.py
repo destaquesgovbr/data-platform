@@ -52,7 +52,7 @@ def compute_trending_dag():
 
         project_id = Variable.get("gcp_project_id", default_var="inspire-7-finep")
         conn = BaseHook.get_connection("postgres_default")
-        db_url = conn.get_uri()
+        db_url = conn.get_uri().replace("postgres://", "postgresql://", 1)
 
         scores_df = fetch_trending_scores(project_id)
         if len(scores_df) == 0:

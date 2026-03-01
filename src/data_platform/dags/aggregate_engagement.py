@@ -34,7 +34,7 @@ def aggregate_engagement_dag():
 
         project_id = Variable.get("gcp_project_id")
         pg_conn = BaseHook.get_connection("postgres_default")
-        db_url = pg_conn.get_uri()
+        db_url = pg_conn.get_uri().replace("postgres://", "postgresql://", 1)
 
         metrics_df = fetch_engagement_metrics(project_id, days=30)
         if metrics_df.empty:

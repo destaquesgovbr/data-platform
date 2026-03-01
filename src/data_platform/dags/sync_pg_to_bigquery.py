@@ -61,7 +61,7 @@ def sync_pg_to_bigquery():
 
         # Get config
         conn = BaseHook.get_connection("postgres_default")
-        db_url = conn.get_uri()
+        db_url = conn.get_uri().replace("postgres://", "postgresql://", 1)
         project_id = Variable.get("gcp_project_id", default_var="inspire-7-finep")
         bucket_name = Variable.get("data_lake_bucket", default_var="inspire-7-finep-dgb-data-lake")
 
@@ -86,7 +86,7 @@ def sync_pg_to_bigquery():
         from data_platform.jobs.bigquery.sync_to_bigquery import sync_dimensions
 
         conn = BaseHook.get_connection("postgres_default")
-        db_url = conn.get_uri()
+        db_url = conn.get_uri().replace("postgres://", "postgresql://", 1)
         project_id = Variable.get("gcp_project_id", default_var="inspire-7-finep")
 
         sync_dimensions(db_url, project_id)
