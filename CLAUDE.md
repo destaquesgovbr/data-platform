@@ -245,7 +245,7 @@ Se as DAGs sumirem do Airflow:
 ```bash
 # 1. Verificar bucket atual
 gcloud composer environments describe destaquesgovbr-composer \
-  --location=us-central1 \
+  --location=southamerica-east1 \
   --format="value(config.dagGcsPrefix)"
 
 # 2. Disparar redeploy

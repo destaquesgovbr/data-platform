@@ -16,7 +16,7 @@ Crie uma nova DAG seguindo o padrao estabelecido do projeto DGB.
 ### Ambiente
 
 - **Airflow**: 3.0.1 (Cloud Composer)
-- **Composer**: `destaquesgovbr-composer` (us-central1)
+- **Composer**: `destaquesgovbr-composer` (southamerica-east1)
 - **GCP Project**: `inspire-7-finep`
 - **Python**: 3.11
 
@@ -260,16 +260,21 @@ dag_instance = {dag_id}_dag()
 - `catchup=False` sempre (a menos que haja motivo especifico)
 - Instanciar a DAG no final: `dag_instance = {dag_id}_dag()`
 
-### 2.3 Requirements
+### 2.3 Dependencias Python
 
-Crie `dags/requirements.txt` com as dependencias pip que o Composer precisa instalar:
+**IMPORTANTE**: O `dags/requirements.txt` NAO e instalado automaticamente pelo Composer.
+Se a DAG precisa de pacotes Python nao incluidos no Composer por padrao, eles devem ser
+instalados via Terraform no repo `infra` (variavel `pypi_packages` do recurso `google_composer_environment`).
 
-```
-# Apenas deps nao incluidas no Composer por padrao
-httpx>=0.27.0
-```
+Pacotes ja incluidos no Composer (nao precisam ser adicionados):
+- `apache-airflow`, `psycopg2`, `pandas`, `requests`
 
-Nao incluir: `apache-airflow`, `psycopg2` (ja incluidos no Composer).
+Se precisar de pacotes extras (ex: `boto3`, `httpx`):
+1. Criar PR no repo `infra` adicionando o pacote em `pypi_packages` do Terraform
+2. Aguardar merge e `terraform apply`
+3. Composer instalara o pacote automaticamente
+
+Manter `dags/requirements.txt` apenas como documentacao das deps necessarias (nao e usado no deploy).
 
 ### 2.4 Deploy Workflow
 
@@ -410,7 +415,7 @@ gh run watch {run_id}
 
 ```bash
 AIRFLOW_URI=$(gcloud composer environments describe destaquesgovbr-composer \
-  --location=us-central1 --format="value(config.airflowUri)")
+  --location=southamerica-east1 --format="value(config.airflowUri)")
 
 curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   "$AIRFLOW_URI/api/v2/dags/{dag_id}" | python3 -c "
