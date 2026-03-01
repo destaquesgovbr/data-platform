@@ -34,7 +34,7 @@ def compute_clusters_dag():
         )
 
         pg_conn = BaseHook.get_connection("postgres_default")
-        db_url = pg_conn.get_uri()
+        db_url = pg_conn.get_uri().replace("postgres://", "postgresql://", 1)
 
         similarities_df = fetch_similar_articles(db_url, lookback_days=1)
         if similarities_df.empty:

@@ -101,15 +101,27 @@ def batch_upsert_clusters(db_url: str, clusters: dict[str, list[str]]) -> int:
     Returns:
         Number of articles updated
     """
-    from data_platform.managers.postgres_manager import PostgresManager
+    import json
 
-    pg = PostgresManager(db_url=db_url, max_connections=2)
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import NullPool
+
+    engine = create_engine(db_url, poolclass=NullPool)
+    upsert_sql = text("""
+        INSERT INTO news_features (unique_id, features)
+        VALUES (:uid, :features)
+        ON CONFLICT (unique_id) DO UPDATE
+        SET features = news_features.features || :features,
+            updated_at = NOW()
+    """)
     count = 0
     try:
-        for unique_id, similar_ids in clusters.items():
-            if pg.upsert_features(unique_id, {"similar_articles": similar_ids}):
+        with engine.begin() as conn:
+            for unique_id, similar_ids in clusters.items():
+                features = json.dumps({"similar_articles": similar_ids})
+                conn.execute(upsert_sql, {"uid": unique_id, "features": features})
                 count += 1
         logger.info(f"Upserted similar_articles for {count} articles")
     finally:
-        pg.close_all()
+        engine.dispose()
     return count

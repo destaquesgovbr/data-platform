@@ -5,15 +5,65 @@ on:
     branches: [ "main" ]
     paths:
       - 'src/data_platform/dags/**'
+      - 'src/data_platform/jobs/**'
   workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
 
+env:
+  PROJECT_ID: inspire-7-finep
+  COMPOSER_ENVIRONMENT: destaquesgovbr-composer
+  COMPOSER_REGION: southamerica-east1
+
 jobs:
-  deploy:
+  deploy-dags:
     uses: destaquesgovbr/reusable-workflows/.github/workflows/composer-deploy-dags.yml@v1
     with:
       dags_local_path: src/data_platform/dags
       dags_bucket_subdir: data-platform
+
+  deploy-plugins:
+    name: Deploy plugins to Composer
+    needs: deploy-dags
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: inspire-7-finep
+
+      - name: Get Composer plugins bucket
+        id: composer
+        run: |
+          DAGS_BUCKET=$(gcloud composer environments describe ${{ env.COMPOSER_ENVIRONMENT }} \
+            --location=${{ env.COMPOSER_REGION }} \
+            --format="value(config.dagGcsPrefix)")
+          PLUGINS_BUCKET=$(echo "$DAGS_BUCKET" | sed 's|/dags$|/plugins|')
+          echo "plugins_bucket=$PLUGINS_BUCKET" >> $GITHUB_OUTPUT
+
+      - name: Prepare plugins directory
+        run: |
+          # Only deploy job modules needed by Composer DAGs
+          mkdir -p /tmp/plugins/data_platform/jobs
+          cp src/data_platform/jobs/__init__.py /tmp/plugins/data_platform/jobs/
+          cp -r src/data_platform/jobs/bigquery /tmp/plugins/data_platform/jobs/
+          cp -r src/data_platform/jobs/similarity /tmp/plugins/data_platform/jobs/
+          # Create package __init__.py
+          touch /tmp/plugins/data_platform/__init__.py
+
+      - name: Deploy plugins to GCS
+        run: |
+          gsutil -m rsync -r -d \
+            /tmp/plugins/data_platform/ \
+            ${{ steps.composer.outputs.plugins_bucket }}/data_platform/

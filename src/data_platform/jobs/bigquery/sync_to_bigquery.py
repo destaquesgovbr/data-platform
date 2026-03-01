@@ -96,10 +96,17 @@ def write_to_parquet_gcs(
     gcs_path = f"silver/analytics/{date_str}.parquet"
     gcs_uri = f"gs://{bucket_name}/{gcs_path}"
 
+    # Cast nullable int columns to Int64 (Pandas nullable integer) so Parquet
+    # writes them as INT64 instead of DOUBLE when NaN values are present.
+    int_cols = ["word_count", "char_count", "paragraph_count", "publication_hour", "publication_dow"]
+    for col in int_cols:
+        if col in df.columns:
+            df[col] = df[col].astype("Int64")
+
     # Write to local temp, then upload
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
-        df.to_parquet(tmp.name, index=False, engine="pyarrow")
+        df.to_parquet(tmp.name, index=False, engine="pyarrow", coerce_timestamps="us", allow_truncated_timestamps=True)
         client = storage.Client()
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(gcs_path)
@@ -126,9 +133,37 @@ def load_parquet_to_bigquery(
 
     client = bigquery.Client(project=project_id)
 
+    schema = [
+        bigquery.SchemaField("unique_id", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("title", "STRING"),
+        bigquery.SchemaField("url", "STRING"),
+        bigquery.SchemaField("agency_key", "STRING"),
+        bigquery.SchemaField("agency_name", "STRING"),
+        bigquery.SchemaField("theme_l1_code", "STRING"),
+        bigquery.SchemaField("theme_l1_label", "STRING"),
+        bigquery.SchemaField("theme_l2_code", "STRING"),
+        bigquery.SchemaField("theme_l2_label", "STRING"),
+        bigquery.SchemaField("most_specific_theme_code", "STRING"),
+        bigquery.SchemaField("most_specific_theme_label", "STRING"),
+        bigquery.SchemaField("published_at", "TIMESTAMP", mode="REQUIRED"),
+        bigquery.SchemaField("extracted_at", "TIMESTAMP"),
+        bigquery.SchemaField("synced_at", "TIMESTAMP", mode="REQUIRED"),
+        bigquery.SchemaField("word_count", "INTEGER"),
+        bigquery.SchemaField("char_count", "INTEGER"),
+        bigquery.SchemaField("paragraph_count", "INTEGER"),
+        bigquery.SchemaField("has_image", "BOOLEAN"),
+        bigquery.SchemaField("has_video", "BOOLEAN"),
+        bigquery.SchemaField("sentiment_score", "FLOAT"),
+        bigquery.SchemaField("sentiment_label", "STRING"),
+        bigquery.SchemaField("publication_hour", "INTEGER"),
+        bigquery.SchemaField("publication_dow", "INTEGER"),
+        bigquery.SchemaField("readability_flesch", "FLOAT"),
+    ]
+
     job_config = bigquery.LoadJobConfig(
         source_format=bigquery.SourceFormat.PARQUET,
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        schema=schema,
     )
 
     table_ref = f"{project_id}.{FULL_TABLE_ID}"

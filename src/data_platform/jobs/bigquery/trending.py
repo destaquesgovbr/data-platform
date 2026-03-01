@@ -66,7 +66,7 @@ def fetch_trending_scores(project_id: str) -> pd.DataFrame:
 
 
 def batch_upsert_trending(db_url: str, scores_df: pd.DataFrame) -> int:
-    """Batch upsert trending_score into news_features via PostgresManager.
+    """Batch upsert trending_score into news_features.
 
     Args:
         db_url: PostgreSQL connection string
@@ -75,17 +75,27 @@ def batch_upsert_trending(db_url: str, scores_df: pd.DataFrame) -> int:
     Returns:
         Number of rows updated
     """
-    from data_platform.managers.postgres_manager import PostgresManager
+    import json
 
-    pg = PostgresManager(db_url=db_url, max_connections=2)
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import NullPool
+
+    engine = create_engine(db_url, poolclass=NullPool)
+    upsert_sql = text("""
+        INSERT INTO news_features (unique_id, features)
+        VALUES (:uid, :features)
+        ON CONFLICT (unique_id) DO UPDATE
+        SET features = news_features.features || :features,
+            updated_at = NOW()
+    """)
     count = 0
     try:
-        for _, row in scores_df.iterrows():
-            if pg.upsert_features(
-                row["unique_id"], {"trending_score": float(row["trending_score"])}
-            ):
+        with engine.begin() as conn:
+            for _, row in scores_df.iterrows():
+                features = json.dumps({"trending_score": float(row["trending_score"])})
+                conn.execute(upsert_sql, {"uid": row["unique_id"], "features": features})
                 count += 1
         logger.info(f"Upserted {count} trending scores to news_features")
     finally:
-        pg.close_all()
+        engine.dispose()
     return count
