@@ -3,7 +3,7 @@ Pydantic models for news and related entities.
 """
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Any, Optional, List
 from pydantic import BaseModel, Field
 
 
@@ -110,3 +110,14 @@ class NewsInsert(BaseModel):
     agency_name: Optional[str] = None
     content_embedding: Optional[List[float]] = None  # 768-dimensional vector (Phase 4.7)
     embedding_generated_at: Optional[datetime] = None  # Phase 4.7
+
+
+class NewsFeatures(BaseModel):
+    """Computed features for a news article (Feature Store)."""
+
+    unique_id: str
+    features: dict[str, Any] = {}
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

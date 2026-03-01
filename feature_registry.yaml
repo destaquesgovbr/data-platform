@@ -1,0 +1,105 @@
+# Feature Registry — controle de versões das features computadas
+# Cada feature tem: versão, modelo usado, e onde é computada.
+# Isso permite reprocessamento seletivo quando um modelo muda.
+
+features:
+  # --- Fase 1: Features locais (sem IA) ---
+  word_count:
+    version: "1.0"
+    type: integer
+    description: "Contagem de palavras do conteúdo"
+    model: "local/python"
+    compute: "feature-worker"
+
+  char_count:
+    version: "1.0"
+    type: integer
+    description: "Contagem de caracteres do conteúdo"
+    model: "local/python"
+    compute: "feature-worker"
+
+  paragraph_count:
+    version: "1.0"
+    type: integer
+    description: "Contagem de parágrafos"
+    model: "local/python"
+    compute: "feature-worker"
+
+  has_image:
+    version: "1.0"
+    type: boolean
+    description: "Artigo possui imagem"
+    model: "local/python"
+    compute: "feature-worker"
+
+  has_video:
+    version: "1.0"
+    type: boolean
+    description: "Artigo possui vídeo"
+    model: "local/python"
+    compute: "feature-worker"
+
+  publication_hour:
+    version: "1.0"
+    type: integer
+    description: "Hora de publicação (0-23 UTC)"
+    model: "local/python"
+    compute: "feature-worker"
+
+  publication_dow:
+    version: "1.0"
+    type: integer
+    description: "Dia da semana (0=seg, 6=dom)"
+    model: "local/python"
+    compute: "feature-worker"
+
+  readability_flesch:
+    version: "1.0"
+    type: float
+    description: "Flesch reading ease score (adaptado pt-BR)"
+    model: "local/textstat"
+    compute: "feature-worker"
+
+  # --- Fase 1: Features IA (extensão do enrichment) ---
+  sentiment:
+    version: "1.0"
+    type: object
+    description: "Análise de sentimento {score: float, label: string}"
+    model: "bedrock/claude-haiku"
+    compute: "enrichment-worker"
+
+  entities:
+    version: "1.0"
+    type: array
+    description: "Entidades nomeadas [{text, type, count}]"
+    model: "bedrock/claude-haiku"
+    compute: "enrichment-worker"
+
+  # --- Fase 3: Features analíticas ---
+  trending_score:
+    version: "1.0"
+    type: float
+    description: "Score de trending (volume + crescimento)"
+    model: "bigquery/sql"
+    compute: "airflow-dag"
+
+  similar_articles:
+    version: "1.0"
+    type: array
+    description: "IDs de artigos similares (cosine similarity > 0.8 via pgvector)"
+    model: "pgvector/cosine"
+    compute: "airflow-dag"
+
+  view_count:
+    version: "1.0"
+    type: integer
+    description: "Total de visualizações (agregado do BigQuery pageviews)"
+    model: "bigquery/sql"
+    compute: "airflow-dag"
+
+  unique_sessions:
+    version: "1.0"
+    type: integer
+    description: "Sessões únicas de visualização"
+    model: "bigquery/sql"
+    compute: "airflow-dag"
