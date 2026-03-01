@@ -17,6 +17,8 @@ from psycopg2.extras import RealDictCursor, execute_values
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
+from psycopg2.extras import Json
+
 from data_platform.models.news import Agency, News, NewsInsert, Theme
 
 
@@ -543,7 +545,14 @@ class PostgresManager:
                 tm.code as most_specific_theme_code,
                 tm.label as most_specific_theme_label,
                 n.tags,
-                n.content_embedding
+                n.content_embedding,
+                nf.features->'sentiment'->>'label' AS sentiment_label,
+                (nf.features->'sentiment'->>'score')::float AS sentiment_score,
+                (nf.features->>'trending_score')::float AS trending_score,
+                (nf.features->>'word_count')::int AS word_count,
+                (nf.features->>'has_image')::boolean AS has_image,
+                (nf.features->>'has_video')::boolean AS has_video,
+                (nf.features->>'readability_flesch')::float AS readability_flesch
         """
 
         query += """
@@ -552,6 +561,7 @@ class PostgresManager:
             LEFT JOIN themes t2 ON n.theme_l2_id = t2.id
             LEFT JOIN themes t3 ON n.theme_l3_id = t3.id
             LEFT JOIN themes tm ON n.most_specific_theme_id = tm.id
+            LEFT JOIN news_features nf ON n.unique_id = nf.unique_id
         """
 
         return query
@@ -693,6 +703,112 @@ class PostgresManager:
         )
 
         return df
+
+    # -------------------------------------------------------------------------
+    # Feature Store (news_features)
+    # -------------------------------------------------------------------------
+
+    def upsert_features(self, unique_id: str, features: dict[str, Any]) -> bool:
+        """
+        Merge features into news_features (JSONB || operator).
+
+        Existing features are preserved; new keys are added; duplicate keys are overwritten.
+
+        Args:
+            unique_id: Article unique_id
+            features: Dictionary of features to merge
+
+        Returns:
+            True if row was inserted/updated
+        """
+        if not features:
+            return False
+
+        conn = self.get_connection()
+
+        try:
+            cursor = conn.cursor()
+
+            query = """
+                INSERT INTO news_features (unique_id, features)
+                VALUES (%s, %s)
+                ON CONFLICT (unique_id) DO UPDATE SET
+                    features = news_features.features || EXCLUDED.features
+            """
+
+            cursor.execute(query, (unique_id, Json(features)))
+            updated = cursor.rowcount > 0
+            conn.commit()
+
+            logger.debug(f"Upserted features for {unique_id}: {list(features.keys())}")
+            return updated
+
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error upserting features for {unique_id}: {e}")
+            raise
+
+        finally:
+            cursor.close()
+            self.put_connection(conn)
+
+    def get_features(self, unique_id: str) -> dict[str, Any] | None:
+        """
+        Get features for an article.
+
+        Args:
+            unique_id: Article unique_id
+
+        Returns:
+            Features dictionary or None if not found
+        """
+        conn = self.get_connection()
+
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            cursor.execute(
+                "SELECT features FROM news_features WHERE unique_id = %s",
+                (unique_id,),
+            )
+            row = cursor.fetchone()
+
+            return dict(row["features"]) if row else None
+
+        finally:
+            cursor.close()
+            self.put_connection(conn)
+
+    def get_features_batch(self, unique_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """
+        Get features for multiple articles.
+
+        Args:
+            unique_ids: List of article unique_ids
+
+        Returns:
+            Dictionary mapping unique_id to features dict.
+            Missing articles are omitted from the result.
+        """
+        if not unique_ids:
+            return {}
+
+        conn = self.get_connection()
+
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            cursor.execute(
+                "SELECT unique_id, features FROM news_features WHERE unique_id = ANY(%s)",
+                (unique_ids,),
+            )
+            rows = cursor.fetchall()
+
+            return {row["unique_id"]: dict(row["features"]) for row in rows}
+
+        finally:
+            cursor.close()
+            self.put_connection(conn)
 
     def __enter__(self) -> "PostgresManager":
         """Context manager entry."""

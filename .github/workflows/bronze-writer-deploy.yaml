@@ -1,0 +1,25 @@
+name: Deploy Bronze Writer
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/data_platform/workers/bronze_writer/**'
+      - 'docker/bronze-writer/**'
+      - 'pyproject.toml'
+      - 'poetry.lock'
+      - '.github/workflows/bronze-writer-deploy.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    uses: destaquesgovbr/reusable-workflows/.github/workflows/cloud-run-deploy.yml@v2
+    with:
+      dockerfile: docker/bronze-writer/Dockerfile
+      ar_repository: destaquesgovbr-bronze-writer
+      image_name: bronze-writer
+      cloud_run_service: destaquesgovbr-bronze-writer

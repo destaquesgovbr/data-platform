@@ -1,0 +1,25 @@
+name: Deploy Feature Worker
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/data_platform/workers/feature_worker/**'
+      - 'docker/feature-worker/**'
+      - 'pyproject.toml'
+      - 'poetry.lock'
+      - '.github/workflows/feature-worker-deploy.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    uses: destaquesgovbr/reusable-workflows/.github/workflows/cloud-run-deploy.yml@v2
+    with:
+      dockerfile: docker/feature-worker/Dockerfile
+      ar_repository: destaquesgovbr-feature-worker
+      image_name: feature-worker
+      cloud_run_service: destaquesgovbr-feature-worker

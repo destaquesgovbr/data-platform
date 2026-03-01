@@ -96,6 +96,14 @@ COLLECTION_SCHEMA: dict[str, Any] = {
             "facet": True,
             "optional": True,
         },
+        # Feature fields (from news_features JSONB)
+        {"name": "sentiment_label", "type": "string", "facet": True, "optional": True},
+        {"name": "sentiment_score", "type": "float", "facet": False, "optional": True},
+        {"name": "trending_score", "type": "float", "facet": False, "optional": True, "sort": True},
+        {"name": "word_count", "type": "int32", "facet": False, "optional": True},
+        {"name": "has_image", "type": "bool", "facet": True, "optional": True},
+        {"name": "has_video", "type": "bool", "facet": True, "optional": True},
+        {"name": "readability_flesch", "type": "float", "facet": False, "optional": True},
         # Embedding field for semantic search (768 dimensions - BGE-M3)
         {
             "name": "content_embedding",

@@ -166,6 +166,21 @@ def prepare_document(row: pd.Series) -> dict[str, Any]:
         if cleaned_tags:  # Só adiciona se houver tags válidas
             doc["tags"] = cleaned_tags
 
+    # Feature fields (optional, from news_features JOIN)
+    feature_fields = [
+        ("sentiment_label", str),
+        ("sentiment_score", float),
+        ("trending_score", float),
+        ("word_count", int),
+        ("has_image", bool),
+        ("has_video", bool),
+        ("readability_flesch", float),
+    ]
+    for field_name, field_type in feature_fields:
+        val = row.get(field_name)
+        if val is not None and not (isinstance(val, float) and pd.isna(val)):
+            doc[field_name] = field_type(val)
+
     # Campo de embedding (vetor de floats para busca semântica)
     if "content_embedding" in row and row["content_embedding"] is not None:
         embedding = parse_embedding(row["content_embedding"])
