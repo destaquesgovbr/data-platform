@@ -171,7 +171,7 @@ class TestFetchNewsForTypesense:
         call_args = mock_read_sql.call_args
         query = call_args[0][0]
         assert "WHERE n.unique_id = %s" in query
-        assert call_args[1]["params"] == ["test-123"]
+        assert call_args[1]["params"] == ("test-123",)
 
 
 class TestUpsertToTypesense:
