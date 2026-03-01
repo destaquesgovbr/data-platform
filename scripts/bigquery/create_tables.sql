@@ -62,8 +62,11 @@ CREATE TABLE IF NOT EXISTS dgb_gold.dim_temas (
 
 
 -- External table over Bronze raw data in GCS
+-- Note: BigQuery does not support multiple wildcards, so we use a single * at the end.
+-- The Bronze Writer stores files at bronze/news/YYYY/MM/DD/{id}.json but BQ
+-- treats nested paths under a single wildcard correctly.
 CREATE OR REPLACE EXTERNAL TABLE dgb_gold.raw_news_bronze
 OPTIONS (
   format = 'JSON',
-  uris = ['gs://inspire-7-finep-dgb-data-lake/bronze/news/*/*/*/*.json']
+  uris = ['gs://inspire-7-finep-dgb-data-lake/bronze/news/*.json']
 );

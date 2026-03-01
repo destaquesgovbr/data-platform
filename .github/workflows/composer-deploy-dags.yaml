@@ -1,0 +1,19 @@
+name: Deploy DAGs to Composer
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/data_platform/dags/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    uses: destaquesgovbr/reusable-workflows/.github/workflows/composer-deploy-dags.yml@v1
+    with:
+      dags_local_path: src/data_platform/dags
+      dags_bucket_subdir: data-platform
