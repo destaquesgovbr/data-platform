@@ -5,8 +5,8 @@ CREATE TABLE IF NOT EXISTS dgb_gold.pageviews (
   referrer STRING,
   user_agent STRING,
   country STRING,
-  event_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
-  ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP()
+  event_timestamp TIMESTAMP NOT NULL,
+  ingested_at TIMESTAMP NOT NULL
 )
 PARTITION BY DATE(event_timestamp)
 CLUSTER BY unique_id
