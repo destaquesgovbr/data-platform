@@ -1,0 +1,245 @@
+"""Sync Umami Analytics data from PostgreSQL to BigQuery."""
+
+import json
+import logging
+
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+PAGEVIEWS_QUERY = """
+    SELECT
+        we.event_id::text,
+        we.session_id::text,
+        we.visit_id::text,
+        we.created_at,
+        we.url_path,
+        we.url_query,
+        we.page_title,
+        we.referrer_domain,
+        we.referrer_path,
+        we.hostname,
+        we.utm_source,
+        we.utm_medium,
+        we.utm_campaign,
+        s.browser,
+        s.os,
+        s.device,
+        s.country,
+        s.region,
+        s.city,
+        s.language
+    FROM website_event we
+    JOIN session s ON we.session_id = s.session_id
+    WHERE we.event_type = 1
+      AND we.created_at >= %s
+      AND we.created_at < %s
+    ORDER BY we.created_at
+"""
+
+EVENTS_QUERY = """
+    SELECT
+        we.event_id::text,
+        we.session_id::text,
+        we.created_at,
+        we.event_name,
+        we.url_path,
+        we.hostname,
+        s.browser,
+        s.os,
+        s.device,
+        s.country,
+        jsonb_object_agg(
+            ed.data_key,
+            COALESCE(ed.string_value, ed.number_value::text)
+        ) FILTER (WHERE ed.data_key IS NOT NULL) AS event_data
+    FROM website_event we
+    JOIN session s ON we.session_id = s.session_id
+    LEFT JOIN event_data ed ON we.event_id = ed.website_event_id
+    WHERE we.event_type = 2
+      AND we.created_at >= %s
+      AND we.created_at < %s
+    GROUP BY we.event_id, we.session_id, we.created_at,
+             we.event_name, we.url_path, we.hostname,
+             s.browser, s.os, s.device, s.country
+    ORDER BY we.created_at
+"""
+
+# BigQuery schemas
+PAGEVIEWS_SCHEMA = [
+    ("event_id", "STRING", "REQUIRED"),
+    ("session_id", "STRING", "REQUIRED"),
+    ("visit_id", "STRING", "NULLABLE"),
+    ("created_at", "TIMESTAMP", "REQUIRED"),
+    ("url_path", "STRING", "NULLABLE"),
+    ("url_query", "STRING", "NULLABLE"),
+    ("page_title", "STRING", "NULLABLE"),
+    ("referrer_domain", "STRING", "NULLABLE"),
+    ("referrer_path", "STRING", "NULLABLE"),
+    ("hostname", "STRING", "NULLABLE"),
+    ("utm_source", "STRING", "NULLABLE"),
+    ("utm_medium", "STRING", "NULLABLE"),
+    ("utm_campaign", "STRING", "NULLABLE"),
+    ("browser", "STRING", "NULLABLE"),
+    ("os", "STRING", "NULLABLE"),
+    ("device", "STRING", "NULLABLE"),
+    ("country", "STRING", "NULLABLE"),
+    ("region", "STRING", "NULLABLE"),
+    ("city", "STRING", "NULLABLE"),
+    ("language", "STRING", "NULLABLE"),
+]
+
+EVENTS_SCHEMA = [
+    ("event_id", "STRING", "REQUIRED"),
+    ("session_id", "STRING", "REQUIRED"),
+    ("created_at", "TIMESTAMP", "REQUIRED"),
+    ("event_name", "STRING", "REQUIRED"),
+    ("url_path", "STRING", "NULLABLE"),
+    ("hostname", "STRING", "NULLABLE"),
+    ("event_data", "JSON", "NULLABLE"),
+    ("browser", "STRING", "NULLABLE"),
+    ("os", "STRING", "NULLABLE"),
+    ("device", "STRING", "NULLABLE"),
+    ("country", "STRING", "NULLABLE"),
+]
+
+
+def get_umami_db_url(airflow_conn_id: str = "umami_postgres") -> str:
+    """Build Umami database URL from Airflow connection.
+
+    Uses a dedicated 'umami_postgres' Airflow connection.
+    Falls back to deriving from 'postgres_default' by swapping the database name.
+
+    Args:
+        airflow_conn_id: Airflow connection ID for Umami database
+
+    Returns:
+        SQLAlchemy-compatible connection string
+    """
+    from airflow.hooks.base import BaseHook
+
+    try:
+        conn = BaseHook.get_connection(airflow_conn_id)
+        db_url = conn.get_uri().replace("postgres://", "postgresql://", 1)
+        logger.info(f"Using Airflow connection: {airflow_conn_id}")
+    except Exception:
+        logger.warning(
+            f"Connection '{airflow_conn_id}' not found, "
+            "deriving from 'postgres_default'"
+        )
+        conn = BaseHook.get_connection("postgres_default")
+        db_url = conn.get_uri().replace("postgres://", "postgresql://", 1)
+        db_url = db_url.replace("/govbrnews", "/umami", 1)
+
+    return db_url
+
+
+def fetch_umami_pageviews(
+    db_url: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    """Fetch pageview events from Umami PostgreSQL.
+
+    Args:
+        db_url: Umami PostgreSQL connection string
+        start_date: Start datetime (inclusive), ISO format
+        end_date: End datetime (exclusive), ISO format
+
+    Returns:
+        DataFrame with pageview data joined with session info
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import NullPool
+
+    engine = create_engine(db_url, poolclass=NullPool)
+    try:
+        df = pd.read_sql_query(PAGEVIEWS_QUERY, engine, params=(start_date, end_date))
+    finally:
+        engine.dispose()
+
+    logger.info(
+        f"Fetched {len(df)} pageviews from Umami ({start_date} to {end_date})"
+    )
+    return df
+
+
+def fetch_umami_events(
+    db_url: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    """Fetch custom events from Umami PostgreSQL.
+
+    Args:
+        db_url: Umami PostgreSQL connection string
+        start_date: Start datetime (inclusive), ISO format
+        end_date: End datetime (exclusive), ISO format
+
+    Returns:
+        DataFrame with custom event data including event_data JSON
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import NullPool
+
+    engine = create_engine(db_url, poolclass=NullPool)
+    try:
+        df = pd.read_sql_query(EVENTS_QUERY, engine, params=(start_date, end_date))
+    finally:
+        engine.dispose()
+
+    # Convert event_data from dict/None to JSON string for BigQuery
+    if not df.empty and "event_data" in df.columns:
+        df["event_data"] = df["event_data"].apply(
+            lambda x: json.dumps(x) if x is not None else None
+        )
+
+    logger.info(
+        f"Fetched {len(df)} custom events from Umami ({start_date} to {end_date})"
+    )
+    return df
+
+
+def load_to_bigquery(
+    df: pd.DataFrame,
+    project_id: str,
+    table_id: str,
+    schema_fields: list[tuple[str, str, str]],
+) -> int:
+    """Load DataFrame into BigQuery table using WRITE_APPEND.
+
+    Args:
+        df: DataFrame to load
+        project_id: GCP project ID
+        table_id: Full table ID (dataset.table)
+        schema_fields: List of (name, type, mode) tuples
+
+    Returns:
+        Number of rows loaded
+    """
+    if df.empty:
+        logger.info(f"No data to load into {table_id}")
+        return 0
+
+    from google.cloud import bigquery
+
+    client = bigquery.Client(project=project_id)
+
+    schema = [
+        bigquery.SchemaField(name, field_type, mode=mode)
+        for name, field_type, mode in schema_fields
+    ]
+
+    job_config = bigquery.LoadJobConfig(
+        schema=schema,
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+    )
+
+    full_table_id = f"{project_id}.{table_id}"
+    load_job = client.load_table_from_dataframe(
+        df, full_table_id, job_config=job_config
+    )
+    load_job.result()
+
+    logger.info(f"Loaded {load_job.output_rows} rows into {full_table_id}")
+    return load_job.output_rows
