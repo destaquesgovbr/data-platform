@@ -7,13 +7,14 @@ logger = logging.getLogger(__name__)
 
 ENGAGEMENT_QUERY = """
     SELECT
-        unique_id,
+        REGEXP_EXTRACT(url_path, r'/artigos/([a-f0-9]{{32}})') AS unique_id,
         COUNT(*) AS view_count,
         COUNT(DISTINCT session_id) AS unique_sessions
-    FROM `{project_id}.dgb_gold.pageviews`
-    WHERE event_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {days} DAY)
-    GROUP BY unique_id
-    HAVING COUNT(*) > 0
+    FROM `{project_id}.dgb_gold.umami_pageviews`
+    WHERE created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {days} DAY)
+      AND url_path LIKE '/artigos/%'
+    GROUP BY 1
+    HAVING unique_id IS NOT NULL
     ORDER BY view_count DESC
 """
 

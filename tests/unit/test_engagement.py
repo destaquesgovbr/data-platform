@@ -11,8 +11,12 @@ from data_platform.jobs.bigquery.engagement import (
 
 
 class TestEngagementQuery:
-    def test_query_groups_by_unique_id(self):
-        assert "GROUP BY unique_id" in ENGAGEMENT_QUERY
+    def test_query_reads_from_umami_pageviews(self):
+        assert "umami_pageviews" in ENGAGEMENT_QUERY
+
+    def test_query_extracts_unique_id_from_url_path(self):
+        assert "REGEXP_EXTRACT(url_path" in ENGAGEMENT_QUERY
+        assert "/artigos/" in ENGAGEMENT_QUERY
 
     def test_query_counts_views(self):
         assert "COUNT(*) AS view_count" in ENGAGEMENT_QUERY
@@ -22,6 +26,12 @@ class TestEngagementQuery:
 
     def test_query_uses_project_id_placeholder(self):
         assert "{project_id}" in ENGAGEMENT_QUERY
+
+    def test_query_filters_artigos_path(self):
+        assert "url_path LIKE '/artigos/%'" in ENGAGEMENT_QUERY
+
+    def test_query_filters_null_unique_ids(self):
+        assert "HAVING unique_id IS NOT NULL" in ENGAGEMENT_QUERY
 
 
 class TestBatchUpsertEngagement:
