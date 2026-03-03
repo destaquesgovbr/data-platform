@@ -108,6 +108,9 @@ def get_umami_db_url(airflow_conn_id: str = "umami_postgres") -> str:
     """Build Umami database URL from Airflow connection.
 
     Uses a dedicated 'umami_postgres' Airflow connection.
+    Builds the URL manually from connection fields to avoid URL-encoding
+    issues with Cloud SQL socket paths (e.g. /cloudsql/...).
+
     Falls back to deriving from 'postgres_default' by swapping the database name.
 
     Args:
@@ -116,11 +119,12 @@ def get_umami_db_url(airflow_conn_id: str = "umami_postgres") -> str:
     Returns:
         SQLAlchemy-compatible connection string
     """
+    from urllib.parse import quote_plus
+
     from airflow.hooks.base import BaseHook
 
     try:
         conn = BaseHook.get_connection(airflow_conn_id)
-        db_url = conn.get_uri().replace("postgres://", "postgresql://", 1)
         logger.info(f"Using Airflow connection: {airflow_conn_id}")
     except Exception:
         logger.warning(
@@ -128,8 +132,21 @@ def get_umami_db_url(airflow_conn_id: str = "umami_postgres") -> str:
             "deriving from 'postgres_default'"
         )
         conn = BaseHook.get_connection("postgres_default")
-        db_url = conn.get_uri().replace("postgres://", "postgresql://", 1)
-        db_url = db_url.replace("/govbrnews", "/umami", 1)
+
+    login = quote_plus(conn.login or "")
+    password = quote_plus(conn.password or "")
+    host = conn.host or "localhost"
+    port = conn.port or 5432
+    schema = conn.schema or "umami"
+
+    # Cloud SQL uses Unix socket paths (e.g. /cloudsql/project:region:instance)
+    if host.startswith("/"):
+        db_url = (
+            f"postgresql://{login}:{password}@/{schema}"
+            f"?host={host}&port={port}"
+        )
+    else:
+        db_url = f"postgresql://{login}:{password}@{host}:{port}/{schema}"
 
     return db_url
 
