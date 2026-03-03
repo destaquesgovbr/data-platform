@@ -70,12 +70,12 @@ def sync_umami_to_bigquery():
         start_date = (logical_date - timedelta(days=1)).strftime("%Y-%m-%d")
         end_date = logical_date.strftime("%Y-%m-%d")
 
-        df = fetch_umami_pageviews(db_url, start_date, end_date)
-        if df.empty:
+        data = fetch_umami_pageviews(db_url, start_date, end_date)
+        if not data:
             return {"status": "no_data", "date": start_date, "rows": 0}
 
         rows = load_to_bigquery(
-            df, project_id, "dgb_gold.umami_pageviews", PAGEVIEWS_SCHEMA
+            data, project_id, "dgb_gold.umami_pageviews", PAGEVIEWS_SCHEMA
         )
         return {"status": "ok", "date": start_date, "rows": rows}
 
@@ -100,12 +100,12 @@ def sync_umami_to_bigquery():
         start_date = (logical_date - timedelta(days=1)).strftime("%Y-%m-%d")
         end_date = logical_date.strftime("%Y-%m-%d")
 
-        df = fetch_umami_events(db_url, start_date, end_date)
-        if df.empty:
+        data = fetch_umami_events(db_url, start_date, end_date)
+        if not data:
             return {"status": "no_data", "date": start_date, "rows": 0}
 
         rows = load_to_bigquery(
-            df, project_id, "dgb_gold.umami_events", EVENTS_SCHEMA
+            data, project_id, "dgb_gold.umami_events", EVENTS_SCHEMA
         )
         return {"status": "ok", "date": start_date, "rows": rows}
 
