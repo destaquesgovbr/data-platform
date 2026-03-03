@@ -1,9 +1,9 @@
 """Unit tests for Umami Analytics sync to BigQuery."""
 
 import json
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-import pandas as pd
 import pytest
 
 from data_platform.jobs.bigquery.umami_sync import (
@@ -11,6 +11,7 @@ from data_platform.jobs.bigquery.umami_sync import (
     EVENTS_SCHEMA,
     PAGEVIEWS_QUERY,
     PAGEVIEWS_SCHEMA,
+    _serialize_row,
     fetch_umami_events,
     fetch_umami_pageviews,
     load_to_bigquery,
@@ -93,7 +94,6 @@ class TestSchemas:
     def test_pageviews_schema_field_names_match_query_columns(self):
         """Schema field names should match the columns returned by the SQL query."""
         schema_names = {s[0] for s in PAGEVIEWS_SCHEMA}
-        # These are the column aliases from the PAGEVIEWS_QUERY
         expected = {
             "event_id", "session_id", "visit_id", "created_at",
             "url_path", "url_query", "page_title", "referrer_domain",
@@ -113,135 +113,170 @@ class TestSchemas:
         assert schema_names == expected
 
 
+class TestSerializeRow:
+    def test_converts_datetime_to_isoformat(self):
+        row = {"created_at": datetime(2026, 3, 1, 10, 0, 0), "name": "test"}
+        result = _serialize_row(row)
+        assert result["created_at"] == "2026-03-01T10:00:00"
+        assert result["name"] == "test"
+
+    def test_converts_event_data_dict_to_json_string(self):
+        row = {"event_data": {"article_id": "abc", "origin": "home"}}
+        result = _serialize_row(row)
+        assert result["event_data"] == '{"article_id": "abc", "origin": "home"}'
+
+    def test_preserves_none_values(self):
+        row = {"event_data": None, "url_path": None}
+        result = _serialize_row(row)
+        assert result["event_data"] is None
+        assert result["url_path"] is None
+
+    def test_preserves_string_values(self):
+        row = {"url_path": "/artigos/abc123", "browser": "Chrome"}
+        result = _serialize_row(row)
+        assert result["url_path"] == "/artigos/abc123"
+
+
 class TestFetchUmamiPageviews:
-    @patch("sqlalchemy.create_engine")
-    @patch("pandas.read_sql_query")
-    def test_returns_dataframe(self, mock_read_sql, mock_create_engine):
-        mock_engine = MagicMock()
-        mock_create_engine.return_value = mock_engine
-        expected_df = pd.DataFrame({
-            "event_id": ["id-1"],
-            "session_id": ["sess-1"],
-            "created_at": ["2026-03-01T10:00:00"],
-            "url_path": ["/artigos/abc123"],
-        })
-        mock_read_sql.return_value = expected_df
+    @patch("data_platform.jobs.bigquery.umami_sync.psycopg2.connect")
+    def test_returns_list_of_dicts(self, mock_connect):
+        mock_conn = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = [
+            {"event_id": "id-1", "session_id": "sess-1", "url_path": "/artigos/abc123",
+             "created_at": datetime(2026, 3, 1, 10, 0, 0)},
+        ]
 
         result = fetch_umami_pageviews("postgresql://test", "2026-03-01", "2026-03-02")
 
         assert len(result) == 1
-        assert result.iloc[0]["url_path"] == "/artigos/abc123"
-        mock_read_sql.assert_called_once()
-        mock_engine.dispose.assert_called_once()
+        assert result[0]["url_path"] == "/artigos/abc123"
+        assert result[0]["created_at"] == "2026-03-01T10:00:00"
+        mock_conn.close.assert_called_once()
 
-    @patch("sqlalchemy.create_engine")
-    @patch("pandas.read_sql_query")
-    def test_passes_date_params(self, mock_read_sql, mock_create_engine):
-        mock_create_engine.return_value = MagicMock()
-        mock_read_sql.return_value = pd.DataFrame()
+    @patch("data_platform.jobs.bigquery.umami_sync.psycopg2.connect")
+    def test_passes_date_params(self, mock_connect):
+        mock_conn = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = []
 
         fetch_umami_pageviews("postgresql://test", "2026-03-01", "2026-03-02")
 
-        call_args = mock_read_sql.call_args
-        assert call_args[1]["params"] == ("2026-03-01", "2026-03-02")
+        mock_cursor.execute.assert_called_once()
+        call_args = mock_cursor.execute.call_args
+        assert call_args[0][1] == ("2026-03-01", "2026-03-02")
 
-    @patch("sqlalchemy.create_engine")
-    @patch("pandas.read_sql_query")
-    def test_disposes_engine_on_error(self, mock_read_sql, mock_create_engine):
-        mock_engine = MagicMock()
-        mock_create_engine.return_value = mock_engine
-        mock_read_sql.side_effect = Exception("DB error")
+    @patch("data_platform.jobs.bigquery.umami_sync.psycopg2.connect")
+    def test_closes_connection_on_error(self, mock_connect):
+        mock_conn = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_cursor.execute.side_effect = Exception("DB error")
 
         with pytest.raises(Exception, match="DB error"):
             fetch_umami_pageviews("postgresql://test", "2026-03-01", "2026-03-02")
 
-        mock_engine.dispose.assert_called_once()
+        mock_conn.close.assert_called_once()
 
 
 class TestFetchUmamiEvents:
-    @patch("sqlalchemy.create_engine")
-    @patch("pandas.read_sql_query")
-    def test_converts_event_data_to_json_string(self, mock_read_sql, mock_create_engine):
-        mock_create_engine.return_value = MagicMock()
-        mock_read_sql.return_value = pd.DataFrame({
-            "event_id": ["id-1"],
-            "session_id": ["sess-1"],
-            "created_at": ["2026-03-01T10:00:00"],
-            "event_name": ["article_click"],
-            "url_path": ["/artigos/abc123"],
-            "hostname": ["example.com"],
-            "browser": ["chrome"],
-            "os": ["Mac OS"],
-            "device": ["laptop"],
-            "country": ["BR"],
-            "event_data": [{"article_id": "abc123", "origin": "home"}],
-        })
+    @patch("data_platform.jobs.bigquery.umami_sync.psycopg2.connect")
+    def test_serializes_event_data_to_json_string(self, mock_connect):
+        mock_conn = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = [
+            {"event_id": "id-1", "session_id": "sess-1",
+             "created_at": datetime(2026, 3, 1, 10, 0, 0),
+             "event_name": "article_click", "url_path": "/artigos/abc123",
+             "hostname": "example.com", "browser": "chrome", "os": "Mac OS",
+             "device": "laptop", "country": "BR",
+             "event_data": {"article_id": "abc123", "origin": "home"}},
+        ]
 
         result = fetch_umami_events("postgresql://test", "2026-03-01", "2026-03-02")
 
-        data = json.loads(result.iloc[0]["event_data"])
+        data = json.loads(result[0]["event_data"])
         assert data["article_id"] == "abc123"
         assert data["origin"] == "home"
 
-    @patch("sqlalchemy.create_engine")
-    @patch("pandas.read_sql_query")
-    def test_handles_null_event_data(self, mock_read_sql, mock_create_engine):
-        mock_create_engine.return_value = MagicMock()
-        mock_read_sql.return_value = pd.DataFrame({
-            "event_id": ["id-1"],
-            "session_id": ["sess-1"],
-            "created_at": ["2026-03-01T10:00:00"],
-            "event_name": ["button_click"],
-            "url_path": ["/"],
-            "hostname": ["example.com"],
-            "browser": ["chrome"],
-            "os": ["Mac OS"],
-            "device": ["laptop"],
-            "country": ["BR"],
-            "event_data": [None],
-        })
+    @patch("data_platform.jobs.bigquery.umami_sync.psycopg2.connect")
+    def test_handles_null_event_data(self, mock_connect):
+        mock_conn = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = [
+            {"event_id": "id-1", "session_id": "sess-1",
+             "created_at": datetime(2026, 3, 1, 10, 0, 0),
+             "event_name": "button_click", "url_path": "/",
+             "hostname": "example.com", "browser": "chrome", "os": "Mac OS",
+             "device": "laptop", "country": "BR", "event_data": None},
+        ]
 
         result = fetch_umami_events("postgresql://test", "2026-03-01", "2026-03-02")
 
-        assert result.iloc[0]["event_data"] is None
+        assert result[0]["event_data"] is None
 
-    @patch("sqlalchemy.create_engine")
-    @patch("pandas.read_sql_query")
-    def test_empty_dataframe_returns_empty(self, mock_read_sql, mock_create_engine):
-        mock_create_engine.return_value = MagicMock()
-        mock_read_sql.return_value = pd.DataFrame()
+    @patch("data_platform.jobs.bigquery.umami_sync.psycopg2.connect")
+    def test_empty_result_returns_empty_list(self, mock_connect):
+        mock_conn = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = []
 
         result = fetch_umami_events("postgresql://test", "2026-03-01", "2026-03-02")
 
-        assert result.empty
+        assert result == []
 
 
 class TestLoadToBigquery:
-    def test_empty_dataframe_returns_zero(self):
-        df = pd.DataFrame()
-        result = load_to_bigquery(df, "my-project", "dgb_gold.umami_pageviews", PAGEVIEWS_SCHEMA)
+    def test_empty_list_returns_zero(self):
+        result = load_to_bigquery([], "my-project", "dgb_gold.umami_pageviews", PAGEVIEWS_SCHEMA)
         assert result == 0
 
-    @patch("google.cloud.bigquery.Client")
-    @patch("google.cloud.bigquery.LoadJobConfig")
-    @patch("google.cloud.bigquery.SchemaField")
-    @patch("google.cloud.bigquery.WriteDisposition")
-    def test_loads_dataframe_to_correct_table(
-        self, mock_wd, mock_sf, mock_config, mock_client_cls
-    ):
+    def test_loads_rows_to_correct_table(self):
+        import sys
+
+        mock_bq = MagicMock()
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
+        mock_bq.Client.return_value = mock_client
         mock_job = MagicMock()
         mock_job.output_rows = 5
-        mock_client.load_table_from_dataframe.return_value = mock_job
+        mock_client.load_table_from_json.return_value = mock_job
 
-        df = pd.DataFrame({
-            "event_id": ["id-1", "id-2"],
-            "session_id": ["s-1", "s-2"],
-        })
+        mock_google = MagicMock()
+        mock_google_cloud = MagicMock()
+        mock_google_cloud.bigquery = mock_bq
+        mock_google.cloud = mock_google_cloud
 
-        result = load_to_bigquery(df, "my-project", "dgb_gold.umami_pageviews", PAGEVIEWS_SCHEMA)
+        sys.modules["google"] = mock_google
+        sys.modules["google.cloud"] = mock_google_cloud
+        sys.modules["google.cloud.bigquery"] = mock_bq
+        try:
+            rows = [
+                {"event_id": "id-1", "session_id": "s-1"},
+                {"event_id": "id-2", "session_id": "s-2"},
+            ]
+            result = load_to_bigquery(rows, "my-project", "dgb_gold.umami_pageviews", PAGEVIEWS_SCHEMA)
 
-        assert result == 5
-        call_args = mock_client.load_table_from_dataframe.call_args
-        assert call_args[0][1] == "my-project.dgb_gold.umami_pageviews"
+            assert result == 5
+            call_args = mock_client.load_table_from_json.call_args
+            assert call_args[0][1] == "my-project.dgb_gold.umami_pageviews"
+        finally:
+            sys.modules.pop("google.cloud.bigquery", None)
+            sys.modules.pop("google.cloud", None)
+            sys.modules.pop("google", None)

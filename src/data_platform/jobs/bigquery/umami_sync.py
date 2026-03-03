@@ -2,8 +2,10 @@
 
 import json
 import logging
+from datetime import datetime
 
-import pandas as pd
+import psycopg2
+import psycopg2.extras
 
 logger = logging.getLogger(__name__)
 
@@ -151,11 +153,40 @@ def get_umami_db_url(airflow_conn_id: str = "umami_postgres") -> str:
     return db_url
 
 
+def _serialize_row(row: dict) -> dict:
+    """Serialize a database row for BigQuery JSON upload.
+
+    Converts datetime objects to ISO strings and ensures
+    event_data dicts become JSON strings.
+    """
+    out = {}
+    for key, value in row.items():
+        if isinstance(value, datetime):
+            out[key] = value.isoformat()
+        elif key == "event_data" and isinstance(value, dict):
+            out[key] = json.dumps(value)
+        else:
+            out[key] = value
+    return out
+
+
+def _fetch_rows(db_url: str, query: str, params: tuple) -> list[dict]:
+    """Execute a query against PostgreSQL and return rows as list of dicts."""
+    conn = psycopg2.connect(db_url)
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(query, params)
+            rows = [_serialize_row(dict(row)) for row in cur.fetchall()]
+    finally:
+        conn.close()
+    return rows
+
+
 def fetch_umami_pageviews(
     db_url: str,
     start_date: str,
     end_date: str,
-) -> pd.DataFrame:
+) -> list[dict]:
     """Fetch pageview events from Umami PostgreSQL.
 
     Args:
@@ -164,28 +195,20 @@ def fetch_umami_pageviews(
         end_date: End datetime (exclusive), ISO format
 
     Returns:
-        DataFrame with pageview data joined with session info
+        List of dicts with pageview data joined with session info
     """
-    from sqlalchemy import create_engine
-    from sqlalchemy.pool import NullPool
-
-    engine = create_engine(db_url, poolclass=NullPool)
-    try:
-        df = pd.read_sql_query(PAGEVIEWS_QUERY, engine, params=(start_date, end_date))
-    finally:
-        engine.dispose()
-
+    rows = _fetch_rows(db_url, PAGEVIEWS_QUERY, (start_date, end_date))
     logger.info(
-        f"Fetched {len(df)} pageviews from Umami ({start_date} to {end_date})"
+        f"Fetched {len(rows)} pageviews from Umami ({start_date} to {end_date})"
     )
-    return df
+    return rows
 
 
 def fetch_umami_events(
     db_url: str,
     start_date: str,
     end_date: str,
-) -> pd.DataFrame:
+) -> list[dict]:
     """Fetch custom events from Umami PostgreSQL.
 
     Args:
@@ -194,39 +217,25 @@ def fetch_umami_events(
         end_date: End datetime (exclusive), ISO format
 
     Returns:
-        DataFrame with custom event data including event_data JSON
+        List of dicts with custom event data including event_data JSON
     """
-    from sqlalchemy import create_engine
-    from sqlalchemy.pool import NullPool
-
-    engine = create_engine(db_url, poolclass=NullPool)
-    try:
-        df = pd.read_sql_query(EVENTS_QUERY, engine, params=(start_date, end_date))
-    finally:
-        engine.dispose()
-
-    # Convert event_data from dict/None to JSON string for BigQuery
-    if not df.empty and "event_data" in df.columns:
-        df["event_data"] = df["event_data"].apply(
-            lambda x: json.dumps(x) if x is not None else None
-        )
-
+    rows = _fetch_rows(db_url, EVENTS_QUERY, (start_date, end_date))
     logger.info(
-        f"Fetched {len(df)} custom events from Umami ({start_date} to {end_date})"
+        f"Fetched {len(rows)} custom events from Umami ({start_date} to {end_date})"
     )
-    return df
+    return rows
 
 
 def load_to_bigquery(
-    df: pd.DataFrame,
+    rows: list[dict],
     project_id: str,
     table_id: str,
     schema_fields: list[tuple[str, str, str]],
 ) -> int:
-    """Load DataFrame into BigQuery table using WRITE_APPEND.
+    """Load rows into BigQuery table using load_table_from_json.
 
     Args:
-        df: DataFrame to load
+        rows: List of dicts to load
         project_id: GCP project ID
         table_id: Full table ID (dataset.table)
         schema_fields: List of (name, type, mode) tuples
@@ -234,7 +243,7 @@ def load_to_bigquery(
     Returns:
         Number of rows loaded
     """
-    if df.empty:
+    if not rows:
         logger.info(f"No data to load into {table_id}")
         return 0
 
@@ -253,8 +262,8 @@ def load_to_bigquery(
     )
 
     full_table_id = f"{project_id}.{table_id}"
-    load_job = client.load_table_from_dataframe(
-        df, full_table_id, job_config=job_config
+    load_job = client.load_table_from_json(
+        rows, full_table_id, job_config=job_config
     )
     load_job.result()
 
