@@ -1,5 +1,7 @@
 """Sync Umami Analytics data from PostgreSQL to BigQuery."""
 
+from __future__ import annotations
+
 import json
 import logging
 from datetime import datetime
@@ -106,12 +108,12 @@ EVENTS_SCHEMA = [
 ]
 
 
-def get_umami_db_url(airflow_conn_id: str = "umami_postgres") -> str:
-    """Build Umami database URL from Airflow connection.
+def get_umami_db_url(airflow_conn_id: str = "umami_postgres") -> dict:
+    """Build Umami database connection kwargs from Airflow connection.
 
     Uses a dedicated 'umami_postgres' Airflow connection.
-    Builds the URL manually from connection fields to avoid URL-encoding
-    issues with Cloud SQL socket paths (e.g. /cloudsql/...).
+    Returns psycopg2-compatible keyword arguments to handle both
+    TCP hosts and Cloud SQL Unix socket paths.
 
     Falls back to deriving from 'postgres_default' by swapping the database name.
 
@@ -119,10 +121,8 @@ def get_umami_db_url(airflow_conn_id: str = "umami_postgres") -> str:
         airflow_conn_id: Airflow connection ID for Umami database
 
     Returns:
-        SQLAlchemy-compatible connection string
+        Dict of psycopg2.connect() keyword arguments
     """
-    from urllib.parse import quote_plus
-
     from airflow.hooks.base import BaseHook
 
     try:
@@ -135,22 +135,19 @@ def get_umami_db_url(airflow_conn_id: str = "umami_postgres") -> str:
         )
         conn = BaseHook.get_connection("postgres_default")
 
-    login = quote_plus(conn.login or "")
-    password = quote_plus(conn.password or "")
     host = conn.host or "localhost"
     port = conn.port or 5432
-    schema = conn.schema or "umami"
+    dbname = conn.schema or "umami"
+    user = conn.login or ""
+    password = conn.password or ""
 
-    # Cloud SQL uses Unix socket paths (e.g. /cloudsql/project:region:instance)
-    if host.startswith("/"):
-        db_url = (
-            f"postgresql://{login}:{password}@/{schema}"
-            f"?host={host}&port={port}"
-        )
-    else:
-        db_url = f"postgresql://{login}:{password}@{host}:{port}/{schema}"
-
-    return db_url
+    return {
+        "host": host,
+        "port": port,
+        "dbname": dbname,
+        "user": user,
+        "password": password,
+    }
 
 
 def _serialize_row(row: dict) -> dict:
@@ -170,9 +167,12 @@ def _serialize_row(row: dict) -> dict:
     return out
 
 
-def _fetch_rows(db_url: str, query: str, params: tuple) -> list[dict]:
+def _fetch_rows(db_conn: dict | str, query: str, params: tuple) -> list[dict]:
     """Execute a query against PostgreSQL and return rows as list of dicts."""
-    conn = psycopg2.connect(db_url)
+    if isinstance(db_conn, dict):
+        conn = psycopg2.connect(**db_conn)
+    else:
+        conn = psycopg2.connect(db_conn)
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(query, params)
@@ -183,7 +183,7 @@ def _fetch_rows(db_url: str, query: str, params: tuple) -> list[dict]:
 
 
 def fetch_umami_pageviews(
-    db_url: str,
+    db_url: dict | str,
     start_date: str,
     end_date: str,
 ) -> list[dict]:
@@ -205,7 +205,7 @@ def fetch_umami_pageviews(
 
 
 def fetch_umami_events(
-    db_url: str,
+    db_url: dict | str,
     start_date: str,
     end_date: str,
 ) -> list[dict]:
