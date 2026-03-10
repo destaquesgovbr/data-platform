@@ -215,10 +215,13 @@ echo -e "${YELLOW}Populating tables...${NC}"
 cd "$PROJECT_ROOT"
 
 # Find Python virtual environment
-if [ -f "/Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate" ]; then
-    source "/Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate"
-elif [ -d "venv" ]; then
-    source venv/bin/activate
+VENV_PATH=$(cd "$PROJECT_ROOT" && poetry env info -e 2>/dev/null)
+if [ -n "$VENV_PATH" ]; then
+    source "$VENV_PATH/bin/activate"
+elif [ -d "$PROJECT_ROOT/.venv" ]; then
+    source "$PROJECT_ROOT/.venv/bin/activate"
+elif [ -d "$PROJECT_ROOT/venv" ]; then
+    source "$PROJECT_ROOT/venv/bin/activate"
 fi
 
 # Set environment variable for local database
