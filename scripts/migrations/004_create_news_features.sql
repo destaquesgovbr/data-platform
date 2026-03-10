@@ -2,7 +2,7 @@
 -- Feature Store: armazena features computadas para cada notícia (JSONB flexível)
 
 CREATE TABLE IF NOT EXISTS news_features (
-    unique_id VARCHAR(32) PRIMARY KEY REFERENCES news(unique_id) ON DELETE CASCADE,
+    unique_id VARCHAR(120) PRIMARY KEY REFERENCES news(unique_id) ON DELETE CASCADE,
     features JSONB NOT NULL DEFAULT '{}',
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );

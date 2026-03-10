@@ -109,6 +109,41 @@ class TestSQLSchemaConsistency:
             assert column in init_sql, f"Column '{column}' missing in init.sql"
             assert column in create_sql, f"Column '{column}' missing in create_schema.sql"
 
+    def test_init_sql_unique_id_varchar_120(self):
+        """Verifica que init.sql define unique_id como VARCHAR(120) para suportar slugs."""
+        init_sql = (PROJECT_ROOT / "docker/postgres/init.sql").read_text()
+        assert re.search(r"unique_id\s+VARCHAR\(120\)", init_sql), \
+            "init.sql should define unique_id as VARCHAR(120)"
+
+    def test_create_schema_unique_id_varchar_120(self):
+        """Verifica que create_schema.sql define unique_id como VARCHAR(120) para suportar slugs."""
+        create_sql = (PROJECT_ROOT / "scripts/create_schema.sql").read_text()
+        assert re.search(r"unique_id\s+VARCHAR\(120\)", create_sql), \
+            "create_schema.sql should define unique_id as VARCHAR(120)"
+
+    def test_news_features_unique_id_varchar_120(self):
+        """Verifica que news_features define unique_id como VARCHAR(120)."""
+        features_sql = (PROJECT_ROOT / "scripts/migrations/004_create_news_features.sql").read_text()
+        assert re.search(r"unique_id\s+VARCHAR\(120\)", features_sql), \
+            "004_create_news_features.sql should define unique_id as VARCHAR(120)"
+
+    def test_init_sql_has_legacy_unique_id(self):
+        """Verifica que init.sql tem a coluna legacy_unique_id para rollback/redirects."""
+        init_sql = (PROJECT_ROOT / "docker/postgres/init.sql").read_text()
+        assert "legacy_unique_id" in init_sql, \
+            "init.sql should have legacy_unique_id column"
+
+    def test_create_schema_has_legacy_unique_id(self):
+        """Verifica que create_schema.sql tem a coluna legacy_unique_id."""
+        create_sql = (PROJECT_ROOT / "scripts/create_schema.sql").read_text()
+        assert "legacy_unique_id" in create_sql, \
+            "create_schema.sql should have legacy_unique_id column"
+
+    def test_migration_005_exists(self):
+        """Verifica que a migration 005 para alterar unique_id existe."""
+        migration = PROJECT_ROOT / "scripts/migrations/005_alter_unique_id_varchar.sql"
+        assert migration.exists(), "Migration 005_alter_unique_id_varchar.sql should exist"
+
 
 class TestPydanticModelConsistency:
     """Tests for Pydantic model consistency with SQL schema."""

@@ -146,7 +146,7 @@ CREATE INDEX IF NOT EXISTS idx_themes_parent ON themes(parent_code);
 -- Create news table
 CREATE TABLE IF NOT EXISTS news (
     id SERIAL PRIMARY KEY,
-    unique_id VARCHAR(32) UNIQUE NOT NULL,
+    unique_id VARCHAR(120) UNIQUE NOT NULL,
 
     -- Foreign keys
     agency_id INTEGER NOT NULL REFERENCES agencies(id),

@@ -1,5 +1,5 @@
 -- DestaquesGovBR PostgreSQL Schema
--- Version: 1.2
+-- Version: 1.3
 -- Database: destaquesgovbr
 -- Encoding: UTF-8
 -- Timezone: UTC
@@ -82,7 +82,7 @@ CREATE INDEX idx_themes_parent ON themes(parent_code);
 
 CREATE TABLE news (
     id SERIAL PRIMARY KEY,
-    unique_id VARCHAR(32) UNIQUE NOT NULL,
+    unique_id VARCHAR(120) UNIQUE NOT NULL,
 
     -- Foreign keys
     agency_id INTEGER NOT NULL REFERENCES agencies(id),
@@ -118,13 +118,17 @@ CREATE TABLE news (
     agency_key VARCHAR(100),
     agency_name VARCHAR(500),
 
+    -- Legacy ID for rollback and URL redirects (issue #43)
+    legacy_unique_id VARCHAR(32),
+
     -- Embeddings (Phase 4.7)
     content_embedding vector(768),
     embedding_generated_at TIMESTAMP WITH TIME ZONE
 );
 
 COMMENT ON TABLE news IS 'Main news storage (migrated from HuggingFace Dataset)';
-COMMENT ON COLUMN news.unique_id IS 'MD5(agency + published_at + title)';
+COMMENT ON COLUMN news.unique_id IS 'Readable slug + hash suffix (e.g., governo-anuncia-programa_a3f2e1)';
+COMMENT ON COLUMN news.legacy_unique_id IS 'Original MD5 unique_id preserved for rollback and URL redirects';
 COMMENT ON COLUMN news.most_specific_theme_id IS 'Most granular theme (L3 > L2 > L1)';
 COMMENT ON COLUMN news.summary IS 'AI-generated summary from LLM enrichment';
 COMMENT ON COLUMN news.video_url IS 'Video URL if available';
@@ -153,6 +157,9 @@ CREATE INDEX idx_news_most_specific_theme ON news(most_specific_theme_id);
 CREATE INDEX idx_news_agency_date ON news(agency_id, published_at DESC);
 -- Note: idx_news_date_range removed due to NOW() not being IMMUTABLE in WHERE clause
 -- A regular index on published_at already exists for date range queries
+
+-- Legacy unique_id lookup (for URL redirects)
+CREATE INDEX idx_news_legacy_unique_id ON news(legacy_unique_id);
 
 -- Full-text search (PostgreSQL Portuguese support)
 CREATE INDEX idx_news_fts ON news
@@ -318,7 +325,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 INSERT INTO schema_version (version, description)
-VALUES ('1.2', 'Added content_embedding and embedding_generated_at columns for semantic search');
+VALUES ('1.3', 'Widen unique_id to VARCHAR(120) for readable slugs, add legacy_unique_id');
 
 -- =============================================================================
 -- COMPLETION MESSAGE
@@ -328,7 +335,7 @@ DO $$
 BEGIN
     RAISE NOTICE '';
     RAISE NOTICE '========================================';
-    RAISE NOTICE 'DestaquesGovBR Schema v1.2 - READY';
+    RAISE NOTICE 'DestaquesGovBR Schema v1.3 - READY';
     RAISE NOTICE '========================================';
     RAISE NOTICE '';
     RAISE NOTICE 'Next steps:';
