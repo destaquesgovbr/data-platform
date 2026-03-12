@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 ENGAGEMENT_QUERY = """
     SELECT
-        REGEXP_EXTRACT(url_path, r'/artigos/([a-f0-9]{{32}})') AS unique_id,
+        REGEXP_EXTRACT(url_path, r'/artigos/([a-z0-9][a-z0-9_-]+)') AS unique_id,
         COUNT(*) AS view_count,
         COUNT(DISTINCT session_id) AS unique_sessions
     FROM `{project_id}.dgb_gold.umami_pageviews`
