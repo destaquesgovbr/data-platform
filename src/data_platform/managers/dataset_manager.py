@@ -57,8 +57,8 @@ class DatasetManager:
         # Sort the dataset before pushing
         dataset = self._sort_dataset(dataset)
 
-        # Push updated dataset (and CSVs) to the Hub
-        self._push_dataset_and_csvs(dataset)
+        # Push updated dataset to the Hub
+        self._push_datasets(dataset)
 
     def update(self, updated_df: pd.DataFrame):
         """
@@ -79,8 +79,8 @@ class DatasetManager:
         # Sort again after updates
         dataset = self._sort_dataset(dataset)
 
-        # Push updated dataset (and CSVs) to the Hub
-        self._push_dataset_and_csvs(dataset)
+        # Push updated dataset to the Hub
+        self._push_datasets(dataset)
 
     def get(
         self, min_date: str, max_date: str, agency: Optional[str] = None
@@ -263,7 +263,7 @@ class DatasetManager:
         )
         return Dataset.from_pandas(df, preserve_index=False)
 
-    def _push_dataset_and_csvs(self, dataset: Dataset):
+    def _push_datasets(self, dataset: Dataset):
         """
         Push the HF Dataset to the Hub and push a reduced version
         containing only 'published_at', 'agency', 'title', and 'url' columns.
