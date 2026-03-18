@@ -78,7 +78,7 @@ def fetch_all_news(conn):
     cursor.itersize = 5000
     cursor.execute(
         "SELECT unique_id, agency_key, published_at, title, legacy_unique_id "
-        "FROM news ORDER BY id"
+        "FROM news ORDER BY unique_id"
     )
     rows = cursor.fetchall()
     cursor.close()
@@ -105,13 +105,23 @@ def build_id_mapping(rows):
 
     Skips rows where old_id == new_id (already migrated).
     Resolves collisions by extending the suffix (7, 8, ... chars).
+
+    Requires rows sorted by unique_id for deterministic processing order.
+    When two records collide, the one with the lexicographically smaller
+    unique_id keeps the base 6-char suffix; the other gets an extended suffix.
     """
     mapping = {}
     seen_new_ids = {}  # new_id -> old_id
     collision_count = 0
     for unique_id, agency_key, published_at, title, _legacy in rows:
         new_id = generate_readable_unique_id(agency_key, published_at, title)
-        if new_id in seen_new_ids and seen_new_ids[new_id] != unique_id:
+
+        # Skip already-migrated records but track their IDs for collision checks
+        if unique_id == new_id:
+            seen_new_ids[new_id] = unique_id
+            continue
+
+        if new_id in seen_new_ids:
             # Collision: extend suffix until unique
             for extra in range(1, 27):  # up to 32 hex chars total
                 new_id = _generate_id_with_extended_suffix(
@@ -119,15 +129,25 @@ def build_id_mapping(rows):
                 )
                 if new_id not in seen_new_ids:
                     break
+            # Verify collision was actually resolved
+            if new_id in seen_new_ids:
+                raise ValueError(
+                    f"Failed to resolve collision after 26 attempts for '{unique_id}'"
+                )
             collision_count += 1
             print(f"   Resolved collision for '{unique_id}' -> '{new_id}'")
-        if unique_id != new_id:
-            mapping[unique_id] = new_id
-            seen_new_ids[new_id] = unique_id
-        else:
-            seen_new_ids[new_id] = unique_id
+
+        mapping[unique_id] = new_id
+        seen_new_ids[new_id] = unique_id
+
     if collision_count:
         print(f"   Resolved {collision_count} collisions by extending suffix")
+
+    # Final uniqueness validation
+    new_ids = list(mapping.values())
+    if len(new_ids) != len(set(new_ids)):
+        raise ValueError("Mapping contains duplicate new_ids after resolution")
+
     return mapping
 
 
