@@ -40,6 +40,8 @@ LEFT JOIN themes t1 ON n.theme_l1_id = t1.id
 LEFT JOIN themes t2 ON n.theme_l2_id = t2.id
 LEFT JOIN themes t3 ON n.theme_l3_id = t3.id;
 
+COMMENT ON VIEW news_with_themes IS 'News with denormalized theme hierarchy for easy querying';
+
 -- Step 7: Index on legacy_unique_id for redirect lookups
 CREATE INDEX IF NOT EXISTS idx_news_legacy_unique_id ON news(legacy_unique_id);
 
