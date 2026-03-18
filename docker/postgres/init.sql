@@ -45,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_themes_parent ON themes(parent_code);
 -- News table
 CREATE TABLE IF NOT EXISTS news (
     id SERIAL PRIMARY KEY,
-    unique_id VARCHAR(32) UNIQUE NOT NULL,
+    unique_id VARCHAR(120) UNIQUE NOT NULL,
 
     -- Foreign keys
     agency_id INTEGER NOT NULL REFERENCES agencies(id),
@@ -79,6 +79,9 @@ CREATE TABLE IF NOT EXISTS news (
     agency_key VARCHAR(100),
     agency_name VARCHAR(500),
 
+    -- Legacy ID for rollback and URL redirects (issue #43)
+    legacy_unique_id VARCHAR(32),
+
     -- Embeddings (Phase 4.7)
     content_embedding vector(768),
     embedding_generated_at TIMESTAMP WITH TIME ZONE
@@ -105,6 +108,9 @@ CREATE TRIGGER update_news_updated_at
     BEFORE UPDATE ON news
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
+
+-- Legacy unique_id lookup (for URL redirects)
+CREATE INDEX IF NOT EXISTS idx_news_legacy_unique_id ON news(legacy_unique_id);
 
 -- Embedding indexes (Phase 4.7)
 -- HNSW index for fast cosine similarity search

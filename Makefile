@@ -59,50 +59,44 @@ setup-db: docker-up
 
 populate-master:
 	@echo "Populating master tables..."
-	@source /Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate && \
-		export DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" && \
-		python scripts/populate_agencies.py && \
-		python scripts/populate_themes.py
+	DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" \
+		poetry run python scripts/populate_agencies.py && \
+	DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" \
+		poetry run python scripts/populate_themes.py
 
 psql:
 	docker exec -it destaquesgovbr-postgres psql -U destaquesgovbr_dev -d destaquesgovbr_dev
 
 # Testing commands
 test:
-	@source /Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate && \
-		PYTHONPATH=src pytest tests/ -v
+	PYTHONPATH=src poetry run pytest tests/ -v
 
 test-unit:
-	@source /Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate && \
-		PYTHONPATH=src pytest tests/unit/ -v
+	PYTHONPATH=src poetry run pytest tests/unit/ -v
 
 test-integration:
-	@source /Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate && \
-		export DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" && \
-		PYTHONPATH=src pytest tests/integration/ -v
+	DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" \
+		PYTHONPATH=src poetry run pytest tests/integration/ -v
 
 # Migration commands
 migrate:
 	@echo "Running test migration (1000 records)..."
-	@source /Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate && \
-		export DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" && \
-		python scripts/migrate_hf_to_postgres.py --max-records 1000
+	DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" \
+		poetry run python scripts/migrate_hf_to_postgres.py --max-records 1000
 
 migrate-full:
 	@echo "Running FULL migration (all records)..."
 	@read -p "This will migrate ALL records. Continue? [y/N] " -n 1 -r; \
 	echo; \
 	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		source /Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate && \
-		export DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" && \
-		python scripts/migrate_hf_to_postgres.py; \
+		DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" \
+		poetry run python scripts/migrate_hf_to_postgres.py; \
 	fi
 
 validate:
 	@echo "Validating migration..."
-	@source /Users/nitai/Library/Caches/pypoetry/virtualenvs/govbr-news-ai-_H0Lmpg7-py3.13/bin/activate && \
-		export DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" && \
-		python scripts/validate_migration.py
+	DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" \
+		poetry run python scripts/validate_migration.py
 
 # Cleanup commands
 clean:
