@@ -85,34 +85,50 @@ def fetch_all_news(conn):
     return rows
 
 
+def _generate_id_with_extended_suffix(agency, published_at, title, extra_chars):
+    """Generate ID with a longer suffix to resolve collisions."""
+    slug = slugify(title)
+    date_str = (
+        published_at.isoformat()
+        if isinstance(published_at, date)
+        else str(published_at)
+    )
+    hash_input = f"{agency}_{date_str}_{title}".encode("utf-8")
+    suffix = hashlib.md5(hash_input).hexdigest()[: 6 + extra_chars]
+    if slug:
+        return f"{slug}_{suffix}"
+    return f"sem-titulo_{suffix}"
+
+
 def build_id_mapping(rows):
     """Build mapping {old_unique_id: new_unique_id} from news rows.
 
     Skips rows where old_id == new_id (already migrated).
+    Resolves collisions by extending the suffix (7, 8, ... chars).
     """
     mapping = {}
+    seen_new_ids = {}  # new_id -> old_id
+    collision_count = 0
     for unique_id, agency_key, published_at, title, _legacy in rows:
         new_id = generate_readable_unique_id(agency_key, published_at, title)
+        if new_id in seen_new_ids and seen_new_ids[new_id] != unique_id:
+            # Collision: extend suffix until unique
+            for extra in range(1, 27):  # up to 32 hex chars total
+                new_id = _generate_id_with_extended_suffix(
+                    agency_key, published_at, title, extra
+                )
+                if new_id not in seen_new_ids:
+                    break
+            collision_count += 1
+            print(f"   Resolved collision for '{unique_id}' -> '{new_id}'")
         if unique_id != new_id:
             mapping[unique_id] = new_id
-    return mapping
-
-
-def check_collisions(mapping):
-    """Check for duplicate new_ids in the mapping.
-
-    Returns list of collision descriptions. Empty list means no collisions.
-    """
-    seen = {}
-    collisions = []
-    for old_id, new_id in mapping.items():
-        if new_id in seen:
-            collisions.append(
-                f"Collision: '{seen[new_id]}' and '{old_id}' both map to '{new_id}'"
-            )
+            seen_new_ids[new_id] = unique_id
         else:
-            seen[new_id] = old_id
-    return collisions
+            seen_new_ids[new_id] = unique_id
+    if collision_count:
+        print(f"   Resolved {collision_count} collisions by extending suffix")
+    return mapping
 
 
 def has_news_features_table(conn):
@@ -166,14 +182,6 @@ def dry_run(conn, output_path):
     mapping = build_id_mapping(rows)
     print(f"   {len(mapping)} records need migration ({len(rows) - len(mapping)} already migrated)")
 
-    collisions = check_collisions(mapping)
-    if collisions:
-        print(f"\n❌ {len(collisions)} collisions detected!")
-        for c in collisions:
-            print(f"   {c}")
-        sys.exit(1)
-    print("   ✓ Zero collisions")
-
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["old_unique_id", "new_unique_id"])
@@ -201,15 +209,6 @@ def migrate(conn, batch_size=1000):
         return
 
     print(f"   {len(mapping)} records to migrate")
-
-    # 2. Check collisions
-    collisions = check_collisions(mapping)
-    if collisions:
-        print(f"\n❌ {len(collisions)} collisions detected! Aborting.")
-        for c in collisions:
-            print(f"   {c}")
-        sys.exit(1)
-    print("   ✓ Zero collisions")
 
     cursor = conn.cursor()
 
