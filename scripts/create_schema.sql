@@ -328,6 +328,39 @@ INSERT INTO schema_version (version, description)
 VALUES ('1.3', 'Widen unique_id to VARCHAR(120) for readable slugs, add legacy_unique_id');
 
 -- =============================================================================
+-- MIGRATION HISTORY (audit trail for database migrations)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS migration_history (
+    id              SERIAL PRIMARY KEY,
+    version         VARCHAR(10)  NOT NULL,
+    name            VARCHAR(255) NOT NULL,
+    migration_type  VARCHAR(10)  NOT NULL CHECK (migration_type IN ('sql', 'python')),
+    operation       VARCHAR(10)  NOT NULL CHECK (operation IN ('migrate', 'rollback', 'dry_run')),
+    status          VARCHAR(20)  NOT NULL CHECK (status IN ('success', 'failed', 'unavailable')),
+    started_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    finished_at     TIMESTAMPTZ,
+    duration_ms     INTEGER,
+    applied_by      TEXT NOT NULL,
+    run_id          TEXT,
+    description     TEXT,
+    execution_details JSONB,
+    error_message   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_mh_version    ON migration_history(version);
+CREATE INDEX IF NOT EXISTS idx_mh_started_at ON migration_history(started_at DESC);
+
+COMMENT ON TABLE migration_history IS 'Audit trail for all database migrations (SQL and Python)';
+
+CREATE OR REPLACE VIEW migration_status AS
+SELECT DISTINCT ON (version)
+    version, name, migration_type, operation, status, applied_by, started_at, duration_ms
+FROM migration_history
+WHERE status = 'success'
+ORDER BY version, started_at DESC;
+
+-- =============================================================================
 -- COMPLETION MESSAGE
 -- =============================================================================
 
