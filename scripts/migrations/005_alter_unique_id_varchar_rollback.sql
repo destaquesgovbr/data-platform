@@ -3,8 +3,9 @@
 --
 -- WARNING: This rollback will FAIL if any unique_id exceeds 32 chars.
 -- Run 006 rollback first to restore MD5 IDs before running this.
-
-BEGIN;
+--
+-- NOTE: Do NOT use BEGIN/COMMIT here. The migration runner manages
+-- the transaction to ensure atomic commit with migration_history.
 
 -- Step 1: Drop view that depends on news.unique_id
 DROP VIEW IF EXISTS news_with_themes;
@@ -38,5 +39,3 @@ ALTER TABLE news DROP COLUMN IF EXISTS legacy_unique_id;
 
 -- Step 5: Revert schema_version
 DELETE FROM schema_version WHERE version = '1.3';
-
-COMMIT;

@@ -72,9 +72,8 @@ def _generate_id_with_extended_suffix(agency, published_at, title, extra_chars):
 
 
 def _fetch_all_news(conn):
-    """Fetch all news rows needed for migration using server-side cursor."""
-    cursor = conn.cursor(name="fetch_news_for_migration")
-    cursor.itersize = 5000
+    """Fetch all news rows needed for migration."""
+    cursor = conn.cursor()
     cursor.execute(
         "SELECT unique_id, agency_key, published_at, title, legacy_unique_id "
         "FROM news ORDER BY unique_id"

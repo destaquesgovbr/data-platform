@@ -42,6 +42,14 @@ jobs:
     name: Validate Inputs
     runs-on: ubuntu-latest
     steps:
+      - name: Validate target_version format
+        if: inputs.target_version != ''
+        run: |
+          if ! echo "${{ inputs.target_version }}" | grep -qE '^[0-9]{3}$'; then
+            echo "::error::target_version must be a 3-digit number (e.g. 006)"
+            exit 1
+          fi
+
       - name: Check confirmation for destructive operations
         run: |
           COMMAND="${{ inputs.command }}"
@@ -178,31 +186,31 @@ jobs:
           DRY_RUN="${{ inputs.dry_run }}"
           TARGET="${{ inputs.target_version }}"
 
-          CMD="poetry run python scripts/migrate.py $COMMAND"
+          ARGS=()
 
           case "$COMMAND" in
             status|history|validate)
-              CMD="$CMD --db-url \"$LOCAL_URL\""
+              ARGS+=("$COMMAND" --db-url "$LOCAL_URL")
               ;;
             migrate)
-              CMD="$CMD --db-url \"$LOCAL_URL\" --yes"
+              ARGS+=("migrate" --db-url "$LOCAL_URL" --yes)
               if [ "$DRY_RUN" = "true" ]; then
-                CMD="$CMD --dry-run"
+                ARGS+=(--dry-run)
               fi
               if [ -n "$TARGET" ]; then
-                CMD="$CMD --target $TARGET"
+                ARGS+=(--target "$TARGET")
               fi
               ;;
             rollback)
-              CMD="poetry run python scripts/migrate.py rollback $TARGET --db-url \"$LOCAL_URL\" --yes"
+              ARGS+=("rollback" "$TARGET" --db-url "$LOCAL_URL" --yes)
               if [ "$DRY_RUN" = "true" ]; then
-                CMD="$CMD --dry-run"
+                ARGS+=(--dry-run)
               fi
               ;;
           esac
 
-          echo "Executing: $COMMAND (dry_run=$DRY_RUN, target=$TARGET)"
-          eval $CMD
+          echo "Executing: ${ARGS[*]}"
+          poetry run python scripts/migrate.py "${ARGS[@]}"
 
   show-status:
     name: Show Status

@@ -270,6 +270,61 @@ def _load_python_module(path: Path):
     return module
 
 
+def _execute_with_history(
+    conn,
+    migration: MigrationInfo,
+    operation: str,
+    dry_run: bool,
+    applied_by: str,
+    run_id: str | None,
+    action_fn,
+) -> None:
+    """Execute an action (migrate or rollback) with atomic history recording.
+
+    action_fn(conn) -> (description, execution_details)
+    """
+    effective_op = "dry_run" if (dry_run and operation == "migrate") else operation
+    started_at = time.time()
+    verb = "Rolling back" if operation == "rollback" else "Executing"
+
+    logger.info(
+        f"{'[DRY RUN] ' if dry_run else ''}{verb} "
+        f"{migration.version}_{migration.name} ({migration.migration_type})"
+    )
+
+    try:
+        description, execution_details = action_fn(conn)
+
+        if dry_run:
+            _record_history(
+                conn, migration, effective_op, "success", started_at,
+                applied_by, run_id, description, execution_details,
+            )
+            conn.rollback()
+            logger.info(f"[DRY RUN] {migration.version} previewed (rolled back)")
+        else:
+            _record_history(
+                conn, migration, effective_op, "success", started_at,
+                applied_by, run_id, description, execution_details,
+            )
+            conn.commit()
+            logger.info(f"{migration.version}_{migration.name} {operation}d successfully")
+
+    except (FileNotFoundError, ValueError):
+        raise
+    except Exception as e:
+        conn.rollback()
+        try:
+            _record_history(
+                conn, migration, effective_op, "failed", started_at,
+                applied_by, run_id, error_message=str(e),
+            )
+            conn.commit()
+        except Exception:
+            logger.warning(f"Could not record {operation} failure in migration_history")
+        raise
+
+
 def execute_migration(
     conn,
     migration: MigrationInfo,
@@ -278,23 +333,16 @@ def execute_migration(
     run_id: str | None,
 ) -> None:
     """Execute a single migration (SQL or Python) with atomic commit."""
-    operation = "dry_run" if dry_run else "migrate"
-    started_at = time.time()
-    description = None
-    execution_details = None
 
-    logger.info(f"{'[DRY RUN] ' if dry_run else ''}Executing {migration.version}_{migration.name} ({migration.migration_type})")
-
-    try:
+    def action(conn):
         if migration.migration_type == "sql":
-            sql_content = migration.path.read_text()
             cursor = conn.cursor()
             try:
-                cursor.execute(sql_content)
+                cursor.execute(migration.path.read_text())
             finally:
                 cursor.close()
+            return None, None
         else:
-            # Python migration
             module = _load_python_module(migration.path)
             if not hasattr(module, "describe"):
                 raise AttributeError(
@@ -302,35 +350,9 @@ def execute_migration(
                 )
             description = module.describe()
             result = module.migrate(conn, dry_run=dry_run)
-            execution_details = result if isinstance(result, dict) else None
+            return description, result if isinstance(result, dict) else None
 
-        if dry_run:
-            _record_history(
-                conn, migration, operation, "success", started_at,
-                applied_by, run_id, description, execution_details,
-            )
-            conn.rollback()
-            logger.info(f"[DRY RUN] {migration.version} previewed (rolled back)")
-        else:
-            _record_history(
-                conn, migration, operation, "success", started_at,
-                applied_by, run_id, description, execution_details,
-            )
-            conn.commit()
-            logger.info(f"{migration.version}_{migration.name} applied successfully")
-
-    except Exception as e:
-        conn.rollback()
-        # Record failure in a separate transaction
-        try:
-            _record_history(
-                conn, migration, operation, "failed", started_at,
-                applied_by, run_id, description, error_message=str(e),
-            )
-            conn.commit()
-        except Exception:
-            logger.warning("Could not record failure in migration_history")
-        raise
+    _execute_with_history(conn, migration, "migrate", dry_run, applied_by, run_id, action)
 
 
 # ---------------------------------------------------------------------------
@@ -345,66 +367,41 @@ def execute_rollback(
     run_id: str | None,
 ) -> None:
     """Execute rollback for a single migration."""
-    operation = "rollback"
-    started_at = time.time()
-    description = None
-    execution_details = None
 
-    logger.info(f"{'[DRY RUN] ' if dry_run else ''}Rolling back {migration.version}_{migration.name}")
-
-    try:
+    def action(conn):
         if migration.migration_type == "sql":
             if not migration.rollback_path or not migration.rollback_path.exists():
                 raise FileNotFoundError(
                     f"No rollback file for SQL migration {migration.version}_{migration.name}. "
                     f"Expected: {migration.version}_{migration.name}_rollback.sql"
                 )
-            sql_content = migration.rollback_path.read_text()
             cursor = conn.cursor()
             try:
-                cursor.execute(sql_content)
+                cursor.execute(migration.rollback_path.read_text())
             finally:
                 cursor.close()
+            return None, None
         else:
-            # Python migration
             module = _load_python_module(migration.path)
             try:
                 result = module.rollback(conn, dry_run=dry_run)
-                execution_details = result if isinstance(result, dict) else None
+                return None, result if isinstance(result, dict) else None
             except NotImplementedError as nie:
                 _record_history(
-                    conn, migration, operation, "unavailable", started_at,
-                    applied_by, run_id, description,
-                    error_message=str(nie),
+                    conn, migration, "rollback", "unavailable", time.time(),
+                    applied_by, run_id, error_message=str(nie),
                 )
                 conn.commit()
                 logger.warning(f"{migration.version} rollback unavailable: {nie}")
-                return
+                raise _RollbackUnavailable()
 
-        if dry_run:
-            conn.rollback()
-            logger.info(f"[DRY RUN] {migration.version} rollback previewed")
-        else:
-            _record_history(
-                conn, migration, operation, "success", started_at,
-                applied_by, run_id, description, execution_details,
-            )
-            conn.commit()
-            logger.info(f"{migration.version}_{migration.name} rolled back successfully")
+    class _RollbackUnavailable(Exception):
+        pass
 
-    except (FileNotFoundError, ValueError):
-        raise
-    except Exception as e:
-        conn.rollback()
-        try:
-            _record_history(
-                conn, migration, operation, "failed", started_at,
-                applied_by, run_id, description, error_message=str(e),
-            )
-            conn.commit()
-        except Exception:
-            logger.warning("Could not record rollback failure in migration_history")
-        raise
+    try:
+        _execute_with_history(conn, migration, "rollback", dry_run, applied_by, run_id, action)
+    except _RollbackUnavailable:
+        return
 
 
 # ---------------------------------------------------------------------------
