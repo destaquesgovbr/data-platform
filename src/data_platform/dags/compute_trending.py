@@ -7,6 +7,7 @@ and upserts them into PG news_features JSONB store.
 """
 
 import logging
+import os
 from datetime import datetime, timedelta
 
 from airflow.decorators import dag, task
@@ -59,7 +60,17 @@ def compute_trending_dag():
             logger.info("No trending scores returned from BigQuery, skipping")
             return {"status": "no_data", "count": 0}
 
-        count = batch_upsert_trending(db_url, scores_df)
+        graphql_url = os.environ.get("GRAPHQL_API_URL")
+        if graphql_url:
+            from data_platform.clients.graphql_client import GraphQLClient
+            from data_platform.jobs.bigquery.trending import (
+                batch_upsert_trending_via_graphql,
+            )
+
+            with GraphQLClient(graphql_url) as gql_client:
+                count = batch_upsert_trending_via_graphql(gql_client, scores_df)
+        else:
+            count = batch_upsert_trending(db_url, scores_df)
         return {"status": "ok", "count": count}
 
     compute_and_sync_trending()

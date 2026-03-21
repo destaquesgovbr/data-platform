@@ -176,6 +176,91 @@ def load_parquet_to_bigquery(
     return load_job.output_rows
 
 
+def fetch_news_for_bigquery_via_graphql(
+    gql_client,
+    start_date: str,
+    end_date: str,
+    batch_size: int = 500,
+) -> pd.DataFrame:
+    """Fetch news + features from PostgreSQL via GraphQL for BigQuery sync.
+
+    Uses paginated NEWS_BATCH_FOR_BIGQUERY_QUERY with cursor-based pagination.
+
+    Args:
+        gql_client: GraphQLClient instance
+        start_date: Start date (YYYY-MM-DD)
+        end_date: End date (YYYY-MM-DD)
+        batch_size: Number of records per page
+
+    Returns:
+        DataFrame with denormalized news data (same shape as fetch_news_for_bigquery)
+    """
+    from data_platform.clients.graphql_client import NEWS_BATCH_FOR_BIGQUERY_QUERY
+
+    all_rows: list[dict] = []
+    cursor: str | None = None
+
+    while True:
+        variables: dict = {
+            "startDate": start_date,
+            "endDate": end_date,
+            "batchSize": batch_size,
+        }
+        if cursor is not None:
+            variables["cursor"] = cursor
+
+        data = gql_client.query(NEWS_BATCH_FOR_BIGQUERY_QUERY, variables)
+        batch = data.get("newsBatchForBigQuery", [])
+
+        if not batch:
+            break
+
+        all_rows.extend(batch)
+
+        # Use last item's uniqueId as cursor for next page
+        cursor = batch[-1]["uniqueId"]
+
+        # If we got fewer than batch_size, we've reached the end
+        if len(batch) < batch_size:
+            break
+
+    if not all_rows:
+        logger.info(f"No data via GraphQL for {start_date} to {end_date}")
+        return pd.DataFrame()
+
+    # Convert camelCase GraphQL response to snake_case DataFrame columns
+    rows = []
+    for r in all_rows:
+        rows.append({
+            "unique_id": r.get("uniqueId"),
+            "title": r.get("title"),
+            "url": r.get("url"),
+            "agency_key": r.get("agencyKey"),
+            "agency_name": r.get("agencyName"),
+            "published_at": r.get("publishedAt"),
+            "theme_l1_code": r.get("themL1Code"),
+            "theme_l1_label": r.get("themL1Label"),
+            "theme_l2_code": r.get("themL2Code"),
+            "theme_l2_label": r.get("themL2Label"),
+            "most_specific_theme_code": r.get("mostSpecificThemeCode"),
+            "most_specific_theme_label": r.get("mostSpecificThemeLabel"),
+            "word_count": r.get("wordCount"),
+            "char_count": r.get("charCount"),
+            "paragraph_count": r.get("paragraphCount"),
+            "has_image": r.get("hasImage"),
+            "has_video": r.get("hasVideo"),
+            "sentiment_label": r.get("sentimentLabel"),
+            "sentiment_score": r.get("sentimentScore"),
+            "readability_flesch": r.get("readabilityFlesch"),
+            "publication_hour": r.get("publicationHour"),
+            "publication_dow": r.get("publicationDow"),
+        })
+
+    df = pd.DataFrame(rows)
+    logger.info(f"Fetched {len(df)} rows via GraphQL ({start_date} to {end_date})")
+    return df
+
+
 def sync_dimensions(db_url: str, project_id: str) -> None:
     """Sync dimension tables (agencies, themes) from PG to BigQuery.
 

@@ -1,11 +1,89 @@
 """Compute similar article clusters using pgvector cosine similarity."""
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# GraphQL-based alternatives
+# ---------------------------------------------------------------------------
+
+
+def fetch_similar_articles_via_graphql(
+    gql_client: Any,
+    unique_ids: list[str],
+    threshold: float = 0.8,
+    limit: int = 5,
+) -> pd.DataFrame:
+    """Fetch similar articles via GraphQL instead of direct pgvector query.
+
+    Args:
+        gql_client: GraphQLClient instance
+        unique_ids: List of article unique_ids to find similarities for
+        threshold: Minimum cosine similarity (0-1)
+        limit: Max similar articles per target
+
+    Returns:
+        DataFrame with columns [unique_id, similar_id, similarity]
+    """
+    from data_platform.clients.graphql_client import SIMILAR_ARTICLES_QUERY
+
+    rows: list[dict] = []
+    for uid in unique_ids:
+        data = gql_client.query(
+            SIMILAR_ARTICLES_QUERY,
+            {"uniqueId": uid, "threshold": threshold, "limit": limit},
+        )
+        for item in data.get("similarArticles", []):
+            rows.append({
+                "unique_id": uid,
+                "similar_id": item["uniqueId"],
+                "similarity": item["similarity"],
+            })
+
+    df = pd.DataFrame(rows, columns=["unique_id", "similar_id", "similarity"])
+    logger.info(
+        f"[GraphQL] Found {len(df)} similarity pairs for {df['unique_id'].nunique() if not df.empty else 0} articles"
+    )
+    return df
+
+
+def batch_upsert_clusters_via_graphql(
+    gql_client: Any,
+    clusters: dict[str, list[str]],
+) -> int:
+    """Batch upsert similar_articles into news_features via GraphQL.
+
+    Args:
+        gql_client: GraphQLClient instance
+        clusters: Dict mapping unique_id to list of similar article IDs
+
+    Returns:
+        Number of articles processed
+    """
+    from data_platform.clients.graphql_client import BATCH_UPSERT_FEATURES_MUTATION
+
+    items = [
+        {"uniqueId": uid, "features": {"similar_articles": similar_ids}}
+        for uid, similar_ids in clusters.items()
+    ]
+
+    if not items:
+        return 0
+
+    data = gql_client.mutate(
+        BATCH_UPSERT_FEATURES_MUTATION,
+        {"items": items},
+    )
+    result = data.get("batchUpsertFeatures", {})
+    processed = result.get("processed", 0)
+    failed = result.get("failed", 0)
+
+    logger.info(f"[GraphQL] Upserted similar_articles: {processed} processed, {failed} failed")
+    return processed
 
 # Find top-K similar articles for each article published in the last 24h
 # Uses pgvector <=> operator (cosine distance)

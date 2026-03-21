@@ -42,6 +42,47 @@ def fetch_engagement_metrics(project_id: str, days: int = 30) -> pd.DataFrame:
     return df
 
 
+def batch_upsert_engagement_via_graphql(gql_client, metrics_df: pd.DataFrame) -> int:
+    """Batch upsert view_count and unique_sessions via GraphQL.
+
+    Args:
+        gql_client: GraphQLClient instance
+        metrics_df: DataFrame with [unique_id, view_count, unique_sessions]
+
+    Returns:
+        Number of rows processed
+    """
+    from data_platform.clients.graphql_client import BATCH_UPSERT_FEATURES_MUTATION
+
+    items = []
+    for _, row in metrics_df.iterrows():
+        items.append({
+            "uniqueId": row["unique_id"],
+            "features": {
+                "view_count": int(row["view_count"]),
+                "unique_sessions": int(row["unique_sessions"]),
+            },
+        })
+
+    if not items:
+        return 0
+
+    # Send in batches of 500
+    total_processed = 0
+    batch_size = 500
+    for i in range(0, len(items), batch_size):
+        batch = items[i : i + batch_size]
+        data = gql_client.mutate(
+            BATCH_UPSERT_FEATURES_MUTATION,
+            {"items": batch},
+        )
+        result = data.get("batchUpsertFeatures", {})
+        total_processed += result.get("processed", len(batch))
+
+    logger.info(f"Upserted engagement metrics via GraphQL for {total_processed} articles")
+    return total_processed
+
+
 def batch_upsert_engagement(db_url: str, metrics_df: pd.DataFrame) -> int:
     """Batch upsert view_count and unique_sessions into news_features.
 

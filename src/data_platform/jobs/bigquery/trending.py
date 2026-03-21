@@ -65,6 +65,46 @@ def fetch_trending_scores(project_id: str) -> pd.DataFrame:
     return df
 
 
+def batch_upsert_trending_via_graphql(gql_client, scores_df: pd.DataFrame) -> int:
+    """Batch upsert trending_score via GraphQL.
+
+    Args:
+        gql_client: GraphQLClient instance
+        scores_df: DataFrame with columns [unique_id, trending_score]
+
+    Returns:
+        Number of rows processed
+    """
+    from data_platform.clients.graphql_client import BATCH_UPSERT_FEATURES_MUTATION
+
+    items = []
+    for _, row in scores_df.iterrows():
+        items.append({
+            "uniqueId": row["unique_id"],
+            "features": {
+                "trending_score": float(row["trending_score"]),
+            },
+        })
+
+    if not items:
+        return 0
+
+    # Send in batches of 500
+    total_processed = 0
+    batch_size = 500
+    for i in range(0, len(items), batch_size):
+        batch = items[i : i + batch_size]
+        data = gql_client.mutate(
+            BATCH_UPSERT_FEATURES_MUTATION,
+            {"items": batch},
+        )
+        result = data.get("batchUpsertFeatures", {})
+        total_processed += result.get("processed", len(batch))
+
+    logger.info(f"Upserted {total_processed} trending scores via GraphQL")
+    return total_processed
+
+
 def batch_upsert_trending(db_url: str, scores_df: pd.DataFrame) -> int:
     """Batch upsert trending_score into news_features.
 
