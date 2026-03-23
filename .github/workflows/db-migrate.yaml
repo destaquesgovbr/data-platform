@@ -189,8 +189,11 @@ jobs:
           ARGS=()
 
           case "$COMMAND" in
-            status|history|validate)
+            status|history)
               ARGS+=("$COMMAND" --db-url "$LOCAL_URL")
+              ;;
+            validate)
+              ARGS+=("validate")
               ;;
             migrate)
               ARGS+=("migrate" --db-url "$LOCAL_URL" --yes)
@@ -263,6 +266,11 @@ jobs:
         run: |
           cloud-sql-proxy ${{ env.CLOUD_SQL_INSTANCE }} --port=5432 &
           sleep 3
+          if ! nc -z 127.0.0.1 5432; then
+            echo "::error::Cloud SQL Proxy failed to start"
+            exit 1
+          fi
+          echo "Cloud SQL Proxy started successfully"
 
       - name: Show migration status
         env:

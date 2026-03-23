@@ -176,6 +176,7 @@ def migrate(conn, dry_run: bool = False) -> dict:
             "preview": True,
         }
 
+    from psycopg2 import sql
     from psycopg2.extras import execute_batch
 
     cursor = conn.cursor()
@@ -193,7 +194,11 @@ def migrate(conn, dry_run: bool = False) -> dict:
     if has_features:
         fk_name = _get_fk_constraint_name(conn)
         if fk_name:
-            cursor.execute(f"ALTER TABLE news_features DROP CONSTRAINT {fk_name}")
+            cursor.execute(
+                sql.SQL("ALTER TABLE news_features DROP CONSTRAINT {}").format(
+                    sql.Identifier(fk_name)
+                )
+            )
 
     # Update news_features
     if has_features:
@@ -217,8 +222,10 @@ def migrate(conn, dry_run: bool = False) -> dict:
     # Re-add FK
     if has_features and fk_name:
         cursor.execute(
-            f"ALTER TABLE news_features ADD CONSTRAINT {fk_name} "
-            f"FOREIGN KEY (unique_id) REFERENCES news(unique_id) ON DELETE CASCADE"
+            sql.SQL(
+                "ALTER TABLE news_features ADD CONSTRAINT {} "
+                "FOREIGN KEY (unique_id) REFERENCES news(unique_id) ON DELETE CASCADE"
+            ).format(sql.Identifier(fk_name))
         )
 
     cursor.close()
@@ -255,12 +262,18 @@ def rollback(conn, dry_run: bool = False) -> dict:
         return {"rows_rolled_back": 0, "to_rollback": to_rollback, "preview": True}
 
     # Handle FK
+    from psycopg2 import sql
+
     has_features = _has_news_features_table(conn)
     fk_name = None
     if has_features:
         fk_name = _get_fk_constraint_name(conn)
         if fk_name:
-            cursor.execute(f"ALTER TABLE news_features DROP CONSTRAINT {fk_name}")
+            cursor.execute(
+                sql.SQL("ALTER TABLE news_features DROP CONSTRAINT {}").format(
+                    sql.Identifier(fk_name)
+                )
+            )
 
     # Update news_features
     if has_features:
@@ -280,8 +293,10 @@ def rollback(conn, dry_run: bool = False) -> dict:
     # Re-add FK
     if has_features and fk_name:
         cursor.execute(
-            f"ALTER TABLE news_features ADD CONSTRAINT {fk_name} "
-            f"FOREIGN KEY (unique_id) REFERENCES news(unique_id) ON DELETE CASCADE"
+            sql.SQL(
+                "ALTER TABLE news_features ADD CONSTRAINT {} "
+                "FOREIGN KEY (unique_id) REFERENCES news(unique_id) ON DELETE CASCADE"
+            ).format(sql.Identifier(fk_name))
         )
 
     # Verify

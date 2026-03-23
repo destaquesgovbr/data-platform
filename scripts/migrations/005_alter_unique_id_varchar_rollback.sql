@@ -7,14 +7,26 @@
 -- NOTE: Do NOT use BEGIN/COMMIT here. The migration runner manages
 -- the transaction to ensure atomic commit with migration_history.
 
--- Step 1: Drop view that depends on news.unique_id
+-- Step 1: Validate that all unique_ids fit in VARCHAR(32)
+-- If migration 006 was applied, unique_ids will be longer and this MUST fail.
+DO $$
+DECLARE
+    long_count INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO long_count FROM news WHERE LENGTH(unique_id) > 32;
+    IF long_count > 0 THEN
+        RAISE EXCEPTION 'Cannot rollback 005: % unique_ids exceed 32 chars. Rollback migration 006 first to restore MD5 IDs.', long_count;
+    END IF;
+END $$;
+
+-- Step 2: Drop view that depends on news.unique_id
 DROP VIEW IF EXISTS news_with_themes;
 
--- Step 2: Narrow unique_id back to VARCHAR(32)
+-- Step 3: Narrow unique_id back to VARCHAR(32)
 ALTER TABLE news_features ALTER COLUMN unique_id TYPE VARCHAR(32);
 ALTER TABLE news ALTER COLUMN unique_id TYPE VARCHAR(32);
 
--- Step 3: Recreate the view
+-- Step 4: Recreate the view
 CREATE VIEW news_with_themes AS
 SELECT
     n.id,
@@ -33,9 +45,9 @@ LEFT JOIN themes t1 ON n.theme_l1_id = t1.id
 LEFT JOIN themes t2 ON n.theme_l2_id = t2.id
 LEFT JOIN themes t3 ON n.theme_l3_id = t3.id;
 
--- Step 4: Remove legacy column and index
+-- Step 5: Remove legacy column and index
 DROP INDEX IF EXISTS idx_news_legacy_unique_id;
 ALTER TABLE news DROP COLUMN IF EXISTS legacy_unique_id;
 
--- Step 5: Revert schema_version
+-- Step 6: Revert schema_version
 DELETE FROM schema_version WHERE version = '1.3';
