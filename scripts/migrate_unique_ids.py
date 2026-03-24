@@ -2,6 +2,10 @@
 """
 Migrate news unique_ids from MD5 hashes to readable slugs.
 
+DEPRECATED: Use `python scripts/migrate.py migrate` instead.
+This script is preserved for backward compatibility with existing tests.
+The canonical implementation is now in scripts/migrations/006_migrate_unique_ids.py.
+
 Phase 4 of issue #43: https://github.com/destaquesgovbr/data-platform/issues/43
 
 Usage:

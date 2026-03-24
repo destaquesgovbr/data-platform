@@ -3,29 +3,30 @@ name: Database Migration
 on:
   workflow_dispatch:
     inputs:
-      migration:
-        description: 'SQL migration file to execute (relative to scripts/migrations/)'
+      command:
+        description: 'Migration command to execute'
         required: true
+        type: choice
+        options:
+          - status
+          - migrate
+          - rollback
+          - history
+          - validate
+      dry_run:
+        description: 'Preview changes without applying (default: true)'
+        required: false
+        type: boolean
+        default: true
+      target_version:
+        description: 'Target version for migrate (--target) or rollback (VERSION)'
+        required: false
         type: string
-      data_migration:
-        description: 'Run Python data migration script after SQL? (scripts/migrate_unique_ids.py)'
+      confirm:
+        description: 'Required for migrate/rollback with dry_run=false'
         required: false
         type: boolean
         default: false
-      data_migration_mode:
-        description: 'Data migration mode (only used if data_migration is true)'
-        required: false
-        type: choice
-        options:
-          - dry-run
-          - migrate
-          - rollback
-        default: dry-run
-      batch_size:
-        description: 'Batch size for data migration (default: 1000)'
-        required: false
-        type: number
-        default: 1000
 
 permissions:
   contents: read
@@ -34,53 +35,61 @@ permissions:
 env:
   PROJECT_ID: inspire-7-finep
   CLOUD_SQL_INSTANCE: inspire-7-finep:southamerica-east1:destaquesgovbr-postgres
-  DATABASE_NAME: govbrnews
+  CLOUD_SQL_PROXY_VERSION: v2.14.3
 
 jobs:
-  validate:
-    name: Validate Migration
+  validate-inputs:
+    name: Validate Inputs
     runs-on: ubuntu-latest
-    outputs:
-      migration_file: ${{ steps.check.outputs.migration_file }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Validate migration file exists
-        id: check
+      - name: Validate target_version format
+        if: inputs.target_version != ''
         run: |
-          MIGRATION_FILE="scripts/migrations/${{ inputs.migration }}"
-          if [ ! -f "$MIGRATION_FILE" ]; then
-            echo "::error::Migration file not found: $MIGRATION_FILE"
-            echo "Available migrations:"
-            ls -1 scripts/migrations/*.sql 2>/dev/null || echo "  (none)"
+          if ! echo "${{ inputs.target_version }}" | grep -qE '^[0-9]{3}$'; then
+            echo "::error::target_version must be a 3-digit number (e.g. 006)"
             exit 1
           fi
-          echo "migration_file=$MIGRATION_FILE" >> $GITHUB_OUTPUT
-          echo "## Migration to execute" >> $GITHUB_STEP_SUMMARY
-          echo "- **File:** \`$MIGRATION_FILE\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Data migration:** ${{ inputs.data_migration }}" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ inputs.data_migration }}" = "true" ]; then
-            echo "- **Mode:** ${{ inputs.data_migration_mode }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Batch size:** ${{ inputs.batch_size }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check confirmation for destructive operations
+        run: |
+          COMMAND="${{ inputs.command }}"
+          DRY_RUN="${{ inputs.dry_run }}"
+          CONFIRM="${{ inputs.confirm }}"
+
+          echo "## Migration Request" >> $GITHUB_STEP_SUMMARY
+          echo "- **Command:** $COMMAND" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry run:** $DRY_RUN" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target version:** ${{ inputs.target_version || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Confirm:** $CONFIRM" >> $GITHUB_STEP_SUMMARY
+          echo "- **Actor:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "$COMMAND" == "migrate" || "$COMMAND" == "rollback" ]]; then
+            if [[ "$DRY_RUN" == "false" && "$CONFIRM" != "true" ]]; then
+              echo "::error::Destructive operation requires confirm=true when dry_run=false"
+              exit 1
+            fi
           fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### SQL Content" >> $GITHUB_STEP_SUMMARY
-          echo '```sql' >> $GITHUB_STEP_SUMMARY
-          cat "$MIGRATION_FILE" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          if [[ "$COMMAND" == "rollback" && -z "${{ inputs.target_version }}" ]]; then
+            echo "::error::rollback requires target_version"
+            exit 1
+          fi
 
   backup:
     name: Create Backup
-    needs: validate
+    needs: validate-inputs
+    if: >-
+      inputs.command == 'migrate' || inputs.command == 'rollback'
     runs-on: ubuntu-latest
+    environment: production
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
-          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@v2
         with:
@@ -88,8 +97,7 @@ jobs:
 
       - name: Create on-demand backup
         run: |
-          DESCRIPTION="pre-migration-${{ inputs.migration }}-$(date +%Y%m%d-%H%M%S)"
-          # Truncate description to 100 chars (Cloud SQL limit)
+          DESCRIPTION="pre-${{ inputs.command }}-$(date +%Y%m%d-%H%M%S)"
           DESCRIPTION="${DESCRIPTION:0:100}"
           echo "Creating backup: $DESCRIPTION"
           gcloud sql backups create \
@@ -110,10 +118,12 @@ jobs:
           echo "$BACKUP" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-  run-sql-migration:
-    name: Run SQL Migration
-    needs: [validate, backup]
+  run-migration:
+    name: Run Migration
+    needs: [validate-inputs, backup]
+    if: always() && needs.validate-inputs.result == 'success' && (needs.backup.result == 'success' || needs.backup.result == 'skipped')
     runs-on: ubuntu-latest
+    environment: production
     permissions:
       contents: read
       id-token: write
@@ -122,8 +132,8 @@ jobs:
 
       - uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
-          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@v2
         with:
@@ -131,88 +141,7 @@ jobs:
 
       - name: Install Cloud SQL Proxy
         run: |
-          curl -o cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.14.3/cloud-sql-proxy.linux.amd64
-          chmod +x cloud-sql-proxy
-          sudo mv cloud-sql-proxy /usr/local/bin/
-
-      - name: Fetch database credentials
-        id: db
-        run: |
-          DB_URL=$(gcloud secrets versions access latest --secret=govbrnews-postgres-connection-string)
-          echo "::add-mask::$DB_URL"
-          echo "url=$DB_URL" >> $GITHUB_OUTPUT
-
-      - name: Start Cloud SQL Proxy
-        run: |
-          cloud-sql-proxy ${{ env.CLOUD_SQL_INSTANCE }} --port=5432 &
-          sleep 3
-          # Verify proxy is running
-          if ! nc -z 127.0.0.1 5432; then
-            echo "::error::Cloud SQL Proxy failed to start"
-            exit 1
-          fi
-          echo "Cloud SQL Proxy started successfully"
-
-      - name: Run SQL migration
-        env:
-          DATABASE_URL: ${{ steps.db.outputs.url }}
-        run: |
-          # Replace host in connection string with localhost (proxy)
-          LOCAL_URL=$(echo "$DATABASE_URL" | sed -E 's|@[^:]+:|@127.0.0.1:|')
-          echo "::add-mask::$LOCAL_URL"
-
-          echo "Executing: ${{ needs.validate.outputs.migration_file }}"
-          psql "$LOCAL_URL" -f "${{ needs.validate.outputs.migration_file }}" -v ON_ERROR_STOP=1
-          echo "SQL migration completed successfully"
-
-      - name: Validate schema after migration
-        env:
-          DATABASE_URL: ${{ steps.db.outputs.url }}
-        run: |
-          LOCAL_URL=$(echo "$DATABASE_URL" | sed -E 's|@[^:]+:|@127.0.0.1:|')
-          echo "::add-mask::$LOCAL_URL"
-
-          echo "## Schema Validation" >> $GITHUB_STEP_SUMMARY
-
-          # Check schema version
-          VERSION=$(psql "$LOCAL_URL" -t -c "SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1;" 2>/dev/null | xargs || echo "N/A")
-          echo "- **Schema version:** $VERSION" >> $GITHUB_STEP_SUMMARY
-
-          # Check unique_id column width on news table
-          COLS=$(psql "$LOCAL_URL" -t -c "
-            SELECT column_name || ': VARCHAR(' || character_maximum_length || ')'
-            FROM information_schema.columns
-            WHERE table_name = 'news'
-              AND column_name IN ('unique_id', 'legacy_unique_id')
-            ORDER BY column_name;" 2>/dev/null || echo "Could not query columns")
-          echo "- **Column sizes:**" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "$COLS" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-
-  run-data-migration:
-    name: Run Data Migration
-    needs: [validate, run-sql-migration]
-    if: inputs.data_migration
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
-          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
-
-      - uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.PROJECT_ID }}
-
-      - name: Install Cloud SQL Proxy
-        run: |
-          curl -o cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.14.3/cloud-sql-proxy.linux.amd64
+          curl -o cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/${{ env.CLOUD_SQL_PROXY_VERSION }}/cloud-sql-proxy.linux.amd64
           chmod +x cloud-sql-proxy
           sudo mv cloud-sql-proxy /usr/local/bin/
 
@@ -244,80 +173,119 @@ jobs:
             echo "::error::Cloud SQL Proxy failed to start"
             exit 1
           fi
+          echo "Cloud SQL Proxy started successfully"
 
-      - name: Run data migration
+      - name: Execute migration command
         env:
           DATABASE_URL: ${{ steps.db.outputs.url }}
         run: |
           LOCAL_URL=$(echo "$DATABASE_URL" | sed -E 's|@[^:]+:|@127.0.0.1:|')
           echo "::add-mask::$LOCAL_URL"
 
-          MODE="${{ inputs.data_migration_mode }}"
-          BATCH="${{ inputs.batch_size }}"
+          COMMAND="${{ inputs.command }}"
+          DRY_RUN="${{ inputs.dry_run }}"
+          TARGET="${{ inputs.target_version }}"
 
-          echo "Running data migration: mode=$MODE batch_size=$BATCH"
+          ARGS=()
 
-          case "$MODE" in
-            dry-run)
-              poetry run python scripts/migrate_unique_ids.py \
-                --db-url "$LOCAL_URL" \
-                --dry-run \
-                --output migration_dry_run.csv
-              echo "## Dry Run Results" >> $GITHUB_STEP_SUMMARY
-              echo "Records to migrate: $(wc -l < migration_dry_run.csv)" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "### Sample (first 20 rows)" >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
-              head -21 migration_dry_run.csv >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
+          case "$COMMAND" in
+            status|history)
+              ARGS+=("$COMMAND" --db-url "$LOCAL_URL")
+              ;;
+            validate)
+              ARGS+=("validate")
               ;;
             migrate)
-              poetry run python scripts/migrate_unique_ids.py \
-                --db-url "$LOCAL_URL" \
-                --batch-size "$BATCH"
+              ARGS+=("migrate" --db-url "$LOCAL_URL" --yes)
+              if [ "$DRY_RUN" = "true" ]; then
+                ARGS+=(--dry-run)
+              fi
+              if [ -n "$TARGET" ]; then
+                ARGS+=(--target "$TARGET")
+              fi
               ;;
             rollback)
-              poetry run python scripts/migrate_unique_ids.py \
-                --db-url "$LOCAL_URL" \
-                --rollback \
-                --batch-size "$BATCH"
+              ARGS+=("rollback" "$TARGET" --db-url "$LOCAL_URL" --yes)
+              if [ "$DRY_RUN" = "true" ]; then
+                ARGS+=(--dry-run)
+              fi
               ;;
           esac
 
-          echo "Data migration ($MODE) completed successfully"
+          echo "Executing: ${ARGS[*]}"
+          poetry run python scripts/migrate.py "${ARGS[@]}"
 
-      - name: Upload dry-run CSV
-        if: inputs.data_migration_mode == 'dry-run'
-        uses: actions/upload-artifact@v4
+  show-status:
+    name: Show Status
+    needs: [validate-inputs, run-migration]
+    if: always() && needs.run-migration.result != 'skipped'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
         with:
-          name: migration-dry-run
-          path: migration_dry_run.csv
-          retention-days: 7
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
-      - name: Validate data after migration
-        if: inputs.data_migration_mode == 'migrate'
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Install Cloud SQL Proxy
+        run: |
+          curl -o cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/${{ env.CLOUD_SQL_PROXY_VERSION }}/cloud-sql-proxy.linux.amd64
+          chmod +x cloud-sql-proxy
+          sudo mv cloud-sql-proxy /usr/local/bin/
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --only main
+
+      - name: Fetch database credentials
+        id: db
+        run: |
+          DB_URL=$(gcloud secrets versions access latest --secret=govbrnews-postgres-connection-string)
+          echo "::add-mask::$DB_URL"
+          echo "url=$DB_URL" >> $GITHUB_OUTPUT
+
+      - name: Start Cloud SQL Proxy
+        run: |
+          cloud-sql-proxy ${{ env.CLOUD_SQL_INSTANCE }} --port=5432 &
+          sleep 3
+          if ! nc -z 127.0.0.1 5432; then
+            echo "::error::Cloud SQL Proxy failed to start"
+            exit 1
+          fi
+          echo "Cloud SQL Proxy started successfully"
+
+      - name: Show migration status
         env:
           DATABASE_URL: ${{ steps.db.outputs.url }}
         run: |
           LOCAL_URL=$(echo "$DATABASE_URL" | sed -E 's|@[^:]+:|@127.0.0.1:|')
           echo "::add-mask::$LOCAL_URL"
 
-          echo "## Data Migration Results" >> $GITHUB_STEP_SUMMARY
-
-          STATS=$(psql "$LOCAL_URL" -t -c "
-            SELECT
-              COUNT(*) AS total,
-              COUNT(legacy_unique_id) AS with_legacy,
-              COUNT(*) FILTER (WHERE unique_id ~ '_[a-f0-9]{6}$') AS new_format
-            FROM news;")
+          echo "## Migration Status" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "total | with_legacy | new_format" >> $GITHUB_STEP_SUMMARY
-          echo "$STATS" >> $GITHUB_STEP_SUMMARY
+          poetry run python scripts/migrate.py status --db-url "$LOCAL_URL" >> $GITHUB_STEP_SUMMARY 2>&1 || true
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-          # Check for orphaned FKs
-          ORPHANS=$(psql "$LOCAL_URL" -t -c "
-            SELECT COUNT(*) FROM news_features nf
-            LEFT JOIN news n ON nf.unique_id = n.unique_id
-            WHERE n.unique_id IS NULL;")
-          echo "- **Orphaned FK in news_features:** $ORPHANS" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Recent History" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          poetry run python scripts/migrate.py history --db-url "$LOCAL_URL" --limit 10 >> $GITHUB_STEP_SUMMARY 2>&1 || true
+          echo '```' >> $GITHUB_STEP_SUMMARY

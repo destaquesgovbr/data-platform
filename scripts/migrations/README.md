@@ -1,64 +1,48 @@
-# Database Migrations - Phase 4.7
+# Database Migrations
 
-Migrations para adicionar suporte a embeddings semânticos usando pgvector.
+Migrations for the destaquesgovbr data-platform PostgreSQL database.
 
-## Ordem de Execução
+## Usage
 
-Execute as migrations nesta ordem:
+Use the generic migration runner:
 
 ```bash
-# 1. Habilitar pgvector extension
-psql $DATABASE_URL -f 001_add_pgvector_extension.sql
+# Show status of all migrations
+python scripts/migrate.py status
 
-# 2. Adicionar colunas de embedding
-psql $DATABASE_URL -f 002_add_embedding_column.sql
+# Apply pending migrations (dry-run)
+python scripts/migrate.py migrate --dry-run
 
-# 3. Criar índices HNSW
-psql $DATABASE_URL -f 003_create_embedding_index.sql
+# Apply pending migrations
+python scripts/migrate.py migrate --yes
+
+# Rollback a specific migration
+python scripts/migrate.py rollback 006 --yes
+
+# Show history
+python scripts/migrate.py history
+
+# Validate consistency
+python scripts/migrate.py validate
 ```
 
-## Validação
+## Naming Convention
 
-Após executar as migrations, valide:
+| Type | Pattern | Example |
+|------|---------|---------|
+| SQL migration | `NNN_description.sql` | `005_alter_unique_id_varchar.sql` |
+| SQL rollback | `NNN_description_rollback.sql` | `005_alter_unique_id_varchar_rollback.sql` |
+| Python migration | `NNN_description.py` | `006_migrate_unique_ids.py` |
 
-```sql
--- Verificar pgvector habilitado
-SELECT * FROM pg_extension WHERE extname = 'vector';
+## Current Migrations
 
--- Verificar colunas criadas
-SELECT column_name, data_type
-FROM information_schema.columns
-WHERE table_name = 'news'
-  AND column_name LIKE '%embedding%';
+| # | File | Type | Description |
+|---|------|------|-------------|
+| 001 | `001_add_pgvector_extension.sql` | SQL | Enable pgvector |
+| 002 | `002_add_embedding_column.sql` | SQL | Add embedding columns |
+| 003 | `003_create_embedding_index.sql` | SQL | HNSW indexes |
+| 004 | `004_create_news_features.sql` | SQL | Feature store table |
+| 005 | `005_alter_unique_id_varchar.sql` | SQL | Widen unique_id to VARCHAR(120) |
+| 006 | `006_migrate_unique_ids.py` | Python | Migrate unique_ids to readable slugs |
 
--- Verificar índices criados
-SELECT indexname
-FROM pg_indexes
-WHERE tablename = 'news'
-  AND indexname LIKE '%embedding%';
-```
-
-## Rollback
-
-Para reverter as migrations (em ordem inversa):
-
-```sql
--- 3. Remover índices
-DROP INDEX IF EXISTS idx_news_content_embedding_hnsw;
-DROP INDEX IF EXISTS idx_news_embedding_status;
-DROP INDEX IF EXISTS idx_news_embedding_updated;
-DROP INDEX IF EXISTS idx_news_published_at_2025;
-
--- 2. Remover colunas
-ALTER TABLE news DROP COLUMN IF EXISTS content_embedding;
-ALTER TABLE news DROP COLUMN IF EXISTS embedding_generated_at;
-
--- 1. Desabilitar pgvector (CUIDADO: pode afetar outras funcionalidades)
--- DROP EXTENSION IF EXISTS vector CASCADE;
-```
-
-## Estimativa de Storage
-
-- **Embeddings** (~30k records de 2025): ~90 MB
-- **HNSW index**: ~200 MB
-- **Total adicional**: ~300 MB
+See [docs/database/migrations.md](../../docs/database/migrations.md) for full documentation.

@@ -1,347 +1,163 @@
-# Database Setup and Migrations
+# Database Migrations
 
-Quick guide for setting up and managing the PostgreSQL database.
-
----
-
-## Initial Setup
-
-### Prerequisites
-
-```bash
-# Install Cloud SQL Proxy
-brew install cloud-sql-proxy  # macOS
-# or download from: https://cloud.google.com/sql/docs/postgres/connect-instance-auth-proxy
-
-# Install PostgreSQL client
-brew install postgresql@15  # macOS
-```
-
-### 1. Create Database Schema
-
-Run the automated setup script:
-
-```bash
-cd /path/to/data-platform
-./scripts/setup_database.sh
-```
-
-This script will:
-1. Check prerequisites (cloud-sql-proxy, psql)
-2. Fetch credentials from Secret Manager
-3. Start Cloud SQL Proxy
-4. Connect to database
-5. Create schema (tables, indexes, triggers, views)
-6. Validate structure
-
-**Expected output**:
-```
-✅ Cloud SQL Proxy running on port 5432
-✅ Connected to PostgreSQL 15.15
-✅ Creating schema...
-NOTICE: Schema creation completed successfully:
-  Tables: 5
-  Indexes: 22
-  Triggers: 4
-✅ Schema created successfully
-```
-
-### 2. Verify Schema
-
-Connect to the database:
-
-```bash
-# Get password
-PASSWORD=$(gcloud secrets versions access latest --secret="govbrnews-postgres-password")
-
-# Connect via Cloud SQL Proxy
-cloud-sql-proxy inspire-7-finep:southamerica-east1:destaquesgovbr-postgres &
-psql "host=127.0.0.1 dbname=govbrnews user=govbrnews_app password=$PASSWORD"
-```
-
-Check tables:
-
-```sql
--- List all tables
-\dt
-
--- Check table structure
-\d news
-\d agencies
-\d themes
-
--- Count records
-SELECT
-    (SELECT COUNT(*) FROM agencies) as agencies,
-    (SELECT COUNT(*) FROM themes) as themes,
-    (SELECT COUNT(*) FROM news) as news,
-    (SELECT COUNT(*) FROM sync_log) as sync_log;
-```
+Generic migration system for the destaquesgovbr data-platform. Supports SQL and Python migrations with audit history, dry-run, and rollback.
 
 ---
 
-## Populate Master Data
-
-### 1. Agencies
-
-Populate the `agencies` table from the agencies YAML file:
+## Quick Reference
 
 ```bash
-python scripts/populate_agencies.py
+# Show migration status
+python scripts/migrate.py status
+
+# Preview pending migrations (no changes)
+python scripts/migrate.py migrate --dry-run
+
+# Apply pending migrations
+python scripts/migrate.py migrate --yes
+
+# Apply up to a specific version
+python scripts/migrate.py migrate --target 005 --yes
+
+# Rollback a specific migration (preview)
+python scripts/migrate.py rollback 006 --dry-run
+
+# Rollback a specific migration
+python scripts/migrate.py rollback 006 --yes
+
+# Show migration history
+python scripts/migrate.py history
+
+# Validate migration files
+python scripts/migrate.py validate
 ```
 
-**Expected**: ~158 agency records
+All commands require `DATABASE_URL` environment variable or `--db-url` flag.
 
-### 2. Themes
+---
 
-Populate the `themes` table from the themes taxonomy file:
+## How It Works
 
-```bash
-python scripts/populate_themes.py
+### Runner: `scripts/migrate.py`
+
+Single entry point for all migration operations. On first run, it bootstraps the `migration_history` table and imports existing entries from `schema_version`.
+
+### Discovery
+
+The runner discovers migration files in `scripts/migrations/` using naming conventions:
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| SQL migration | `NNN_description.sql` | `005_alter_unique_id_varchar.sql` |
+| SQL rollback | `NNN_description_rollback.sql` | `005_alter_unique_id_varchar_rollback.sql` |
+| Python migration | `NNN_description.py` | `006_migrate_unique_ids.py` |
+
+Rollback files are automatically associated with their migration by version number.
+
+### Execution
+
+1. Discovers pending migrations (not yet in `migration_status` view)
+2. Executes each in version order
+3. Records result in `migration_history` within the same transaction (atomic commit)
+4. On failure: rolls back transaction, records `status=failed` separately, stops immediately
+
+### Python Migration Interface
+
+Each `.py` migration file must expose:
+
+```python
+def describe() -> str:
+    """Human description for logs and audit."""
+
+def migrate(conn, dry_run: bool = False) -> dict:
+    """Execute the migration. Returns metrics dict."""
+
+def rollback(conn, dry_run: bool = False) -> dict:
+    """Revert the migration. Raises NotImplementedError if not possible."""
 ```
 
-**Expected**: ~150-200 theme records (hierarchical: L1 → L2 → L3)
+The runner manages the connection and transaction. The migration must not call `conn.commit()` or `conn.rollback()`.
 
-### 3. Verify
+---
+
+## Migration History
+
+### Table: `migration_history`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| version | VARCHAR(10) | Migration version (e.g. "005") |
+| name | VARCHAR(255) | Migration name |
+| migration_type | VARCHAR(10) | `sql` or `python` |
+| operation | VARCHAR(10) | `migrate`, `rollback`, or `dry_run` |
+| status | VARCHAR(20) | `success`, `failed`, or `unavailable` |
+| applied_by | TEXT | `$GITHUB_ACTOR` or `$USER` |
+| run_id | TEXT | `$GITHUB_RUN_ID` (CI/CD only) |
+| duration_ms | INTEGER | Execution time in milliseconds |
+| execution_details | JSONB | Metrics returned by Python migrations |
+| error_message | TEXT | Error details on failure |
+
+### View: `migration_status`
+
+Shows the current state of each migration (latest successful operation per version).
 
 ```sql
--- Check agencies
-SELECT COUNT(*), COUNT(DISTINCT key) FROM agencies;
-
--- Check themes by level
-SELECT level, COUNT(*) FROM themes GROUP BY level ORDER BY level;
-
--- Sample data
-SELECT * FROM agencies LIMIT 5;
-SELECT code, label, level FROM themes WHERE level = 1 ORDER BY code;
+SELECT * FROM migration_status ORDER BY version;
 ```
 
 ---
 
-## Schema Migrations
+## CI/CD: GitHub Actions Workflow
 
-### Current Schema Version
+The `db-migrate.yaml` workflow runs migrations via GitHub Actions with:
 
-```sql
-SELECT * FROM schema_version;
-```
+- Automatic backup before destructive operations
+- Cloud SQL Proxy for secure database access
+- Confirmation required for non-dry-run operations
+- Post-execution status report
 
-Expected output:
-```
- version |         applied_at         |                description
----------+----------------------------+-------------------------------------------
- 1.0     | 2024-12-24 14:XX:XX+00     | Initial schema for GovBRNews data platform
-```
+### Workflow Inputs
 
-### Future Migrations
-
-When creating schema changes:
-
-1. **Create migration SQL file**:
-   ```bash
-   scripts/migrations/v1.1_add_column.sql
-   ```
-
-2. **Apply migration**:
-   ```bash
-   psql -h 127.0.0.1 -U govbrnews_app -d govbrnews -f scripts/migrations/v1.1_add_column.sql
-   ```
-
-3. **Update schema_version**:
-   ```sql
-   INSERT INTO schema_version (version, description)
-   VALUES ('1.1', 'Add new column to news table');
-   ```
-
-4. **Document in PROGRESS.md**
+| Input | Type | Description |
+|-------|------|-------------|
+| command | choice | `status`, `migrate`, `rollback`, `history`, `validate` |
+| dry_run | boolean | Preview without applying (default: true) |
+| target_version | string | Version for `--target` or rollback |
+| confirm | boolean | Required for destructive operations with dry_run=false |
 
 ---
 
-## Common Operations
+## Creating a New Migration
 
-### Backup Database
+### SQL Migration
 
-```bash
-# Export to Cloud Storage
-gcloud sql export sql destaquesgovbr-postgres \
-  gs://destaquesgovbr-backups/manual-backup-$(date +%Y%m%d).sql \
-  --database=govbrnews
-```
+1. Create `scripts/migrations/NNN_description.sql`
+2. Optionally create `scripts/migrations/NNN_description_rollback.sql`
+3. Test locally with `--dry-run`
+4. Run via workflow or CLI
 
-### Import Data
+### Python Migration
 
-```bash
-# Import from Cloud Storage
-gcloud sql import sql destaquesgovbr-postgres \
-  gs://destaquesgovbr-backups/backup.sql \
-  --database=govbrnews
-```
-
-### Truncate Tables (Development Only)
-
-```sql
--- ⚠️ DANGER: Delete all data (use only in development)
-TRUNCATE TABLE news RESTART IDENTITY CASCADE;
-TRUNCATE TABLE sync_log RESTART IDENTITY CASCADE;
-
--- Keep master data, only clear news
-TRUNCATE TABLE news RESTART IDENTITY;
-```
-
-### Reset Database (Development Only)
-
-```bash
-# Drop and recreate schema
-psql -h 127.0.0.1 -U govbrnews_app -d govbrnews <<EOF
-DROP SCHEMA public CASCADE;
-CREATE SCHEMA public;
-GRANT ALL ON SCHEMA public TO govbrnews_app;
-GRANT ALL ON SCHEMA public TO public;
-EOF
-
-# Recreate schema
-./scripts/setup_database.sh
-```
+1. Create `scripts/migrations/NNN_description.py`
+2. Implement `describe()`, `migrate()`, `rollback()`
+3. Add unit tests in `tests/unit/`
+4. Test locally with `--dry-run`
 
 ---
 
-## Troubleshooting
+## Current Migrations
 
-### Connection Issues
-
-**Problem**: Can't connect to database
-
-```bash
-# 1. Verify Cloud SQL status
-gcloud sql instances describe destaquesgovbr-postgres
-
-# 2. Check Cloud SQL Proxy is running
-ps aux | grep cloud-sql-proxy
-
-# 3. Kill stale proxy processes
-lsof -ti:5432 | xargs kill -9
-
-# 4. Restart proxy
-cloud-sql-proxy inspire-7-finep:southamerica-east1:destaquesgovbr-postgres
-```
-
-### Permission Errors
-
-**Problem**: Permission denied
-
-```bash
-# Check service account permissions
-gcloud projects get-iam-policy inspire-7-finep \
-  --flatten="bindings[].members" \
-  --filter="bindings.members:serviceAccount:YOUR_EMAIL"
-
-# You should see:
-# - roles/cloudsql.client
-# - roles/secretmanager.secretAccessor
-```
-
-### Schema Creation Failed
-
-**Problem**: Error during schema creation
-
-```sql
--- Check what was created
-SELECT tablename FROM pg_tables WHERE schemaname = 'public';
-SELECT indexname FROM pg_indexes WHERE schemaname = 'public';
-SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema = 'public';
-
--- Drop incomplete schema and retry
-DROP SCHEMA public CASCADE;
-CREATE SCHEMA public;
-```
-
-Then run `./scripts/setup_database.sh` again.
-
----
-
-## CI/CD Integration
-
-### GitHub Actions
-
-The database can be accessed from GitHub Actions workflows:
-
-```yaml
-- name: Run database migrations
-  run: |
-    # Cloud SQL Proxy is auto-configured via Workload Identity
-    cloud-sql-proxy inspire-7-finep:southamerica-east1:destaquesgovbr-postgres &
-
-    # Get password from Secret Manager
-    PASSWORD=$(gcloud secrets versions access latest --secret="govbrnews-postgres-password")
-
-    # Run migration
-    psql "host=127.0.0.1 dbname=govbrnews user=govbrnews_app password=$PASSWORD" \
-      -f scripts/migrations/migration.sql
-```
-
----
-
-## Performance Monitoring
-
-### Query Performance
-
-```sql
--- Enable query stats extension (run once)
-CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
-
--- View slow queries
-SELECT
-    query,
-    calls,
-    total_exec_time,
-    mean_exec_time,
-    max_exec_time
-FROM pg_stat_statements
-WHERE mean_exec_time > 1000  -- > 1 second
-ORDER BY mean_exec_time DESC
-LIMIT 10;
-```
-
-### Index Usage
-
-```sql
--- Check index usage
-SELECT
-    schemaname,
-    tablename,
-    indexname,
-    idx_scan as index_scans,
-    idx_tup_read as tuples_read,
-    idx_tup_fetch as tuples_fetched
-FROM pg_stat_user_indexes
-WHERE schemaname = 'public'
-ORDER BY idx_scan DESC;
-
--- Find unused indexes
-SELECT
-    schemaname,
-    tablename,
-    indexname
-FROM pg_stat_user_indexes
-WHERE idx_scan = 0
-  AND indexname NOT LIKE '%_pkey'
-ORDER BY tablename, indexname;
-```
-
-### Table Sizes
-
-```sql
-SELECT
-    tablename,
-    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
-FROM pg_tables
-WHERE schemaname = 'public'
-ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
-```
+| Version | File | Type | Description |
+|---------|------|------|-------------|
+| 001 | `001_add_pgvector_extension.sql` | SQL | Enable pgvector for vector search |
+| 002 | `002_add_embedding_column.sql` | SQL | Add 768-dim embedding columns |
+| 003 | `003_create_embedding_index.sql` | SQL | HNSW indexes for fast similarity |
+| 004 | `004_create_news_features.sql` | SQL | JSONB feature store table |
+| 005 | `005_alter_unique_id_varchar.sql` | SQL | Widen unique_id to VARCHAR(120) |
+| 006 | `006_migrate_unique_ids.py` | Python | Migrate ~300k unique_ids to readable slugs |
 
 ---
 
 See also:
 - [Database Schema](./schema.md)
-- [Cloud SQL Documentation](../../infra/docs/cloud-sql.md)
-- [Migration Plan](_plan/README.md)
+- [Migration Rollback Runbook](../runbooks/migration-rollback.md)
