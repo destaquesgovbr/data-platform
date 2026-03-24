@@ -10,10 +10,22 @@ logger = logging.getLogger(__name__)
 
 UPSERT_SQL = text("""
     INSERT INTO news_features (unique_id, features)
-    VALUES (:uid, :features)
+    VALUES (:uid, jsonb_build_object('integrity', :integrity_fields::jsonb))
     ON CONFLICT (unique_id) DO UPDATE
-    SET features = news_features.features || :features,
+    SET features = jsonb_set(
+        COALESCE(news_features.features, '{}'),
+        '{integrity}',
+        COALESCE(news_features.features -> 'integrity', '{}') || :integrity_fields::jsonb
+    ),
         updated_at = NOW()
+""")
+
+LOAD_STATE_SQL = text("""
+    SELECT unique_id,
+           COALESCE((features -> 'integrity' ->> 'check_count')::int, 0) AS check_count,
+           features -> 'integrity' ->> 'image_status' AS image_status
+    FROM news_features
+    WHERE unique_id = ANY(:uids)
 """)
 
 
@@ -37,10 +49,17 @@ def upsert_integrity_results(db_url: str, results: list[dict]) -> dict:
 
     try:
         with engine.begin() as conn:
+            # Pré-carregar estado atual em batch (resolve N+1)
+            unique_ids = [r["unique_id"] for r in results if r.get("unique_id")]
+            existing_state = _load_existing_state(conn, unique_ids)
+
             for r in results:
                 uid = r.get("unique_id")
                 if not uid:
                     continue
+
+                state = existing_state.get(uid, {})
+                previous_image_status = state.get("image_status")
 
                 # Montar objeto integrity para merge
                 integrity = {}
@@ -52,20 +71,19 @@ def upsert_integrity_results(db_url: str, results: list[dict]) -> dict:
                     if key in r:
                         integrity[key] = r[key]
 
-                # Incrementar check_count
-                integrity["check_count"] = _get_current_check_count(conn, uid) + 1
+                integrity["check_count"] = state.get("check_count", 0) + 1
 
-                features = json.dumps({"integrity": integrity})
-                conn.execute(UPSERT_SQL, {"uid": uid, "features": features})
+                conn.execute(UPSERT_SQL, {
+                    "uid": uid,
+                    "integrity_fields": json.dumps(integrity),
+                })
                 count += 1
 
                 # Rastrear mudanças de status de imagem
                 if r.get("image_status") == "broken":
                     broken_ids.append(uid)
-                elif r.get("image_status") == "ok":
-                    # Verificar se era broken antes (agora foi corrigido)
-                    if _was_previously_broken(conn, uid):
-                        fixed_ids.append(uid)
+                elif r.get("image_status") == "ok" and previous_image_status == "broken":
+                    fixed_ids.append(uid)
 
         logger.info(
             f"Upsert de integridade: {count} artigos, "
@@ -77,30 +95,15 @@ def upsert_integrity_results(db_url: str, results: list[dict]) -> dict:
     return {"broken_ids": broken_ids, "fixed_ids": fixed_ids, "count": count}
 
 
-def _get_current_check_count(conn, unique_id: str) -> int:
-    """Busca check_count atual do artigo."""
-    result = conn.execute(
-        text("""
-            SELECT COALESCE(
-                (features -> 'integrity' ->> 'check_count')::int,
-                0
-            ) FROM news_features WHERE unique_id = :uid
-        """),
-        {"uid": unique_id},
-    ).scalar()
-    return result or 0
-
-
-def _was_previously_broken(conn, unique_id: str) -> bool:
-    """Verifica se o artigo tinha image_status = 'broken' antes."""
-    result = conn.execute(
-        text("""
-            SELECT features -> 'integrity' ->> 'image_status'
-            FROM news_features WHERE unique_id = :uid
-        """),
-        {"uid": unique_id},
-    ).scalar()
-    return result == "broken"
+def _load_existing_state(conn, unique_ids: list[str]) -> dict:
+    """Carrega check_count e image_status atuais em batch."""
+    if not unique_ids:
+        return {}
+    rows = conn.execute(LOAD_STATE_SQL, {"uids": unique_ids}).fetchall()
+    return {
+        r.unique_id: {"check_count": r.check_count, "image_status": r.image_status}
+        for r in rows
+    }
 
 
 def sync_image_status_to_typesense(
