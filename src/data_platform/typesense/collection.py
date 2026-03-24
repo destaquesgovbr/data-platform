@@ -103,6 +103,7 @@ COLLECTION_SCHEMA: dict[str, Any] = {
         {"name": "word_count", "type": "int32", "facet": False, "optional": True},
         {"name": "has_image", "type": "bool", "facet": True, "optional": True},
         {"name": "has_video", "type": "bool", "facet": True, "optional": True},
+        {"name": "image_broken", "type": "bool", "facet": True, "optional": True},
         {"name": "readability_flesch", "type": "float", "facet": False, "optional": True},
         # Embedding field for semantic search (768 dimensions - BGE-M3)
         {
