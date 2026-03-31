@@ -138,6 +138,37 @@ class TestHandleThumbnailGeneration:
         assert result["status"] == "skipped"
         assert "previously failed" in result.get("reason", "")
 
+    def test_updates_features_before_image_url(self) -> None:
+        """Features must be updated before image_url for retry consistency.
+
+        If the order were reversed and update() succeeded but upsert_features()
+        failed, the article would be skipped on retry (has image_url) leaving
+        has_image=false permanently in the feature store.
+        """
+        mock_pg = Mock()
+        mock_pg.get_by_unique_id.return_value = _make_article()
+        mock_pg.get_features.return_value = None
+        mock_extractor = Mock(return_value=_make_extraction_result())
+        mock_uploader = Mock(return_value=FAKE_URL)
+        mock_exists = Mock(return_value=False)
+
+        call_order = []
+        mock_pg.upsert_features.side_effect = lambda *a, **kw: call_order.append("features")
+        mock_pg.update.side_effect = lambda *a, **kw: call_order.append("image_url")
+
+        handle_thumbnail_generation(
+            "uid_123",
+            mock_pg,
+            "bucket",
+            extractor_fn=mock_extractor,
+            uploader_fn=mock_uploader,
+            exists_fn=mock_exists,
+        )
+
+        assert call_order == ["features", "image_url"], (
+            "Features must be updated before image_url for retry consistency"
+        )
+
     def test_db_update_failure_propagates(self) -> None:
         """If DB update fails after upload, exception propagates (not swallowed)."""
         mock_pg = Mock()
