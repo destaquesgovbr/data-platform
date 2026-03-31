@@ -58,3 +58,29 @@ class TestProcessEndpoint:
         client = TestClient(app)
         resp = client.post("/process", json={"message": {"data": data}})
         assert resp.status_code == 400
+
+    @patch("data_platform.workers.thumbnail_worker.app.handle_thumbnail_generation")
+    @patch("data_platform.workers.thumbnail_worker.app._get_pg")
+    def test_returns_json_content_type(self, mock_get_pg, mock_handler) -> None:
+        mock_handler.return_value = {"status": "generated"}
+        mock_get_pg.return_value = Mock()
+
+        client = TestClient(app)
+        resp = client.post("/process", json=_make_pubsub_envelope("uid_123"))
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("application/json")
+        assert resp.json() == {"status": "generated"}
+
+    @patch("data_platform.workers.thumbnail_worker.app.handle_thumbnail_generation")
+    @patch("data_platform.workers.thumbnail_worker.app._get_pg")
+    def test_returns_500_on_infrastructure_error(self, mock_get_pg, mock_handler) -> None:
+        mock_handler.side_effect = RuntimeError("DB connection lost")
+        mock_get_pg.return_value = Mock()
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/process", json=_make_pubsub_envelope("uid_123"))
+
+        assert resp.status_code == 500
+        assert "internal error" in resp.text.lower()
+        assert "DB connection" not in resp.text  # No leak

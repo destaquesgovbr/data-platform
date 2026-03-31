@@ -27,6 +27,21 @@ class ThumbnailExtractionResult:
     format: str
 
 
+ALLOWED_SCHEMES = ("http://", "https://")
+
+
+def _validate_video_url(video_url: str) -> None:
+    """Validate that video URL uses a safe scheme.
+
+    Prevents SSRF via ffmpeg protocols (file://, concat:, data:, etc).
+
+    Raises:
+        ThumbnailExtractionError: If URL scheme is not HTTP(S).
+    """
+    if not video_url.startswith(ALLOWED_SCHEMES):
+        raise ThumbnailExtractionError(f"Invalid URL scheme: {video_url[:50]}")
+
+
 def build_ffmpeg_command(video_url: str, width: int, height: int) -> list[str]:
     """Build ffmpeg command to extract first frame as JPEG.
 
@@ -40,6 +55,7 @@ def build_ffmpeg_command(video_url: str, width: int, height: int) -> list[str]:
     """
     return [
         "ffmpeg",
+        "-nostdin",
         "-i",
         video_url,
         "-vframes",
@@ -78,6 +94,7 @@ def extract_first_frame(
     Raises:
         ThumbnailExtractionError: If ffmpeg fails or times out.
     """
+    _validate_video_url(video_url)
     cmd = build_ffmpeg_command(video_url, width, height)
     logger.info(f"Extracting thumbnail from {video_url} ({width}x{height})")
 

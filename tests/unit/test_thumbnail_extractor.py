@@ -8,12 +8,39 @@ import pytest
 from data_platform.workers.thumbnail_worker.extractor import (
     ThumbnailExtractionError,
     ThumbnailExtractionResult,
+    _validate_video_url,
     build_ffmpeg_command,
     extract_first_frame,
 )
 
 # Minimal valid JPEG: SOI marker (0xFFD8) + APP0 + EOI marker (0xFFD9)
 FAKE_JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 100 + b"\xff\xd9"
+
+
+class TestValidateVideoUrl:
+    """Tests for _validate_video_url (SSRF prevention)."""
+
+    def test_accepts_http_url(self) -> None:
+        _validate_video_url("http://example.com/video.mp4")
+
+    def test_accepts_https_url(self) -> None:
+        _validate_video_url("https://example.com/video.mp4")
+
+    def test_rejects_file_scheme(self) -> None:
+        with pytest.raises(ThumbnailExtractionError, match="Invalid URL scheme"):
+            _validate_video_url("file:///etc/passwd")
+
+    def test_rejects_data_scheme(self) -> None:
+        with pytest.raises(ThumbnailExtractionError, match="Invalid URL scheme"):
+            _validate_video_url("data:text/plain;base64,aGVsbG8=")
+
+    def test_rejects_concat_protocol(self) -> None:
+        with pytest.raises(ThumbnailExtractionError, match="Invalid URL scheme"):
+            _validate_video_url("concat:file1|file2")
+
+    def test_rejects_empty_url(self) -> None:
+        with pytest.raises(ThumbnailExtractionError, match="Invalid URL scheme"):
+            _validate_video_url("")
 
 
 class TestBuildFfmpegCommand:
@@ -38,6 +65,10 @@ class TestBuildFfmpegCommand:
         cmd = build_ffmpeg_command("http://example.com/video.mp4", 640, 360)
         assert "pipe:1" in cmd
         assert "mjpeg" in cmd
+
+    def test_includes_nostdin_flag(self) -> None:
+        cmd = build_ffmpeg_command("http://example.com/video.mp4", 640, 360)
+        assert "-nostdin" in cmd
 
     def test_custom_dimensions(self) -> None:
         cmd = build_ffmpeg_command("http://example.com/video.mp4", 320, 180)
@@ -93,6 +124,10 @@ class TestExtractFirstFrame:
 
         with pytest.raises(ThumbnailExtractionError, match="empty"):
             extract_first_frame("http://example.com/video.mp4")
+
+    def test_rejects_non_http_url(self) -> None:
+        with pytest.raises(ThumbnailExtractionError, match="Invalid URL scheme"):
+            extract_first_frame("file:///etc/passwd")
 
     @patch("data_platform.workers.thumbnail_worker.extractor.subprocess.run")
     def test_passes_timeout_to_subprocess(self, mock_run) -> None:

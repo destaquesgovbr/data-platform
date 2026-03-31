@@ -104,11 +104,13 @@ def handle_thumbnail_generation(
         # 6. Upload to GCS
         public_url = uploader_fn(bucket_name, unique_id, result.image_bytes)
 
-    # 7. Update image_url in news table
-    pg.update(unique_id, {"image_url": public_url})
-
-    # 8. Update features
-    pg.upsert_features(unique_id, {"has_image": True, "thumbnail_generated": True})
+    # 7-8. Update image_url and features atomically
+    try:
+        pg.update(unique_id, {"image_url": public_url})
+        pg.upsert_features(unique_id, {"has_image": True, "thumbnail_generated": True})
+    except Exception:
+        logger.error(f"Failed to update DB for {unique_id} after upload", exc_info=True)
+        raise
 
     logger.info(f"Thumbnail {'recovered' if already_in_gcs else 'generated'} for {unique_id}")
     return {"status": "generated", "unique_id": unique_id, "url": public_url}

@@ -2,6 +2,7 @@
 
 from unittest.mock import Mock
 
+import pytest
 from data_platform.workers.thumbnail_worker.extractor import (
     ThumbnailExtractionError,
     ThumbnailExtractionResult,
@@ -136,3 +137,23 @@ class TestHandleThumbnailGeneration:
 
         assert result["status"] == "skipped"
         assert "previously failed" in result.get("reason", "")
+
+    def test_db_update_failure_propagates(self) -> None:
+        """If DB update fails after upload, exception propagates (not swallowed)."""
+        mock_pg = Mock()
+        mock_pg.get_by_unique_id.return_value = _make_article()
+        mock_pg.get_features.return_value = None
+        mock_pg.update.side_effect = RuntimeError("DB connection lost")
+        mock_extractor = Mock(return_value=_make_extraction_result())
+        mock_uploader = Mock(return_value=FAKE_URL)
+        mock_exists = Mock(return_value=False)
+
+        with pytest.raises(RuntimeError, match="DB connection lost"):
+            handle_thumbnail_generation(
+                "uid_123",
+                mock_pg,
+                "bucket",
+                extractor_fn=mock_extractor,
+                uploader_fn=mock_uploader,
+                exists_fn=mock_exists,
+            )
