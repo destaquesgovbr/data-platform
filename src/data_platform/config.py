@@ -73,6 +73,15 @@ class Settings(BaseSettings):
     gcs_bucket: str = ""
 
     # ==========================================================================
+    # Thumbnail Configuration
+    # ==========================================================================
+    thumbnail_width: int = 640
+    thumbnail_height: int = 360
+    thumbnail_format: str = "jpeg"
+    thumbnail_ffmpeg_timeout: int = 30
+    thumbnail_gcs_prefix: str = "thumbnails"
+
+    # ==========================================================================
     # Application Configuration
     # ==========================================================================
     log_level: str = "INFO"

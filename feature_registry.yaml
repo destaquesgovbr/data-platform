@@ -75,6 +75,21 @@ features:
     model: "bedrock/claude-haiku"
     compute: "enrichment-worker"
 
+  # --- Thumbnail (geração automática de thumbnail para vídeos) ---
+  thumbnail_generated:
+    version: "1.0"
+    type: boolean
+    description: "Thumbnail gerado automaticamente a partir do vídeo"
+    model: "local/ffmpeg"
+    compute: "thumbnail-worker"
+
+  thumbnail_failed:
+    version: "1.0"
+    type: boolean
+    description: "Falha ao gerar thumbnail (vídeo inacessível)"
+    model: "local/ffmpeg"
+    compute: "thumbnail-worker"
+
   # --- Fase 3: Features analíticas ---
   trending_score:
     version: "1.0"
