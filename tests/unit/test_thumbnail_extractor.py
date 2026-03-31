@@ -42,6 +42,12 @@ class TestValidateVideoUrl:
         with pytest.raises(ThumbnailExtractionError, match="Invalid URL scheme"):
             _validate_video_url("")
 
+    def test_accepts_uppercase_http(self) -> None:
+        _validate_video_url("HTTP://example.com/video.mp4")
+
+    def test_accepts_mixed_case_https(self) -> None:
+        _validate_video_url("Https://example.com/video.mp4")
+
 
 class TestBuildFfmpegCommand:
     """Tests for build_ffmpeg_command (pure function)."""

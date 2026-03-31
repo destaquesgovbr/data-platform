@@ -70,4 +70,4 @@ async def process(request: Request):
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"Unhandled error for {unique_id}: {e}", exc_info=True)
-        return PlainTextResponse(status_code=500, content="ACK (internal error)")
+        return JSONResponse(status_code=200, content={"status": "error", "unique_id": unique_id})

@@ -38,7 +38,7 @@ def _validate_video_url(video_url: str) -> None:
     Raises:
         ThumbnailExtractionError: If URL scheme is not HTTP(S).
     """
-    if not video_url.startswith(ALLOWED_SCHEMES):
+    if not video_url.lower().startswith(ALLOWED_SCHEMES):
         raise ThumbnailExtractionError(f"Invalid URL scheme: {video_url[:50]}")
 
 
