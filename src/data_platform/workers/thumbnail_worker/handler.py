@@ -104,10 +104,15 @@ def handle_thumbnail_generation(
         # 6. Upload to GCS
         public_url = uploader_fn(bucket_name, unique_id, result.image_bytes)
 
-    # 7-8. Update image_url and features atomically
+    # 7-8. Update features first, then image_url.
+    # Order matters: if upsert_features succeeds but update fails,
+    # the article remains eligible (no image_url) and will be retried.
+    # Features use JSONB merge (||) so the retry is idempotent.
+    # If update succeeds but upsert_features were to fail, the article
+    # would be skipped on retry (has image_url) leaving has_image=false.
     try:
-        pg.update(unique_id, {"image_url": public_url})
         pg.upsert_features(unique_id, {"has_image": True, "thumbnail_generated": True})
+        pg.update(unique_id, {"image_url": public_url})
     except Exception:
         logger.error(f"Failed to update DB for {unique_id} after upload", exc_info=True)
         raise
