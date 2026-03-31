@@ -6,6 +6,8 @@ Busca artigos com video_url mas sem image_url e gera thumbnails
 via Cloud Run thumbnail-worker.
 """
 
+import base64
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -85,9 +87,9 @@ def generate_video_thumbnails_dag():
                     f"{worker_url}/process",
                     json={
                         "message": {
-                            "data": __import__("base64")
-                            .b64encode(__import__("json").dumps({"unique_id": unique_id}).encode())
-                            .decode(),
+                            "data": base64.b64encode(
+                                json.dumps({"unique_id": unique_id}).encode()
+                            ).decode(),
                             "attributes": {},
                         }
                     },
