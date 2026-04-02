@@ -3,11 +3,13 @@
 Used by the Airflow DAG to backfill thumbnails for existing articles.
 """
 
+import logging
 from typing import Any
 
 import pandas as pd
-from loguru import logger
 from sqlalchemy.engine import Engine
+
+logger = logging.getLogger(__name__)
 
 QUERY = """
     SELECT n.unique_id, n.video_url
