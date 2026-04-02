@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 import pandas as pd
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ def fetch_articles_needing_thumbnails(
     Returns:
         List of dicts: [{unique_id, video_url}, ...]
     """
-    df = pd.read_sql_query(QUERY, engine, params={"batch_size": batch_size})
+    df = pd.read_sql_query(text(QUERY), engine, params={"batch_size": batch_size})
 
     if df.empty:
         logger.info("No articles needing thumbnails")
