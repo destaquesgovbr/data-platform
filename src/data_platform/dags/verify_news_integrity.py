@@ -113,7 +113,7 @@ def verify_news_integrity_dag():
     def sync_typesense(changes: dict):
         """Atualiza campo image_broken no Typesense para artigos afetados."""
         from data_platform.jobs.integrity.results import sync_image_status_to_typesense
-        from data_platform.typesense.client import get_typesense_client
+        from data_platform.typesense.client import get_client
         from data_platform.typesense.collection import COLLECTION_NAME
 
         broken_ids = changes.get("broken_ids", [])
@@ -123,7 +123,7 @@ def verify_news_integrity_dag():
             logger.info("Nenhuma mudança de status de imagem para sincronizar")
             return 0
 
-        client = get_typesense_client()
+        client = get_client()
         return sync_image_status_to_typesense(client, COLLECTION_NAME, broken_ids, fixed_ids)
 
     batch = fetch_batch()

@@ -43,7 +43,7 @@ def get_client(
     Args:
         host: Host do servidor Typesense (default: TYPESENSE_HOST env var ou 'localhost')
         port: Porta do servidor (default: TYPESENSE_PORT env var ou '8108')
-        api_key: Chave de API (default: TYPESENSE_API_KEY env var)
+        api_key: Chave de API (default: Airflow Variable ou TYPESENSE_API_KEY env var)
         protocol: Protocolo de conexão (default: 'http')
         timeout: Timeout de conexão em segundos (default: 10)
 
@@ -55,6 +55,16 @@ def get_client(
     """
     # Try TYPESENSE_WRITE_CONN JSON first, then individual env vars
     conn_host, conn_port, conn_key, conn_protocol = _parse_write_conn()
+
+    # Try Airflow Variable for API key (after WRITE_CONN, before env vars)
+    if not conn_key:
+        try:
+            from airflow.models import Variable
+            conn_key = Variable.get("typesense_api_key", default_var=None)
+        except Exception:
+            # Airflow Variable not available (running outside Airflow or variable not set)
+            pass
+
     host = host or conn_host or os.getenv("TYPESENSE_HOST", "localhost")
     port = port or conn_port or os.getenv("TYPESENSE_PORT", "8108")
     api_key = api_key or conn_key or os.getenv(
