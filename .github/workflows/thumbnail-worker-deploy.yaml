@@ -1,0 +1,25 @@
+name: Deploy Thumbnail Worker
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/data_platform/workers/thumbnail_worker/**'
+      - 'docker/thumbnail-worker/**'
+      - 'pyproject.toml'
+      - 'poetry.lock'
+      - '.github/workflows/thumbnail-worker-deploy.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    uses: destaquesgovbr/reusable-workflows/.github/workflows/cloud-run-deploy.yml@v2
+    with:
+      dockerfile: docker/thumbnail-worker/Dockerfile
+      ar_repository: destaquesgovbr-thumbnail-worker
+      image_name: thumbnail-worker
+      cloud_run_service: destaquesgovbr-thumbnail-worker

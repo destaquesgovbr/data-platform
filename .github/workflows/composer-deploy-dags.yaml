@@ -59,8 +59,9 @@ jobs:
           mkdir -p /tmp/plugins/data_platform/typesense
           cp src/data_platform/jobs/__init__.py /tmp/plugins/data_platform/jobs/
           cp -r src/data_platform/jobs/bigquery /tmp/plugins/data_platform/jobs/
-          cp -r src/data_platform/jobs/similarity /tmp/plugins/data_platform/jobs/
           cp -r src/data_platform/jobs/integrity /tmp/plugins/data_platform/jobs/
+          cp -r src/data_platform/jobs/similarity /tmp/plugins/data_platform/jobs/
+          cp -r src/data_platform/jobs/thumbnail /tmp/plugins/data_platform/jobs/
           # Deploy only typesense modules needed by DAGs (skip indexer.py — depends on pandas)
           cp src/data_platform/typesense/client.py /tmp/plugins/data_platform/typesense/
           cp src/data_platform/typesense/collection.py /tmp/plugins/data_platform/typesense/

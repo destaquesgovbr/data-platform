@@ -3,11 +3,14 @@
 Used by the Airflow DAG to backfill thumbnails for existing articles.
 """
 
+import logging
 from typing import Any
 
 import pandas as pd
-from loguru import logger
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
+
+logger = logging.getLogger(__name__)
 
 QUERY = """
     SELECT n.unique_id, n.video_url
@@ -40,7 +43,7 @@ def fetch_articles_needing_thumbnails(
     Returns:
         List of dicts: [{unique_id, video_url}, ...]
     """
-    df = pd.read_sql_query(QUERY, engine, params={"batch_size": batch_size})
+    df = pd.read_sql_query(text(QUERY), engine, params={"batch_size": batch_size})
 
     if df.empty:
         logger.info("No articles needing thumbnails")
