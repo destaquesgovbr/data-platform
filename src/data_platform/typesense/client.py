@@ -60,10 +60,13 @@ def get_client(
     if not conn_key:
         try:
             from airflow.models import Variable
-            conn_key = Variable.get("typesense_api_key", default_var=None)
-        except Exception:
-            # Airflow Variable not available (running outside Airflow or variable not set)
+        except ImportError:
+            # Running outside Airflow (CLI, tests) - skip Variable lookup
             pass
+        else:
+            # Get API key from Airflow Variable (backed by Secret Manager)
+            # If Secret Manager has issues, let the exception propagate for visibility
+            conn_key = Variable.get("typesense_api_key", default_var=None)
 
     host = host or conn_host or os.getenv("TYPESENSE_HOST", "localhost")
     port = port or conn_port or os.getenv("TYPESENSE_PORT", "8108")
