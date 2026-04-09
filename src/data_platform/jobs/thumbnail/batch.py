@@ -23,7 +23,7 @@ QUERY = """
           nf.unique_id IS NULL
           OR (nf.features->>'thumbnail_failed')::boolean IS NOT TRUE
       )
-    ORDER BY n.published_at DESC
+    ORDER BY n.published_at DESC, n.unique_id ASC
     LIMIT :batch_size
 """
 

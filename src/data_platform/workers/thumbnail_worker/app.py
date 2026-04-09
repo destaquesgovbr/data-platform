@@ -8,6 +8,8 @@ without images, and stores them in GCS.
 import base64
 import json
 import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -19,16 +21,16 @@ from data_platform.workers.thumbnail_worker.handler import handle_thumbnail_gene
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Thumbnail Worker", version="1.0.0")
 
-_pg: PostgresManager | None = None
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Initialize PostgresManager on startup, close on shutdown."""
+    app.state.pg = PostgresManager()
+    yield
+    app.state.pg.close_all()
 
 
-def _get_pg() -> PostgresManager:
-    global _pg
-    if _pg is None:
-        _pg = PostgresManager()
-    return _pg
+app = FastAPI(title="Thumbnail Worker", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -65,7 +67,8 @@ async def process(request: Request):
     bucket_name = settings.gcs_bucket
 
     try:
-        result = handle_thumbnail_generation(unique_id, _get_pg(), bucket_name)
+        pg = request.app.state.pg
+        result = handle_thumbnail_generation(unique_id, pg, bucket_name)
         logger.info(f"Result for {unique_id}: {result['status']}")
         return JSONResponse(content=result)
     except Exception as e:

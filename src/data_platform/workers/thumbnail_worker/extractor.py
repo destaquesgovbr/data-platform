@@ -5,6 +5,7 @@ Pure wrapper around ffmpeg subprocess — no database or storage I/O.
 
 import subprocess
 from dataclasses import dataclass
+from urllib.parse import urlparse, urlunparse
 
 from loguru import logger
 
@@ -28,6 +29,20 @@ class ThumbnailExtractionResult:
 
 
 ALLOWED_SCHEMES = ("http://", "https://")
+JPEG_SOI = b"\xff\xd8"
+
+
+def _sanitize_url(url: str) -> str:
+    """Strip query params and fragment from URL for safe logging.
+
+    Args:
+        url: Full URL possibly containing auth query params.
+
+    Returns:
+        URL with only scheme, netloc, and path preserved.
+    """
+    parsed = urlparse(url)
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
 
 
 def _validate_video_url(video_url: str) -> None:
@@ -39,7 +54,7 @@ def _validate_video_url(video_url: str) -> None:
         ThumbnailExtractionError: If URL scheme is not HTTP(S).
     """
     if not video_url.lower().startswith(ALLOWED_SCHEMES):
-        raise ThumbnailExtractionError(f"Invalid URL scheme: {video_url[:50]}")
+        raise ThumbnailExtractionError(f"Invalid URL scheme: {_sanitize_url(video_url)[:50]}")
 
 
 def build_ffmpeg_command(video_url: str, width: int, height: int) -> list[str]:
@@ -96,25 +111,29 @@ def extract_first_frame(
     """
     _validate_video_url(video_url)
     cmd = build_ffmpeg_command(video_url, width, height)
-    logger.info(f"Extracting thumbnail from {video_url} ({width}x{height})")
+    safe_url = _sanitize_url(video_url)
+    logger.info(f"Extracting thumbnail from {safe_url} ({width}x{height})")
 
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=timeout_seconds)
     except subprocess.TimeoutExpired as e:
         raise ThumbnailExtractionError(
-            f"ffmpeg timeout after {timeout_seconds}s for {video_url}"
+            f"ffmpeg timeout after {timeout_seconds}s for {safe_url}"
         ) from e
 
     if result.returncode != 0:
         stderr = result.stderr.decode(errors="replace")
         raise ThumbnailExtractionError(
-            f"ffmpeg exit code {result.returncode} for {video_url}: {stderr[:200]}"
+            f"ffmpeg exit code {result.returncode} for {safe_url}: {stderr[:200]}"
         )
 
     if not result.stdout:
-        raise ThumbnailExtractionError(f"ffmpeg produced empty output for {video_url}")
+        raise ThumbnailExtractionError(f"ffmpeg produced empty output for {safe_url}")
 
-    logger.info(f"Extracted {len(result.stdout)} bytes from {video_url}")
+    if result.stdout[:2] != JPEG_SOI:
+        raise ThumbnailExtractionError(f"ffmpeg output is not valid JPEG for {safe_url}")
+
+    logger.info(f"Extracted {len(result.stdout)} bytes from {safe_url}")
 
     return ThumbnailExtractionResult(
         image_bytes=result.stdout,
