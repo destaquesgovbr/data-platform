@@ -7,6 +7,7 @@ via Cloud Run thumbnail-worker.
 """
 
 import base64
+import concurrent.futures
 import json
 import logging
 from datetime import datetime, timedelta
@@ -20,6 +21,42 @@ from airflow.models import Variable
 logger = logging.getLogger(__name__)
 
 WORKER_REQUEST_TIMEOUT = 60
+
+
+def _process_one(article: dict, worker_url: str) -> tuple[str, str]:
+    """Envia um artigo para o thumbnail worker. Retorna (unique_id, status).
+
+    Args:
+        article: Dict with unique_id key.
+        worker_url: Base URL of the thumbnail worker.
+
+    Returns:
+        Tuple of (unique_id, status).
+    """
+    unique_id = article["unique_id"]
+    try:
+        resp = requests.post(
+            f"{worker_url}/process",
+            json={
+                "message": {
+                    "data": base64.b64encode(
+                        json.dumps({"unique_id": unique_id}).encode()
+                    ).decode(),
+                    "attributes": {},
+                }
+            },
+            timeout=WORKER_REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        result = (
+            resp.json()
+            if resp.headers.get("content-type", "").startswith("application/json")
+            else {}
+        )
+        return unique_id, result.get("status", "unknown")
+    except Exception as e:
+        logger.error(f"Erro ao processar {unique_id}: {e}")
+        return unique_id, "failed"
 
 
 @dag(
@@ -60,9 +97,11 @@ def generate_video_thumbnails_dag():
         from sqlalchemy.pool import NullPool
 
         engine = create_engine(db_url, poolclass=NullPool)
-
-        batch_size = int(Variable.get("thumbnail_batch_size", default_var="100"))
-        articles = fetch_articles_needing_thumbnails(engine, batch_size=batch_size)
+        try:
+            batch_size = int(Variable.get("thumbnail_batch_size", default_var="100"))
+            articles = fetch_articles_needing_thumbnails(engine, batch_size=batch_size)
+        finally:
+            engine.dispose()
 
         if not articles:
             logger.info("Nenhum artigo para gerar thumbnail")
@@ -73,41 +112,22 @@ def generate_video_thumbnails_dag():
 
     @task()
     def generate_thumbnails(articles: list[dict]):
-        """Envia artigos para o Thumbnail Worker via HTTP."""
+        """Envia artigos para o Thumbnail Worker via HTTP (paralelo)."""
         if not articles:
             return {"processed": 0, "generated": 0, "failed": 0, "skipped": 0}
 
         worker_url = Variable.get("thumbnail_worker_url")
+        max_workers = int(Variable.get("thumbnail_max_workers", default_var="5"))
         summary = {"processed": 0, "generated": 0, "failed": 0, "skipped": 0}
 
-        for article in articles:
-            unique_id = article["unique_id"]
-            try:
-                resp = requests.post(
-                    f"{worker_url}/process",
-                    json={
-                        "message": {
-                            "data": base64.b64encode(
-                                json.dumps({"unique_id": unique_id}).encode()
-                            ).decode(),
-                            "attributes": {},
-                        }
-                    },
-                    timeout=WORKER_REQUEST_TIMEOUT,
-                )
-                resp.raise_for_status()
-                result = (
-                    resp.json()
-                    if resp.headers.get("content-type", "").startswith("application/json")
-                    else {}
-                )
-                status = result.get("status", "unknown")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_process_one, article, worker_url): article for article in articles
+            }
+            for future in concurrent.futures.as_completed(futures):
+                unique_id, status = future.result()
                 summary[status] = summary.get(status, 0) + 1
-            except Exception as e:
-                logger.error(f"Erro ao processar {unique_id}: {e}")
-                summary["failed"] += 1
-
-            summary["processed"] += 1
+                summary["processed"] += 1
 
         return summary
 

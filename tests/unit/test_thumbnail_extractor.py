@@ -8,6 +8,7 @@ import pytest
 from data_platform.workers.thumbnail_worker.extractor import (
     ThumbnailExtractionError,
     ThumbnailExtractionResult,
+    _sanitize_url,
     _validate_video_url,
     build_ffmpeg_command,
     extract_first_frame,
@@ -15,6 +16,27 @@ from data_platform.workers.thumbnail_worker.extractor import (
 
 # Minimal valid JPEG: SOI marker (0xFFD8) + APP0 + EOI marker (0xFFD9)
 FAKE_JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 100 + b"\xff\xd9"
+
+
+class TestSanitizeUrl:
+    """Tests for _sanitize_url (log-safe URL stripping)."""
+
+    def test_strips_query_params(self) -> None:
+        result = _sanitize_url("https://cdn.ebc.com.br/video.mp4?token=SECRET&sig=abc")
+        assert result == "https://cdn.ebc.com.br/video.mp4"
+        assert "SECRET" not in result
+
+    def test_strips_fragment(self) -> None:
+        result = _sanitize_url("https://example.com/video.mp4#section")
+        assert result == "https://example.com/video.mp4"
+
+    def test_preserves_url_without_query(self) -> None:
+        result = _sanitize_url("https://example.com/path/video.mp4")
+        assert result == "https://example.com/path/video.mp4"
+
+    def test_handles_empty_url(self) -> None:
+        result = _sanitize_url("")
+        assert isinstance(result, str)
 
 
 class TestValidateVideoUrl:
@@ -145,3 +167,29 @@ class TestExtractFirstFrame:
         mock_run.assert_called_once()
         _, kwargs = mock_run.call_args
         assert kwargs["timeout"] == 60
+
+    @patch("data_platform.workers.thumbnail_worker.extractor.subprocess.run")
+    def test_non_jpeg_output_raises_extraction_error(self, mock_run) -> None:
+        """ffmpeg output that doesn't start with JPEG SOI marker is rejected."""
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=0, stdout=b"GIF89a" + b"\x00" * 100, stderr=b""
+        )
+        with pytest.raises(ThumbnailExtractionError, match="not valid JPEG"):
+            extract_first_frame("http://example.com/video.mp4")
+
+    @patch("data_platform.workers.thumbnail_worker.extractor.subprocess.run")
+    def test_random_bytes_output_raises_extraction_error(self, mock_run) -> None:
+        """Random bytes that are not JPEG must be rejected."""
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=0, stdout=b"\x00\x01\x02\x03" * 25, stderr=b""
+        )
+        with pytest.raises(ThumbnailExtractionError, match="not valid JPEG"):
+            extract_first_frame("http://example.com/video.mp4")
+
+    @patch("data_platform.workers.thumbnail_worker.extractor.subprocess.run")
+    def test_error_message_does_not_leak_query_params(self, mock_run) -> None:
+        """Error messages must not contain URL query parameters."""
+        mock_run.return_value = CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
+        with pytest.raises(ThumbnailExtractionError) as exc_info:
+            extract_first_frame("http://example.com/video.mp4?token=SECRET")
+        assert "SECRET" not in str(exc_info.value)
