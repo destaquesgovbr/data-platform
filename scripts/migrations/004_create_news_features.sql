@@ -23,7 +23,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_news_features_updated_at
+CREATE OR REPLACE TRIGGER trg_news_features_updated_at
     BEFORE UPDATE ON news_features
     FOR EACH ROW
     EXECUTE FUNCTION update_news_features_updated_at();
