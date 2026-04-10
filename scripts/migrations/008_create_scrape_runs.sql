@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS scrape_runs (
     id SERIAL PRIMARY KEY,
     agency_key VARCHAR(100) NOT NULL,
-    status VARCHAR(20) NOT NULL,              -- 'success', 'error'
+    status VARCHAR(20) NOT NULL CHECK (status IN ('success', 'error')),
     error_category VARCHAR(50),               -- ErrorCategory enum value
     error_message TEXT,
     articles_scraped INTEGER DEFAULT 0,
