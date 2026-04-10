@@ -13,13 +13,14 @@ on:
           - rollback
           - history
           - validate
+          - stamp
       dry_run:
         description: 'Preview changes without applying (default: true)'
         required: false
         type: boolean
         default: true
       target_version:
-        description: 'Target version for migrate (--target) or rollback (VERSION)'
+        description: 'Target version for migrate (--target), rollback (VERSION), or stamp (VERSION)'
         required: false
         type: string
       confirm:
@@ -73,6 +74,17 @@ jobs:
           if [[ "$COMMAND" == "rollback" && -z "${{ inputs.target_version }}" ]]; then
             echo "::error::rollback requires target_version"
             exit 1
+          fi
+
+          if [[ "$COMMAND" == "stamp" ]]; then
+            if [[ -z "${{ inputs.target_version }}" ]]; then
+              echo "::error::stamp requires target_version"
+              exit 1
+            fi
+            if [[ "$CONFIRM" != "true" ]]; then
+              echo "::error::stamp requires confirm=true"
+              exit 1
+            fi
           fi
 
   backup:
@@ -209,6 +221,9 @@ jobs:
               if [ "$DRY_RUN" = "true" ]; then
                 ARGS+=(--dry-run)
               fi
+              ;;
+            stamp)
+              ARGS+=("stamp" "$TARGET" --db-url "$LOCAL_URL" --yes)
               ;;
           esac
 

@@ -591,6 +591,56 @@ def main():
         else:
             typer.echo(f"All {len(migrations)} migrations are consistent.")
 
+    @app.command()
+    def stamp(
+        version: str = typer.Argument(
+            ...,
+            help="Mark all pending migrations up to VERSION as applied without executing them (e.g. '007')",
+        ),
+        db_url: str = typer.Option(None, "--db-url", envvar="DATABASE_URL"),
+        migrations_path: str = typer.Option(str(MIGRATIONS_DIR), "--migrations-dir"),
+        yes: bool = typer.Option(False, "--yes", "-y"),
+    ):
+        """Bootstrap: mark migrations as applied without executing them.
+
+        Use when migrations were applied outside of this runner (e.g. via old workflow).
+        Only pending migrations are stamped; already-recorded ones are skipped.
+        """
+        conn = _connect(db_url)
+        try:
+            bootstrap(conn)
+            migrations = discover_migrations(Path(migrations_path))
+            pending = get_pending(conn, migrations, target=version)
+
+            if not pending:
+                typer.echo(f"No pending migrations up to {version}. Nothing to stamp.")
+                return
+
+            typer.echo(f"Will stamp {len(pending)} migration(s) as applied (no SQL executed):")
+            for m in pending:
+                typer.echo(f"  {m.version}_{m.name} ({m.migration_type})")
+
+            if not yes:
+                typer.confirm(
+                    "Stamp these migrations as applied without running them?", abort=True
+                )
+
+            applied_by = _get_applied_by()
+            run_id = _get_run_id()
+
+            for m in pending:
+                _record_history(
+                    conn, m, "migrate", "success", time.time(),
+                    applied_by, run_id,
+                    description="Stamped as applied — existing database bootstrap",
+                )
+                conn.commit()
+                typer.echo(f"  Stamped: {m.version}_{m.name}")
+
+            typer.echo(f"\nDone: {len(pending)} migration(s) stamped.")
+        finally:
+            conn.close()
+
     app()
 
 
