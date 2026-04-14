@@ -1,6 +1,9 @@
 """Unit tests for engagement metrics aggregation."""
 
+import json
+import logging
 from unittest.mock import MagicMock, patch
+
 import pandas as pd
 import pytest
 
@@ -55,10 +58,14 @@ class TestEngagementQuery:
 
 class TestBatchUpsertEngagement:
 
-    @patch("data_platform.managers.postgres_manager.PostgresManager")
-    def test_upserts_all_rows(self, mock_pg_class):
-        mock_pg = mock_pg_class.return_value
-        mock_pg.upsert_features.return_value = True
+    @patch("data_platform.jobs.bigquery.engagement.create_engine")
+    def test_upserts_all_rows(self, mock_create_engine):
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_create_engine.return_value = mock_engine
+        mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
+        mock_conn.execute.return_value.scalars.return_value.all.return_value = ["art-1", "art-2"]
 
         df = pd.DataFrame({
             "unique_id": ["art-1", "art-2"],
@@ -67,12 +74,16 @@ class TestBatchUpsertEngagement:
         })
         count = batch_upsert_engagement("postgresql://test", df)
         assert count == 2
-        mock_pg.close_all.assert_called_once()
+        mock_engine.dispose.assert_called_once()
 
-    @patch("data_platform.managers.postgres_manager.PostgresManager")
-    def test_upserts_correct_features(self, mock_pg_class):
-        mock_pg = mock_pg_class.return_value
-        mock_pg.upsert_features.return_value = True
+    @patch("data_platform.jobs.bigquery.engagement.create_engine")
+    def test_upserts_correct_features(self, mock_create_engine):
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_create_engine.return_value = mock_engine
+        mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
+        mock_conn.execute.return_value.scalars.return_value.all.return_value = ["art-1"]
 
         df = pd.DataFrame({
             "unique_id": ["art-1"],
@@ -81,22 +92,39 @@ class TestBatchUpsertEngagement:
         })
         batch_upsert_engagement("postgresql://test", df)
 
-        mock_pg.upsert_features.assert_called_once_with(
-            "art-1", {"view_count": 42, "unique_sessions": 30}
+        upsert_call = next(
+            c for c in mock_conn.execute.call_args_list
+            if "INSERT INTO" in str(c.args[0])
         )
+        params = upsert_call.args[1]
+        assert params["uid"] == "art-1"
+        assert json.loads(params["features"]) == {"view_count": 42, "unique_sessions": 30}
 
-    @patch("data_platform.managers.postgres_manager.PostgresManager")
-    def test_empty_dataframe(self, mock_pg_class):
-        mock_pg = mock_pg_class.return_value
+    @patch("data_platform.jobs.bigquery.engagement.create_engine")
+    def test_empty_dataframe(self, mock_create_engine):
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_create_engine.return_value = mock_engine
+        mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
+
         df = pd.DataFrame(columns=["unique_id", "view_count", "unique_sessions"])
         count = batch_upsert_engagement("postgresql://test", df)
         assert count == 0
-        mock_pg.close_all.assert_called_once()
+        mock_conn.execute.assert_not_called()
+        mock_engine.dispose.assert_called_once()
 
-    @patch("data_platform.managers.postgres_manager.PostgresManager")
-    def test_closes_pg_on_error(self, mock_pg_class):
-        mock_pg = mock_pg_class.return_value
-        mock_pg.upsert_features.side_effect = Exception("DB error")
+    @patch("data_platform.jobs.bigquery.engagement.create_engine")
+    def test_disposes_engine_on_error(self, mock_create_engine):
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_create_engine.return_value = mock_engine
+        mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
+
+        filter_result = MagicMock()
+        filter_result.scalars.return_value.all.return_value = ["art-1"]
+        mock_conn.execute.side_effect = [filter_result, Exception("DB error")]
 
         df = pd.DataFrame({
             "unique_id": ["art-1"],
@@ -105,5 +133,40 @@ class TestBatchUpsertEngagement:
         })
         with pytest.raises(Exception, match="DB error"):
             batch_upsert_engagement("postgresql://test", df)
+        mock_engine.dispose.assert_called_once()
 
-        mock_pg.close_all.assert_called_once()
+    @patch("data_platform.jobs.bigquery.engagement.create_engine")
+    def test_filters_orphaned_ids(self, mock_create_engine):
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_create_engine.return_value = mock_engine
+        mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
+        mock_conn.execute.return_value.scalars.return_value.all.return_value = ["art-1"]
+
+        df = pd.DataFrame({
+            "unique_id": ["art-1", "orphan-1"],
+            "view_count": [100, 50],
+            "unique_sessions": [80, 40],
+        })
+        count = batch_upsert_engagement("postgresql://test", df)
+        assert count == 1
+        mock_engine.dispose.assert_called_once()
+
+    @patch("data_platform.jobs.bigquery.engagement.create_engine")
+    def test_logs_orphaned_count(self, mock_create_engine, caplog):
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_create_engine.return_value = mock_engine
+        mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
+        mock_conn.execute.return_value.scalars.return_value.all.return_value = ["art-1"]
+
+        df = pd.DataFrame({
+            "unique_id": ["art-1", "orphan-1", "orphan-2"],
+            "view_count": [100, 50, 30],
+            "unique_sessions": [80, 40, 25],
+        })
+        with caplog.at_level(logging.WARNING, logger="data_platform.jobs.bigquery.engagement"):
+            batch_upsert_engagement("postgresql://test", df)
+        assert "Filtered 2 orphaned" in caplog.text

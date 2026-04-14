@@ -1,7 +1,11 @@
 """Aggregate pageview engagement metrics from BigQuery."""
 
+import json
 import logging
+
 import pandas as pd
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +52,6 @@ def batch_upsert_engagement(db_url: str, metrics_df: pd.DataFrame) -> int:
     Returns:
         Number of rows updated
     """
-    import json
-
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.pool import NullPool
-
     engine = create_engine(db_url, poolclass=NullPool)
     upsert_sql = text("""
         INSERT INTO news_features (unique_id, features)
@@ -64,6 +63,20 @@ def batch_upsert_engagement(db_url: str, metrics_df: pd.DataFrame) -> int:
     count = 0
     try:
         with engine.begin() as conn:
+            all_ids = metrics_df["unique_id"].tolist()
+            if all_ids:
+                valid_result = conn.execute(
+                    text("SELECT unique_id FROM news WHERE unique_id = ANY(:ids)"),
+                    {"ids": all_ids},
+                )
+                valid_ids = set(valid_result.scalars().all())
+                initial_count = len(metrics_df)
+                metrics_df = metrics_df[metrics_df["unique_id"].isin(valid_ids)]
+                orphaned = initial_count - len(metrics_df)
+                if orphaned:
+                    logger.warning(
+                        f"Filtered {orphaned} orphaned unique_ids not found in news table"
+                    )
             for _, row in metrics_df.iterrows():
                 features = json.dumps({
                     "view_count": int(row["view_count"]),
