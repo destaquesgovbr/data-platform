@@ -92,8 +92,11 @@ class TestBatchUpsertEngagement:
         })
         batch_upsert_engagement("postgresql://test", df)
 
-        call = mock_conn.execute.call_args_list[1]
-        params = call.args[1]
+        upsert_call = next(
+            c for c in mock_conn.execute.call_args_list
+            if "INSERT INTO" in str(c.args[0])
+        )
+        params = upsert_call.args[1]
         assert params["uid"] == "art-1"
         assert json.loads(params["features"]) == {"view_count": 42, "unique_sessions": 30}
 
@@ -150,20 +153,20 @@ class TestBatchUpsertEngagement:
         assert count == 1
         mock_engine.dispose.assert_called_once()
 
-    def test_logs_orphaned_count(self, caplog):
-        with patch("data_platform.jobs.bigquery.engagement.create_engine") as mock_create_engine:
-            mock_engine = MagicMock()
-            mock_conn = MagicMock()
-            mock_create_engine.return_value = mock_engine
-            mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
-            mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
-            mock_conn.execute.return_value.scalars.return_value.all.return_value = ["art-1"]
+    @patch("data_platform.jobs.bigquery.engagement.create_engine")
+    def test_logs_orphaned_count(self, mock_create_engine, caplog):
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_create_engine.return_value = mock_engine
+        mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
+        mock_conn.execute.return_value.scalars.return_value.all.return_value = ["art-1"]
 
-            df = pd.DataFrame({
-                "unique_id": ["art-1", "orphan-1", "orphan-2"],
-                "view_count": [100, 50, 30],
-                "unique_sessions": [80, 40, 25],
-            })
-            with caplog.at_level(logging.WARNING, logger="data_platform.jobs.bigquery.engagement"):
-                batch_upsert_engagement("postgresql://test", df)
-            assert "Filtered 2 orphaned" in caplog.text
+        df = pd.DataFrame({
+            "unique_id": ["art-1", "orphan-1", "orphan-2"],
+            "view_count": [100, 50, 30],
+            "unique_sessions": [80, 40, 25],
+        })
+        with caplog.at_level(logging.WARNING, logger="data_platform.jobs.bigquery.engagement"):
+            batch_upsert_engagement("postgresql://test", df)
+        assert "Filtered 2 orphaned" in caplog.text
