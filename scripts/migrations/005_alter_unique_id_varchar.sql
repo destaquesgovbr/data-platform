@@ -10,6 +10,8 @@ BEGIN;
 ALTER TABLE news ADD COLUMN IF NOT EXISTS legacy_unique_id VARCHAR(32);
 
 -- Step 2: Backfill legacy column with current MD5 IDs
+-- IMPORTANT: Must run BEFORE migration 006 (which converts unique_id to slugs)
+-- Re-execution is safe: WHERE IS NULL filters out already-populated rows
 UPDATE news SET legacy_unique_id = unique_id WHERE legacy_unique_id IS NULL;
 
 -- Step 3: Widen unique_id on news table (only if still narrower than 120)
