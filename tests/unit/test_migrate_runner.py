@@ -517,3 +517,106 @@ class TestValidateMigrations:
         migrations = discover_migrations(tmp_path)
         issues = validate_migrations(migrations)
         assert issues == []
+
+
+# ---------------------------------------------------------------------------
+# Stamp
+# ---------------------------------------------------------------------------
+class TestStamp:
+    """Tests for the stamp CLI command (mark migrations as applied without executing)."""
+
+    def _make_migrations(self, versions):
+        """Create MigrationInfo list for given version strings."""
+        from migrate import MigrationInfo
+
+        return [
+            MigrationInfo(
+                version=v,
+                name=f"migration_{v}",
+                path=Path(f"{v}_migration_{v}.sql"),
+                migration_type="sql",
+                rollback_path=None,
+            )
+            for v in versions
+        ]
+
+    def _run_stamp(self, target, migrations_dir, pending, mock_conn):
+        """Run the stamp command via main() with mocked dependencies."""
+        import migrate
+
+        with patch.object(
+            sys, "argv",
+            ["migrate.py", "stamp", target, "--db-url", "postgresql://test", "--yes"],
+        ), patch("psycopg2.connect", return_value=mock_conn), patch.object(
+            migrate, "bootstrap"
+        ), patch.object(
+            migrate, "discover_migrations", return_value=self._make_migrations(
+                [m.version for m in pending]
+                + [v for v in ["001", "002", "003", "004", "005"] if v <= target]
+            ),
+        ) as mock_discover, patch.object(
+            migrate, "get_pending", return_value=pending
+        ) as mock_get_pending, patch.object(
+            migrate, "_record_history"
+        ) as mock_record, patch.object(
+            migrate, "_get_applied_by", return_value="test-user"
+        ), patch.object(
+            migrate, "_get_run_id", return_value=None
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                migrate.main()
+            assert exc_info.value.code in (None, 0)
+            return mock_record, mock_discover, mock_get_pending
+
+    def test_stamp_marks_pending_as_applied(self):
+        pending = self._make_migrations(["001", "002", "003"])
+        mock_conn = MagicMock()
+
+        mock_record, _, _ = self._run_stamp("003", "/tmp", pending, mock_conn)
+
+        assert mock_record.call_count == 3
+        for c in mock_record.call_args_list:
+            args, kwargs = c
+            # positional: conn, migration, "migrate", "success", started_at, applied_by, run_id
+            assert args[2] == "migrate"       # operation
+            assert args[3] == "success"       # status
+            assert "Stamped" in kwargs.get("description", "")
+
+    def test_stamp_skips_already_applied(self):
+        # Only 003 is pending (001, 002 already applied)
+        pending = self._make_migrations(["003"])
+        mock_conn = MagicMock()
+
+        mock_record, _, _ = self._run_stamp("003", "/tmp", pending, mock_conn)
+
+        assert mock_record.call_count == 1
+        args = mock_record.call_args_list[0][0]
+        assert args[1].version == "003"
+
+    def test_stamp_respects_target_version(self):
+        pending = self._make_migrations(["001", "002", "003"])
+        mock_conn = MagicMock()
+
+        mock_record, _, mock_get_pending = self._run_stamp("003", "/tmp", pending, mock_conn)
+
+        # get_pending should have been called with target="003"
+        gp_call = mock_get_pending.call_args
+        gp_positional = gp_call[0]
+        gp_kwargs = gp_call[1]
+        target_arg = gp_kwargs.get("target") or (gp_positional[2] if len(gp_positional) > 2 else None)
+        assert target_arg == "003"
+
+        # Only 001-003 stamped (as returned by mocked get_pending)
+        assert mock_record.call_count == 3
+        stamped_versions = [c[0][1].version for c in mock_record.call_args_list]
+        assert stamped_versions == ["001", "002", "003"]
+
+    def test_stamp_noop_when_all_applied(self, capsys):
+        pending = []  # nothing pending
+        mock_conn = MagicMock()
+
+        mock_record, _, _ = self._run_stamp("003", "/tmp", pending, mock_conn)
+
+        assert mock_record.call_count == 0
+        captured = capsys.readouterr()
+        assert "Nothing to stamp" in captured.out
