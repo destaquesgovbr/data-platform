@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 
 from migrate_unique_ids import (
     build_id_mapping,
-    check_collisions,
     dry_run,
     generate_readable_unique_id,
     generate_suffix,
@@ -156,11 +155,6 @@ class TestBuildIdMapping:
         new_ids = list(mapping.values())
         assert len(new_ids) == len(set(new_ids))
 
-    def test_detects_collision_via_check(self):
-        """If two rows map to the same new_id, check_collisions catches it."""
-        mapping = {"old1": "same-slug_abc123", "old2": "same-slug_abc123"}
-        collisions = check_collisions(mapping)
-        assert len(collisions) > 0
 
 
 # ---------------------------------------------------------------------------

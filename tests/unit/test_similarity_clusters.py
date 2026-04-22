@@ -61,48 +61,56 @@ class TestGroupSimilarArticles:
         assert result == {"a": ["b"]}
 
 
+def _make_engine_mock():
+    """Build a mock SQLAlchemy engine that supports `with engine.begin() as conn`."""
+    mock_conn = MagicMock()
+    mock_engine = MagicMock()
+    mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
+    mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
+    return mock_engine, mock_conn
+
+
 class TestBatchUpsertClusters:
     """Tests for batch upserting clusters to news_features."""
 
-    @patch("data_platform.managers.postgres_manager.PostgresManager")
-    def test_upserts_all_clusters(self, mock_pg_class):
-        mock_pg = mock_pg_class.return_value
-        mock_pg.upsert_features.return_value = True
+    def test_upserts_all_clusters(self):
+        mock_engine, mock_conn = _make_engine_mock()
 
-        clusters = {
-            "art-1": ["art-2", "art-3"],
-            "art-2": ["art-1"],
-        }
-        count = batch_upsert_clusters("postgresql://test", clusters)
+        with patch("sqlalchemy.create_engine", return_value=mock_engine):
+            clusters = {"art-1": ["art-2", "art-3"], "art-2": ["art-1"]}
+            count = batch_upsert_clusters("postgresql://test", clusters)
 
         assert count == 2
-        mock_pg.close_all.assert_called_once()
+        mock_engine.dispose.assert_called_once()
 
-    @patch("data_platform.managers.postgres_manager.PostgresManager")
-    def test_upserts_correct_feature_dict(self, mock_pg_class):
-        mock_pg = mock_pg_class.return_value
-        mock_pg.upsert_features.return_value = True
+    def test_upserts_correct_feature_dict(self):
+        mock_engine, mock_conn = _make_engine_mock()
 
-        clusters = {"art-1": ["art-2", "art-3"]}
-        batch_upsert_clusters("postgresql://test", clusters)
+        with patch("sqlalchemy.create_engine", return_value=mock_engine):
+            batch_upsert_clusters("postgresql://test", {"art-1": ["art-2", "art-3"]})
 
-        mock_pg.upsert_features.assert_called_once_with(
-            "art-1", {"similar_articles": ["art-2", "art-3"]}
-        )
+        execute_call = mock_conn.execute.call_args
+        params = execute_call[0][1]
+        assert params["uid"] == "art-1"
+        import json
+        features = json.loads(params["features"])
+        assert features == {"similar_articles": ["art-2", "art-3"]}
 
-    @patch("data_platform.managers.postgres_manager.PostgresManager")
-    def test_empty_clusters(self, mock_pg_class):
-        mock_pg = mock_pg_class.return_value
-        count = batch_upsert_clusters("postgresql://test", {})
+    def test_empty_clusters(self):
+        mock_engine, _ = _make_engine_mock()
+
+        with patch("sqlalchemy.create_engine", return_value=mock_engine):
+            count = batch_upsert_clusters("postgresql://test", {})
+
         assert count == 0
-        mock_pg.close_all.assert_called_once()
+        mock_engine.dispose.assert_called_once()
 
-    @patch("data_platform.managers.postgres_manager.PostgresManager")
-    def test_closes_pg_on_error(self, mock_pg_class):
-        mock_pg = mock_pg_class.return_value
-        mock_pg.upsert_features.side_effect = Exception("DB error")
+    def test_closes_engine_on_error(self):
+        mock_engine, mock_conn = _make_engine_mock()
+        mock_conn.execute.side_effect = Exception("DB error")
 
-        with pytest.raises(Exception, match="DB error"):
-            batch_upsert_clusters("postgresql://test", {"art-1": ["art-2"]})
+        with patch("sqlalchemy.create_engine", return_value=mock_engine):
+            with pytest.raises(Exception, match="DB error"):
+                batch_upsert_clusters("postgresql://test", {"art-1": ["art-2"]})
 
-        mock_pg.close_all.assert_called_once()
+        mock_engine.dispose.assert_called_once()

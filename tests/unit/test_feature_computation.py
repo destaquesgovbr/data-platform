@@ -68,6 +68,7 @@ class TestComputeHasVideo:
 
     def test_without_url(self):
         assert compute_has_video(None) is False
+        assert compute_has_video("") is False
 
 
 class TestComputePublicationHour:
@@ -79,6 +80,11 @@ class TestComputePublicationHour:
         dt = datetime(2024, 6, 15, 0, 0, 0, tzinfo=timezone.utc)
         assert compute_publication_hour(dt) == 0
 
+    def test_none_raises(self):
+        """None input raises AttributeError — callers must guard with `if published_at`."""
+        with pytest.raises(AttributeError):
+            compute_publication_hour(None)
+
 
 class TestComputePublicationDow:
     def test_monday(self):
@@ -88,6 +94,11 @@ class TestComputePublicationDow:
     def test_sunday(self):
         dt = datetime(2024, 6, 16, 12, 0, 0)  # Sunday
         assert compute_publication_dow(dt) == 6
+
+    def test_none_raises(self):
+        """None input raises AttributeError — callers must guard with `if published_at`."""
+        with pytest.raises(AttributeError):
+            compute_publication_dow(None)
 
 
 class TestComputeReadabilityFlesch:
@@ -131,3 +142,11 @@ class TestComputeAll:
         assert features["has_image"] is False
         assert "publication_hour" not in features
         assert "readability_flesch" not in features
+
+    def test_explicit_none_published_at(self):
+        """Explicit published_at=None behaves same as missing key."""
+        article = {"content": "Some text.", "image_url": None, "video_url": None, "published_at": None}
+        features = compute_all(article)
+
+        assert "publication_hour" not in features
+        assert "publication_dow" not in features

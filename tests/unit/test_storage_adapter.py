@@ -136,11 +136,12 @@ class TestStorageAdapterPostgres:
         assert mock_postgres.update.called
         assert result == 1
 
-    def test_get_postgres(self, adapter: StorageAdapter) -> None:
-        """Test get from PostgreSQL."""
+    def test_get_postgres(self, adapter: StorageAdapter, mock_postgres: Mock) -> None:
+        """Test get from PostgreSQL returns empty DataFrame (mock returns [])."""
         result = adapter.get("2024-01-01", "2024-12-31")
 
         assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0  # mock returns [] which converts to empty DataFrame
 
 
 class TestStorageAdapterDualWrite:
