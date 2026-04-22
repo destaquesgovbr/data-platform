@@ -269,3 +269,6 @@ MIT License - ver [LICENSE](LICENSE) para detalhes.
 ---
 
 *Última atualização: 2024-12-24*
+
+
+<!-- Fix #139 -->
