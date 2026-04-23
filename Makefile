@@ -76,7 +76,7 @@ test-unit:
 
 test-integration:
 	DATABASE_URL="postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev" \
-		PYTHONPATH=src poetry run pytest tests/integration/ -v
+		PYTHONPATH=src poetry run pytest tests/integration/ -v --no-cov
 
 # Migration commands
 migrate:
