@@ -71,19 +71,17 @@ class TestFetchNewsForBigquery:
         assert "2024-06-02" in call_params
 
 
-@pytest.mark.skipif(
-    not _airflow_available(),
-    reason="Airflow not installed (runs in Cloud Composer only)",
-)
 class TestDagStructure:
     """Tests for the DAG definition — only runs when Airflow is available."""
 
     def test_dag_exists_and_has_correct_schedule(self):
+        pytest.importorskip("airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)")
         from data_platform.dags.sync_pg_to_bigquery import dag_instance
 
         assert dag_instance.dag_id == "sync_pg_to_bigquery"
 
     def test_dag_has_tasks(self):
+        pytest.importorskip("airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)")
         from data_platform.dags.sync_pg_to_bigquery import dag_instance
 
         task_ids = [t.task_id for t in dag_instance.tasks]
@@ -91,6 +89,7 @@ class TestDagStructure:
         assert "sync_dims" in task_ids
 
     def test_dag_catchup_disabled(self):
+        pytest.importorskip("airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)")
         from data_platform.dags.sync_pg_to_bigquery import dag_instance
 
         assert dag_instance.catchup is False

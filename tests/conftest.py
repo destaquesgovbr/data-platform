@@ -3,7 +3,11 @@ Pytest configuration and fixtures.
 """
 
 import os
+from unittest.mock import MagicMock, patch
+
 import pytest
+
+from data_platform.managers.dataset_manager import DatasetManager
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -14,18 +18,33 @@ def set_test_environment():
 
 
 @pytest.fixture
-def sample_news_data():
-    """Sample news data for testing."""
-    from collections import OrderedDict
+def mock_sqlalchemy_engine():
+    """Build a mock SQLAlchemy engine that supports `with engine.begin() as conn`."""
+    mock_conn = MagicMock()
+    mock_engine = MagicMock()
+    mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
+    mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
+    return mock_engine, mock_conn
 
-    return OrderedDict(
-        [
-            ("unique_id", ["abc123", "def456"]),
-            ("agency", ["mec", "saude"]),
-            ("title", ["Test News 1", "Test News 2"]),
-            ("url", ["https://example.com/1", "https://example.com/2"]),
-            ("content", ["Content 1", "Content 2"]),
-            ("published_at", ["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"]),
-            ("extracted_at", ["2024-01-01T01:00:00Z", "2024-01-02T01:00:00Z"]),
-        ]
-    )
+
+@pytest.fixture
+def mock_dataset_manager_base():
+    """Base fixture: DatasetManager with mocked token."""
+    with patch("data_platform.managers.dataset_manager.get_token") as mock_token:
+        mock_token.return_value = "hf_test"
+        manager = DatasetManager()
+        yield manager
+
+
+@pytest.fixture
+def mock_dataset_manager_full():
+    """Full fixture: DatasetManager with all methods mocked."""
+    with patch("data_platform.managers.dataset_manager.get_token") as mock_token:
+        mock_token.return_value = "hf_test"
+        with patch.object(DatasetManager, "_load_existing_dataset"):
+            with patch.object(DatasetManager, "_push_datasets"):
+                with patch.object(DatasetManager, "_sort_dataset", side_effect=lambda ds: ds):
+                    manager = DatasetManager()
+                    yield manager
+
+

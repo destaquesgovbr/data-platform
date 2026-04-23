@@ -1,5 +1,6 @@
 """Unit tests for trending score computation."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -31,59 +32,57 @@ class TestTrendingQuery:
 class TestBatchUpsertTrending:
     """Tests for batch_upsert_trending function."""
 
-    @patch("data_platform.managers.postgres_manager.PostgresManager")
-    def test_upserts_all_rows(self, mock_pg_class):
-        mock_pg = mock_pg_class.return_value
-        mock_pg.upsert_features.return_value = True
+    def test_upserts_all_rows(self, mock_sqlalchemy_engine):
+        mock_engine, mock_conn = mock_sqlalchemy_engine
 
         df = pd.DataFrame({
             "unique_id": ["art-1", "art-2", "art-3"],
             "trending_score": [2.5, 1.8, 0.5],
         })
 
-        count = batch_upsert_trending("postgresql://test", df)
+        with patch("sqlalchemy.create_engine", return_value=mock_engine):
+            count = batch_upsert_trending("postgresql://test", df)
 
         assert count == 3
-        assert mock_pg.upsert_features.call_count == 3
-        mock_pg.close_all.assert_called_once()
+        assert mock_conn.execute.call_count == 3
+        mock_engine.dispose.assert_called_once()
 
-    @patch("data_platform.managers.postgres_manager.PostgresManager")
-    def test_handles_empty_dataframe(self, mock_pg_class):
-        mock_pg = mock_pg_class.return_value
+    def test_handles_empty_dataframe(self, mock_sqlalchemy_engine):
+        mock_engine, mock_conn = mock_sqlalchemy_engine
 
         df = pd.DataFrame(columns=["unique_id", "trending_score"])
-        count = batch_upsert_trending("postgresql://test", df)
+
+        with patch("sqlalchemy.create_engine", return_value=mock_engine):
+            count = batch_upsert_trending("postgresql://test", df)
 
         assert count == 0
-        mock_pg.close_all.assert_called_once()
+        mock_engine.dispose.assert_called_once()
 
-    @patch("data_platform.managers.postgres_manager.PostgresManager")
-    def test_upserts_correct_feature_dict(self, mock_pg_class):
-        mock_pg = mock_pg_class.return_value
-        mock_pg.upsert_features.return_value = True
+    def test_upserts_correct_feature_dict(self, mock_sqlalchemy_engine):
+        mock_engine, mock_conn = mock_sqlalchemy_engine
 
         df = pd.DataFrame({
             "unique_id": ["art-1"],
             "trending_score": [3.14],
         })
 
-        batch_upsert_trending("postgresql://test", df)
-
-        mock_pg.upsert_features.assert_called_once_with(
-            "art-1", {"trending_score": 3.14}
-        )
-
-    @patch("data_platform.managers.postgres_manager.PostgresManager")
-    def test_closes_pg_on_error(self, mock_pg_class):
-        mock_pg = mock_pg_class.return_value
-        mock_pg.upsert_features.side_effect = Exception("DB error")
-
-        df = pd.DataFrame({
-            "unique_id": ["art-1"],
-            "trending_score": [1.0],
-        })
-
-        with pytest.raises(Exception, match="DB error"):
+        with patch("sqlalchemy.create_engine", return_value=mock_engine):
             batch_upsert_trending("postgresql://test", df)
 
-        mock_pg.close_all.assert_called_once()
+        execute_call = mock_conn.execute.call_args
+        params = execute_call[0][1]
+        assert params["uid"] == "art-1"
+        features = json.loads(params["features"])
+        assert features == {"trending_score": pytest.approx(3.14)}
+
+    def test_closes_engine_on_error(self, mock_sqlalchemy_engine):
+        mock_engine, mock_conn = mock_sqlalchemy_engine
+        mock_conn.execute.side_effect = Exception("DB error")
+
+        df = pd.DataFrame({"unique_id": ["art-1"], "trending_score": [1.0]})
+
+        with patch("sqlalchemy.create_engine", return_value=mock_engine):
+            with pytest.raises(Exception, match="DB error"):
+                batch_upsert_trending("postgresql://test", df)
+
+        mock_engine.dispose.assert_called_once()
