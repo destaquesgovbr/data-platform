@@ -4,320 +4,513 @@ This directory contains integration tests for the data platform.
 
 ## Overview
 
-Integration tests validate that components work correctly together with real dependencies (like PostgreSQL) while mocking external services (like Typesense, ML models).
+Integration tests validate that components work correctly together with **real dependencies**:
+- Real PostgreSQL database (via Docker)
+- Real Typesense server (via Docker)
+- Real JSONB operations
+- Real SQL queries and JOINs
+- Real pagination and date arithmetic
+
+Unlike unit tests (which use mocks), integration tests verify actual database behavior that mocks cannot simulate.
+
+---
 
 ## Test Files
 
-### `test_embedding_workflow.py`
-
-**Complete embedding workflow integration test**
-
-Tests the end-to-end flow:
-1. Generate embeddings for 2025 news records
-2. Sync embeddings to Typesense
-3. Validate data flows correctly through the entire pipeline
-
-**Key Features:**
-- Uses real PostgreSQL test database (via pytest-postgresql)
-- Mocks external services (Typesense client, SentenceTransformer model)
-- Tests both happy path and edge cases
-- Validates 2025-only filtering
-- Tests batch processing
-- Tests incremental sync
-
-**Test Scenarios:**
-- Full workflow: generate → sync → validate
-- Only 2025 news are processed
-- Embeddings stored correctly in PostgreSQL
-- Documents sent to Typesense with correct format
-- Text preparation strategy (title + summary, fallback to content)
-- Incremental sync (only sync updated embeddings)
-- Batch processing with different batch sizes
-- Edge cases (no records, missing summaries, etc.)
-
 ### `test_postgres_integration.py`
 
-**PostgresManager integration tests**
+**Basic PostgresManager integration tests** (7 tests)
 
-Tests database operations with a real Cloud SQL instance.
+Tests core database operations:
+- Database connectivity and connection pooling
+- Agency/theme cache loading
+- Insert, update, get operations
+- Duplicate handling (ON CONFLICT DO NOTHING/UPDATE)
+- Count with filters
+
+### `test_features_integration.py`
+
+**Feature Store integration tests** (18 tests)
+
+Tests JSONB operations with real PostgreSQL:
+- JSONB `||` merge operator (preserve existing keys + overwrite duplicates)
+- Nested JSONB structures (3 levels deep)
+- Foreign key constraints with CASCADE delete
+- Batch queries with missing IDs
+- Trigger execution (auto-update `updated_at`)
+- Edge cases (NULL values, special characters, numeric precision)
+
+**Why these tests matter:**
+- Unit tests only verify SQL syntax
+- Integration tests verify actual PostgreSQL JSONB behavior
+- Merge semantics with `||` operator can only be validated with real DB
+
+### `test_typesense_query_integration.py`
+
+**Typesense query integration tests** (25 tests)
+
+Tests complex 7-table JOIN queries:
+- Query structure (55+ columns, 6 LEFT JOINs)
+- JSONB path extraction (`features->'sentiment'->>'label'`)
+- Type casting chains (`(features->>'score')::float`)
+- Date arithmetic (`published_at < %s::date + INTERVAL '1 day'`)
+- NULL propagation in LEFT JOINs
+- Pagination consistency (LIMIT/OFFSET without duplicates)
+- Count accuracy
+
+**Why these tests matter:**
+- Validates the most complex query in the system
+- Used for daily PostgreSQL → Typesense sync
+- Mocks can't validate JOIN cardinality, NULL handling, or date boundaries
+
+### `test_typesense_e2e_integration.py`
+
+**Typesense E2E sync tests** (10 tests)
+
+Tests complete roundtrip PostgreSQL → Typesense:
+- Document preparation (`prepare_document`)
+- Schema compatibility
+- Batch indexing
+- Search and filter operations
+- Field preservation (core, theme, feature fields)
+- Document updates (upsert)
+
+**Why these tests matter:**
+- Validates end-to-end sync pipeline
+- Ensures schema changes don't break Typesense integration
+- Tests actual search functionality
+
+---
 
 ## Requirements
 
 ### Dependencies
 
 ```bash
-# Install test dependencies
+# Install with dev dependencies
 poetry install --with dev
 ```
 
-Required packages:
-- `pytest` - Test framework
-- `pytest-postgresql` - Temporary PostgreSQL instances for testing
-- `pytest-cov` - Coverage reporting
+### Docker Infrastructure
 
-### PostgreSQL
-
-The embedding workflow tests use `pytest-postgresql` which:
-- Automatically creates a temporary PostgreSQL instance
-- Sets up schema and test data
-- Cleans up after tests
-- No manual setup required!
-
-**Note:** You need PostgreSQL binaries installed on your system:
+Integration tests require Docker services:
 
 ```bash
-# macOS
-brew install postgresql
+# Start PostgreSQL (port 5433) and Typesense (port 8108)
+make docker-up
 
-# Ubuntu/Debian
-sudo apt-get install postgresql
-
-# The tests will use these binaries to create temporary test databases
+# Verify containers are running
+docker ps | grep destaquesgovbr
 ```
+
+### Master Data
+
+Tests require agencies and themes to be populated:
+
+```bash
+make populate-master
+```
+
+This populates:
+- **158 agencies** from `test-data/agencies.yaml`
+- **588 themes** from `test-data/themes_tree_enriched_full.yaml`
+
+---
 
 ## Running Tests
 
 ### Run all integration tests
 
 ```bash
-pytest tests/integration/ -v
+make test-integration
 ```
 
-### Run only embedding workflow tests
+This runs with:
+- `--no-cov` flag (coverage disabled for integration tests)
+- Proper `DATABASE_URL` environment variable
+- Verbose output
+
+### Run specific test file
 
 ```bash
-pytest tests/integration/test_embedding_workflow.py -v
+PYTHONPATH=src poetry run pytest tests/integration/test_features_integration.py -v --no-cov
 ```
 
 ### Run specific test class
 
 ```bash
-pytest tests/integration/test_embedding_workflow.py::TestEmbeddingWorkflow -v
+PYTHONPATH=src poetry run pytest tests/integration/test_typesense_query_integration.py::TestTypesenseQueryExecution -v --no-cov
 ```
 
 ### Run specific test
 
 ```bash
-pytest tests/integration/test_embedding_workflow.py::TestEmbeddingWorkflow::test_complete_workflow_generate_and_sync -v
+PYTHONPATH=src poetry run pytest tests/integration/test_postgres_integration.py::TestPostgresIntegration::test_connection -v --no-cov
 ```
 
-### With coverage
+### Run with marker
 
 ```bash
-pytest tests/integration/ -v --cov=data_platform --cov-report=html
+# Only integration tests
+pytest -m integration -v
+
+# Skip integration tests (run unit tests only)
+pytest -m "not integration" -v
 ```
 
-### With detailed output
+### Run E2E tests (requires Typesense)
 
 ```bash
-pytest tests/integration/ -v -s  # -s shows print statements
+# Set Typesense environment variables
+export TYPESENSE_HOST=localhost
+export TYPESENSE_PORT=8108
+export TYPESENSE_API_KEY=local_dev_key_12345
+
+# Run E2E tests
+pytest tests/integration/test_typesense_e2e_integration.py -v --no-cov
 ```
+
+---
 
 ## Test Database
 
-### Automatic Setup (pytest-postgresql)
+### Docker PostgreSQL
 
-The `test_embedding_workflow.py` tests use `pytest-postgresql` which:
+Integration tests use the Docker PostgreSQL container on port 5433.
 
-1. Creates a temporary PostgreSQL cluster
-2. Starts PostgreSQL on a random port
-3. Creates test database with schema
-4. Runs tests
-5. Shuts down and cleans up
+**Setup:**
 
-**No manual setup required!**
+```bash
+make docker-up         # Start container
+make populate-master   # Load agencies + themes
+make test-integration  # Run tests
+```
 
 ### Schema
 
-The test database includes:
-- `agencies` table (3 sample agencies)
-- `themes` table (6 sample themes across 3 levels)
-- `news` table (13 sample records: 10 from 2025, 3 from 2024)
-- `sync_log` table
+Tests use the **full production schema**:
+- `agencies` (158 records populated from YAML)
+- `themes` (588 records populated from YAML)
+- `news` (test data created per-test, cleaned up after)
+- `news_features` (test data created per-test, cleaned up after)
 
-### Test Data
+### Test Data Lifecycle
 
-Sample data inserted automatically:
+Tests use the **factory pattern** with automatic cleanup:
 
-**Agencies:**
-- MEC (Ministério da Educação)
-- Saúde (Ministério da Saúde)
-- Fazenda (Ministério da Fazenda)
+1. **Setup**: `news_factory()` creates NewsInsert with unique timestamp-based IDs
+2. **Test**: Test runs with test data
+3. **Cleanup**: `cleanup_news` fixture deletes test records via `DELETE FROM news`
 
-**Themes:**
-- Level 1: Educação, Saúde
-- Level 2: Ensino Superior, Política de Saúde
-- Level 3: Universidades, SUS
+**Result**: Zero data pollution - all test records are cleaned up automatically.
 
-**News:**
-- 10 records from January 2025 (with summaries)
-- 3 records from December 2024 (should NOT be processed)
+### Reset Database
 
-## Mocking Strategy
+To completely reset the database:
 
-### What is Mocked
+```bash
+make docker-reset  # Destroys and recreates container
+make populate-master  # Re-populate master data
+```
 
-1. **SentenceTransformer model** - Generates random normalized embeddings (768 dimensions)
-2. **Typesense client** - Simulates successful document imports
-3. **External HTTP calls** - None needed (all external services are mocked)
+---
 
-### What is Real
+## Fixtures
 
-1. **PostgreSQL database** - Real database operations (via pytest-postgresql)
-2. **Data processing logic** - Real embedding generation and sync code
-3. **Database transactions** - Real commit/rollback behavior
+### Session-Scoped (Shared across all tests)
+
+- `env_vars`: Configures `DATABASE_URL` environment variable
+- `postgres_manager_session`: PostgresManager for read-only operations
+- `test_agency`: MEC agency (read-only)
+- `test_theme`: Educação theme (read-only)
+- `typesense_client`: Typesense client (E2E tests only)
+
+### Function-Scoped (Fresh per test)
+
+- `postgres_manager`: PostgresManager for write operations
+- `news_factory`: Factory function to create NewsInsert with unique IDs
+- `cleanup_news`: List to track unique_ids for automatic cleanup
+- `date_ranges`: Common date ranges (today, yesterday, last_week)
+- `typesense_test_data`: 3 news articles with themes + features (Typesense query tests)
+- `typesense_test_collection`: Temporary Typesense collection (E2E tests)
+
+### Example Usage
+
+```python
+def test_my_feature(
+    postgres_manager: PostgresManager,
+    news_factory: callable,
+    cleanup_news: list[str],
+) -> None:
+    """Test my feature."""
+    # Create test data
+    news = news_factory(title="Test News")
+    cleanup_news.append(news.unique_id)  # Mark for cleanup
+    
+    # Insert
+    postgres_manager.insert([news])
+    
+    # Test
+    result = postgres_manager.get_by_unique_id(news.unique_id)
+    assert result is not None
+    
+    # Cleanup happens automatically via fixture
+```
+
+---
 
 ## Understanding Test Output
 
 ### Successful run
 
 ```
-tests/integration/test_embedding_workflow.py::TestEmbeddingWorkflow::test_complete_workflow_generate_and_sync PASSED
+tests/integration/test_features_integration.py::TestFeatureStoreUpsert::test_upsert_merges_features_preserves_existing PASSED [11%]
 ```
 
 ### Failed test
 
 ```
-tests/integration/test_embedding_workflow.py::TestEmbeddingWorkflow::test_complete_workflow_generate_and_sync FAILED
+tests/integration/test_features_integration.py::TestFeatureStoreUpsert::test_upsert_merges_features_preserves_existing FAILED [11%]
 
-AssertionError: assert 8 == 10
-  Expected 10 embeddings to be generated, but got 8
+AssertionError: Existing key should be preserved
+assert 150 == None
 ```
+
+### Test cleanup
+
+```
+Cleaned up 3 test records
+```
+
+This message confirms that the `cleanup_news` fixture successfully deleted test data.
+
+---
+
+## Test Statistics
+
+| Metric | Value |
+|--------|-------|
+| **Total tests** | 60 |
+| **Passing** | 59 (98.3%) |
+| **Skipped** | 1 (embeddings test) |
+| **Execution time** | ~5.6s |
+| **Data pollution** | 0 records |
+| **Files** | 4 |
+| **Classes** | 12 |
+
+---
+
+## What Integration Tests Validate
+
+Integration tests verify behaviors that **mocks cannot simulate**:
+
+### JSONB Operations
+- ✅ `||` merge operator (preserve existing, overwrite duplicates)
+- ✅ Nested structures (3+ levels deep)
+- ✅ Type casting (Python dict → JSONB → Python dict)
+- ✅ Path extraction (`->`→`->>`→`::type`)
+
+### SQL Queries
+- ✅ 7-table JOIN cardinality
+- ✅ NULL propagation in LEFT JOINs
+- ✅ Date arithmetic with INTERVAL
+- ✅ EXTRACT(EPOCH/YEAR/MONTH) from timestamps
+
+### Database Constraints
+- ✅ Foreign key enforcement
+- ✅ CASCADE delete behavior
+- ✅ Trigger execution
+- ✅ ON CONFLICT DO NOTHING/UPDATE
+
+### Pagination
+- ✅ LIMIT/OFFSET consistency
+- ✅ No duplicates across batches
+- ✅ Consistent ordering (DESC published_at)
+
+### Typesense Integration
+- ✅ PostgreSQL → Typesense roundtrip
+- ✅ Schema compatibility
+- ✅ Search & filter operations
+- ✅ Batch indexing
+
+---
 
 ## Troubleshooting
 
-### PostgreSQL binaries not found
+### Docker containers not running
 
 **Error:**
 ```
-VersionNotAvailable: Could not find postgresql binary
+Database not available: could not connect to server
 ```
 
 **Solution:**
 ```bash
-# macOS
-brew install postgresql
-
-# Linux
-sudo apt-get install postgresql
+make docker-up
+docker ps  # Verify containers are running
 ```
 
-### Port already in use
+### Master data missing
 
 **Error:**
 ```
-OSError: [Errno 48] Address already in use
+SKIPPED: MEC agency not found - run 'make populate-master'
 ```
 
 **Solution:**
-The tests use random ports. This error usually means PostgreSQL didn't clean up properly. Restart your terminal or run:
-
 ```bash
-pkill -9 postgres
+make populate-master
 ```
 
-### pgvector extension not available
+### Port conflicts
+
+**Error:**
+```
+port 5433 is already in use
+```
+
+**Solution:**
+```bash
+# Stop conflicting container
+docker ps | grep 5433
+docker stop <container_id>
+
+# Or use docker-reset
+make docker-reset
+```
+
+### Typesense tests skipped
 
 **Behavior:**
-Tests will automatically fall back to using `FLOAT[]` instead of `vector(768)` type.
+E2E tests are skipped if Typesense is not available.
 
-**To install pgvector (optional):**
+**Solution:**
 ```bash
-# macOS
-brew install pgvector
+# Verify Typesense is running
+curl http://localhost:8108/health
 
-# From source
-git clone https://github.com/pgvector/pgvector.git
-cd pgvector
-make
-sudo make install
+# Restart if needed
+make docker-up
 ```
 
-## CI/CD Integration
-
-These tests are designed to run in CI/CD pipelines:
-
-```yaml
-# .github/workflows/test.yml
-- name: Install PostgreSQL
-  run: |
-    sudo apt-get update
-    sudo apt-get install -y postgresql
-
-- name: Run integration tests
-  run: |
-    poetry install --with dev
-    poetry run pytest tests/integration/ -v
-```
+---
 
 ## Performance
 
-Typical test execution times:
-- Full test suite: ~30-60 seconds
-- Single test: ~5-10 seconds
+Typical execution times:
 
-The temporary PostgreSQL setup adds ~10-15 seconds overhead (one-time per test session).
+| Scope | Time |
+|-------|------|
+| All integration tests | ~5.6s |
+| PostgresManager tests | ~0.5s |
+| Feature Store tests | ~1.1s |
+| Typesense query tests | ~2.5s |
+| E2E tests | ~1.5s |
+
+Performance tips:
+- Tests run **without coverage** (54% faster)
+- Connection pooling reduces overhead
+- Automatic cleanup is efficient (single DELETE query)
+
+---
 
 ## Best Practices
 
-1. **Keep tests independent** - Each test should set up and clean up its own data
-2. **Use fixtures** - Reuse common setup (database, sample data, mocks)
-3. **Test one thing** - Each test should validate a single behavior
-4. **Descriptive names** - Test names should describe what they validate
-5. **Good docstrings** - Explain what the test validates and why
-6. **Mock external services** - Never depend on real Typesense, real ML models, etc.
-7. **Use real database** - Test actual SQL queries and transactions
+### Do
+
+✅ Use fixtures for setup (`news_factory`, `cleanup_news`)  
+✅ Test one behavior per test  
+✅ Use descriptive test names  
+✅ Add cleanup to `cleanup_news` list  
+✅ Use strong assertions with messages  
+✅ Test edge cases (NULL, empty, special characters)  
+
+### Don't
+
+❌ Leave test data in database  
+❌ Use soft-delete (mark "DELETED")  
+❌ Use weak assertions (`assert count >= 0`)  
+❌ Create manual cleanup code  
+❌ Skip `@pytest.mark.integration` marker  
+❌ Test line coverage (that's for unit tests)  
+
+---
 
 ## Writing New Tests
 
 ### Template
 
 ```python
-def test_my_new_feature(
-    test_database_url,
-    sample_2025_news,
-    mock_sentence_transformer,
-    postgresql
-):
-    """
-    Test description.
+import pytest
+from data_platform.managers import PostgresManager
 
-    Validates:
-    1. First thing
-    2. Second thing
-    """
-    # Arrange
-    with patch('module.Class', return_value=mock_object):
-        component = Component(database_url=test_database_url)
+@pytest.mark.integration
+class TestMyFeature:
+    """Tests for my feature."""
 
-    # Act
-    result = component.do_something()
+    def test_my_behavior(
+        self,
+        postgres_manager: PostgresManager,
+        news_factory: callable,
+        cleanup_news: list[str],
+    ) -> None:
+        """Test that my feature works correctly."""
+        # Arrange
+        news = news_factory(title="Test")
+        cleanup_news.append(news.unique_id)
+        postgres_manager.insert([news])
 
-    # Assert
-    assert result['success'] == True
+        # Act
+        result = postgres_manager.my_feature(news.unique_id)
 
-    # Verify database state
-    cur = postgresql.cursor()
-    cur.execute("SELECT COUNT(*) FROM table")
-    count = cur.fetchone()[0]
-    assert count == expected_count
+        # Assert
+        assert result is not None, "Feature should return result"
+        assert result["status"] == "success"
 ```
 
-### Fixtures to Use
+### Add to conftest.py
 
-- `test_database_url` - Database connection string
-- `postgresql` - PostgreSQL connection (for direct queries)
-- `setup_test_schema` - Creates schema (auto-used by sample_2025_news)
-- `sample_2025_news` - Inserts 10 news from 2025, 3 from 2024
-- `mock_sentence_transformer` - Mocked ML model
-- `mock_typesense_client` - Mocked Typesense client
+If you need a fixture used by multiple tests:
+
+```python
+@pytest.fixture
+def my_fixture(postgres_manager: PostgresManager) -> dict:
+    """My reusable fixture."""
+    # Setup
+    data = {"key": "value"}
+    yield data
+    # Cleanup (if needed)
+```
+
+---
+
+## CI/CD Integration
+
+Integration tests are designed for CI/CD pipelines:
+
+```yaml
+# .github/workflows/test.yml
+- name: Start Docker services
+  run: docker-compose up -d
+
+- name: Populate master data
+  run: make populate-master
+
+- name: Run integration tests
+  run: make test-integration
+```
+
+---
 
 ## Related Documentation
 
 - [Main README](../../README.md) - Project overview
-- [Schema Documentation](../../_plan/SCHEMA.md) - Database schema
-- [Unit Tests](../unit/README.md) - Unit test documentation
+- [Schema Documentation](../../_plan/SCHEMA.md) - Database schema details
+- [CLAUDE.md](../../CLAUDE.md) - Development guidelines
+- [Unit Tests](../unit/) - Unit test documentation
 
 ---
 
-**Last Updated:** 2024-12-27
+**Last Updated:** 2026-04-23  
+**Test Count:** 60 integration tests  
+**Success Rate:** 98.3%

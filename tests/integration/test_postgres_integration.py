@@ -5,8 +5,6 @@ These tests require a running PostgreSQL database (via Cloud SQL Proxy or local 
 Run with: pytest tests/integration/ -v
 """
 
-import os
-from collections.abc import Generator
 from datetime import UTC, datetime
 
 import pytest
@@ -14,48 +12,16 @@ import pytest
 from data_platform.managers import PostgresManager
 from data_platform.models import NewsInsert
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev"
-)
 
-
-@pytest.fixture(scope="module")  # type: ignore[untyped-decorator]
-def env_vars() -> Generator[None, None, None]:
-    """Configura variáveis de ambiente para todos os testes."""
-    original_env = os.environ.copy()
-
-    os.environ.update(
-        {
-            "DATABASE_URL": DATABASE_URL,
-        }
-    )
-
-    yield
-
-    # Restaurar env vars originais
-    os.environ.clear()
-    os.environ.update(original_env)
-
-
-@pytest.fixture(scope="module")  # type: ignore[untyped-decorator]
-def postgres_manager(env_vars: None) -> Generator[PostgresManager, None, None]:
-    """Create PostgresManager instance for integration tests."""
-    try:
-        manager = PostgresManager()
-        manager.load_cache()
-        yield manager
-        manager.close_all()
-    except Exception as e:
-        pytest.skip(f"Database not available: {e}")
-
-
+@pytest.mark.integration
 class TestPostgresIntegration:
     """Integration tests for PostgresManager."""
 
     def test_connection(self, postgres_manager: PostgresManager) -> None:
         """Test database connection works."""
         count = postgres_manager.count()
-        assert count >= 0  # Should return a valid count
+        assert isinstance(count, int), "Count should return an integer"
+        assert count >= 0, "Count should be non-negative"
 
     def test_cache_loading(self, postgres_manager: PostgresManager) -> None:
         """Test agency and theme cache loading."""
@@ -76,139 +42,114 @@ class TestPostgresIntegration:
         assert theme01 is not None
         assert theme01.level == 1
 
-    def test_insert_and_get(self, postgres_manager: PostgresManager) -> None:
+    def test_insert_and_get(
+        self,
+        postgres_manager: PostgresManager,
+        news_factory: callable,
+        cleanup_news: list[str],
+    ) -> None:
         """Test inserting and retrieving news."""
-        # Get an agency for testing
-        agency = postgres_manager.get_agency_by_key("mec")
-        assert agency is not None
-
-        # Create test news
-        test_news = NewsInsert(
-            unique_id=f"test_{datetime.now().timestamp()}",
-            agency_id=agency.id,
-            title="Test Integration News",
-            url="https://example.com/test",
-            content="Test content for integration testing",
-            published_at=datetime.now(UTC),
-            extracted_at=datetime.now(UTC),
-            agency_key="mec",
-            agency_name=agency.name,
-        )
+        # Create test news using factory
+        test_news = news_factory(title="Test Integration News")
+        cleanup_news.append(test_news.unique_id)
 
         # Insert
         inserted = postgres_manager.insert([test_news])
-        assert inserted == 1
+        assert inserted == 1, "Should insert exactly 1 record"
 
         # Retrieve
         news = postgres_manager.get_by_unique_id(test_news.unique_id)
-        assert news is not None
+        assert news is not None, "Inserted news should be retrievable"
         assert news.title == "Test Integration News"
-        assert news.agency_id == agency.id
+        assert news.agency_id == test_news.agency_id
+        assert news.url == test_news.url
+        assert news.content == test_news.content
 
-        # Clean up
-        postgres_manager.update(test_news.unique_id, {"title": "DELETED - Integration Test"})
+        # No manual cleanup needed - cleanup_news fixture handles it
 
-    def test_update(self, postgres_manager: PostgresManager) -> None:
+    def test_update(
+        self,
+        postgres_manager: PostgresManager,
+        news_factory: callable,
+        cleanup_news: list[str],
+    ) -> None:
         """Test updating news."""
-        # Get an agency for testing
-        agency = postgres_manager.get_agency_by_key("mec")
-        assert agency is not None
-
         # Create and insert test news
-        unique_id = f"test_update_{datetime.now().timestamp()}"
-        test_news = NewsInsert(
-            unique_id=unique_id,
-            agency_id=agency.id,
-            title="Original Title",
-            published_at=datetime.now(UTC),
-            agency_key="mec",
-            agency_name=agency.name,
-        )
-
+        test_news = news_factory(title="Original Title")
+        cleanup_news.append(test_news.unique_id)
         postgres_manager.insert([test_news])
 
         # Update
         updated = postgres_manager.update(
-            unique_id, {"title": "Updated Title", "summary": "Test summary"}
+            test_news.unique_id, {"title": "Updated Title", "summary": "Test summary"}
         )
-        assert updated is True
+        assert updated is True, "Update should return True"
 
         # Verify update
-        news = postgres_manager.get_by_unique_id(unique_id)
+        news = postgres_manager.get_by_unique_id(test_news.unique_id)
+        assert news is not None
         assert news.title == "Updated Title"
         assert news.summary == "Test summary"
 
-        # Clean up
-        postgres_manager.update(unique_id, {"title": "DELETED - Integration Test"})
+        # No manual cleanup needed - cleanup_news fixture handles it
 
-    def test_count_with_filters(self, postgres_manager: PostgresManager) -> None:
+    def test_count_with_filters(
+        self, postgres_manager: PostgresManager, test_agency
+    ) -> None:
         """Test counting with filters."""
         # Get count of all news
         total = postgres_manager.count()
+        assert isinstance(total, int), "Count should return an integer"
         assert total >= 0
 
         # Get count by agency
-        agency = postgres_manager.get_agency_by_key("mec")
-        if agency:
-            count_by_agency = postgres_manager.count({"agency_id": agency.id})
-            assert count_by_agency >= 0
+        count_by_agency = postgres_manager.count({"agency_id": test_agency.id})
+        assert isinstance(count_by_agency, int), "Count should return an integer"
+        assert count_by_agency <= total, "Agency count should be <= total count"
 
-    def test_insert_duplicate_ignores(self, postgres_manager: PostgresManager) -> None:
+    def test_insert_duplicate_ignores(
+        self,
+        postgres_manager: PostgresManager,
+        news_factory: callable,
+        cleanup_news: list[str],
+    ) -> None:
         """Test that inserting duplicate unique_id is ignored."""
-        agency = postgres_manager.get_agency_by_key("mec")
-        unique_id = f"test_dup_{datetime.now().timestamp()}"
-
-        test_news = NewsInsert(
-            unique_id=unique_id,
-            agency_id=agency.id,
-            title="Original",
-            published_at=datetime.now(UTC),
-            agency_key="mec",
-            agency_name=agency.name,
-        )
+        test_news = news_factory(title="Original")
+        cleanup_news.append(test_news.unique_id)
 
         # First insert
         inserted1 = postgres_manager.insert([test_news])
-        assert inserted1 == 1
+        assert inserted1 == 1, "First insert should succeed"
 
         # Second insert (should be ignored)
         inserted2 = postgres_manager.insert([test_news])
-        assert inserted2 == 0  # ON CONFLICT DO NOTHING
+        assert inserted2 == 0, "Duplicate insert should be ignored (ON CONFLICT DO NOTHING)"
 
-        # Clean up
-        postgres_manager.update(unique_id, {"title": "DELETED - Integration Test"})
+        # No manual cleanup needed - cleanup_news fixture handles it
 
-    def test_insert_with_allow_update(self, postgres_manager: PostgresManager) -> None:
+    def test_insert_with_allow_update(
+        self,
+        postgres_manager: PostgresManager,
+        news_factory: callable,
+        cleanup_news: list[str],
+    ) -> None:
         """Test insert with allow_update=True."""
-        agency = postgres_manager.get_agency_by_key("mec")
-        unique_id = f"test_upd_{datetime.now().timestamp()}"
-
         # First insert
-        test_news1 = NewsInsert(
-            unique_id=unique_id,
-            agency_id=agency.id,
-            title="Original",
-            published_at=datetime.now(UTC),
-            agency_key="mec",
-            agency_name=agency.name,
-        )
+        test_news1 = news_factory(title="Original")
+        cleanup_news.append(test_news1.unique_id)
         postgres_manager.insert([test_news1])
 
         # Second insert with different title and allow_update=True
-        test_news2 = NewsInsert(
-            unique_id=unique_id,
-            agency_id=agency.id,
+        test_news2 = news_factory(
+            unique_id=test_news1.unique_id,  # Same unique_id
             title="Updated via Insert",
-            published_at=datetime.now(UTC),
-            agency_key="mec",
-            agency_name=agency.name,
         )
         inserted = postgres_manager.insert([test_news2], allow_update=True)
-        assert inserted == 1
+        assert inserted == 1, "Insert with allow_update should return 1"
 
         # Verify update
-        news = postgres_manager.get_by_unique_id(unique_id)
+        news = postgres_manager.get_by_unique_id(test_news1.unique_id)
+        assert news is not None
         assert news.title == "Updated via Insert"
 
-        # Clean up
-        postgres_manager.update(unique_id, {"title": "DELETED - Integration Test"})
+        # No manual cleanup needed - cleanup_news fixture handles it
