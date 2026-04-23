@@ -1,5 +1,6 @@
 """Unit tests for trending score computation."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -28,20 +29,11 @@ class TestTrendingQuery:
         assert "{project_id}" in TRENDING_QUERY
 
 
-def _make_engine_mock():
-    """Build a mock SQLAlchemy engine that supports `with engine.begin() as conn`."""
-    mock_conn = MagicMock()
-    mock_engine = MagicMock()
-    mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
-    mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
-    return mock_engine, mock_conn
-
-
 class TestBatchUpsertTrending:
     """Tests for batch_upsert_trending function."""
 
-    def test_upserts_all_rows(self):
-        mock_engine, mock_conn = _make_engine_mock()
+    def test_upserts_all_rows(self, mock_sqlalchemy_engine):
+        mock_engine, mock_conn = mock_sqlalchemy_engine
 
         df = pd.DataFrame({
             "unique_id": ["art-1", "art-2", "art-3"],
@@ -55,8 +47,8 @@ class TestBatchUpsertTrending:
         assert mock_conn.execute.call_count == 3
         mock_engine.dispose.assert_called_once()
 
-    def test_handles_empty_dataframe(self):
-        mock_engine, mock_conn = _make_engine_mock()
+    def test_handles_empty_dataframe(self, mock_sqlalchemy_engine):
+        mock_engine, mock_conn = mock_sqlalchemy_engine
 
         df = pd.DataFrame(columns=["unique_id", "trending_score"])
 
@@ -66,8 +58,8 @@ class TestBatchUpsertTrending:
         assert count == 0
         mock_engine.dispose.assert_called_once()
 
-    def test_upserts_correct_feature_dict(self):
-        mock_engine, mock_conn = _make_engine_mock()
+    def test_upserts_correct_feature_dict(self, mock_sqlalchemy_engine):
+        mock_engine, mock_conn = mock_sqlalchemy_engine
 
         df = pd.DataFrame({
             "unique_id": ["art-1"],
@@ -77,15 +69,14 @@ class TestBatchUpsertTrending:
         with patch("sqlalchemy.create_engine", return_value=mock_engine):
             batch_upsert_trending("postgresql://test", df)
 
-        import json
         execute_call = mock_conn.execute.call_args
         params = execute_call[0][1]
         assert params["uid"] == "art-1"
         features = json.loads(params["features"])
         assert features == {"trending_score": pytest.approx(3.14)}
 
-    def test_closes_engine_on_error(self):
-        mock_engine, mock_conn = _make_engine_mock()
+    def test_closes_engine_on_error(self, mock_sqlalchemy_engine):
+        mock_engine, mock_conn = mock_sqlalchemy_engine
         mock_conn.execute.side_effect = Exception("DB error")
 
         df = pd.DataFrame({"unique_id": ["art-1"], "trending_score": [1.0]})

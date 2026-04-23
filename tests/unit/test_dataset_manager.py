@@ -47,22 +47,9 @@ class TestDatasetManagerInit:
 class TestDatasetManagerInsert:
     """Tests for insert() method."""
 
-    @pytest.fixture
-    def mock_manager(self):
-        """Create DatasetManager with mocked dependencies."""
-        with patch("data_platform.managers.dataset_manager.get_token") as mock_token:
-            mock_token.return_value = "hf_test"
-            with patch.object(DatasetManager, "_load_existing_dataset"):
-                with patch.object(DatasetManager, "_push_datasets"):
-                    with patch.object(
-                        DatasetManager, "_sort_dataset", side_effect=lambda ds: ds
-                    ):
-                        manager = DatasetManager()
-                        yield manager
-
-    def test_insert_into_empty_dataset(self, mock_manager):
+    def test_insert_into_empty_dataset(self, mock_dataset_manager_full):
         """Insert into empty dataset creates new dataset."""
-        mock_manager._load_existing_dataset.return_value = None
+        mock_dataset_manager_full._load_existing_dataset.return_value = None
 
         new_data = OrderedDict(
             {
@@ -79,12 +66,12 @@ class TestDatasetManagerInsert:
             mock_dataset = MagicMock()
             mock_from_dict.return_value = mock_dataset
 
-            mock_manager.insert(new_data)
+            mock_dataset_manager_full.insert(new_data)
 
             mock_from_dict.assert_called_once_with(new_data)
-            mock_manager._push_datasets.assert_called_once()
+            mock_dataset_manager_full._push_datasets.assert_called_once()
 
-    def test_insert_with_allow_update_false(self, mock_manager):
+    def test_insert_with_allow_update_false(self, mock_dataset_manager_full):
         """Insert with allow_update=False passes correct flag to _merge_new_into_dataset."""
         existing = Dataset.from_dict(
             {
@@ -94,7 +81,7 @@ class TestDatasetManagerInsert:
                 "published_at": ["2024-01-01"],
             }
         )
-        mock_manager._load_existing_dataset.return_value = existing
+        mock_dataset_manager_full._load_existing_dataset.return_value = existing
 
         new_data = OrderedDict(
             {
@@ -105,15 +92,15 @@ class TestDatasetManagerInsert:
             }
         )
 
-        with patch.object(mock_manager, "_merge_new_into_dataset") as mock_merge:
+        with patch.object(mock_dataset_manager_full, "_merge_new_into_dataset") as mock_merge:
             mock_merge.return_value = existing
 
-            mock_manager.insert(new_data, allow_update=False)
+            mock_dataset_manager_full.insert(new_data, allow_update=False)
 
             mock_merge.assert_called_once()
             assert mock_merge.call_args[1]["allow_update"] is False
 
-    def test_insert_with_allow_update_true(self, mock_manager):
+    def test_insert_with_allow_update_true(self, mock_dataset_manager_full):
         """Insert with allow_update=True passes correct flag to _merge_new_into_dataset."""
         existing = Dataset.from_dict(
             {
@@ -123,7 +110,7 @@ class TestDatasetManagerInsert:
                 "published_at": ["2024-01-01"],
             }
         )
-        mock_manager._load_existing_dataset.return_value = existing
+        mock_dataset_manager_full._load_existing_dataset.return_value = existing
 
         new_data = OrderedDict(
             {
@@ -134,10 +121,10 @@ class TestDatasetManagerInsert:
             }
         )
 
-        with patch.object(mock_manager, "_merge_new_into_dataset") as mock_merge:
+        with patch.object(mock_dataset_manager_full, "_merge_new_into_dataset") as mock_merge:
             mock_merge.return_value = existing
 
-            mock_manager.insert(new_data, allow_update=True)
+            mock_dataset_manager_full.insert(new_data, allow_update=True)
 
             assert mock_merge.call_args[1]["allow_update"] is True
 
@@ -145,30 +132,18 @@ class TestDatasetManagerInsert:
 class TestDatasetManagerUpdate:
     """Tests for update() method."""
 
-    @pytest.fixture
-    def mock_manager(self):
-        with patch("data_platform.managers.dataset_manager.get_token") as mock_token:
-            mock_token.return_value = "hf_test"
-            with patch.object(DatasetManager, "_load_existing_dataset"):
-                with patch.object(DatasetManager, "_push_datasets"):
-                    with patch.object(
-                        DatasetManager, "_sort_dataset", side_effect=lambda ds: ds
-                    ):
-                        manager = DatasetManager()
-                        yield manager
-
-    def test_update_nonexistent_dataset_returns_early(self, mock_manager):
+    def test_update_nonexistent_dataset_returns_early(self, mock_dataset_manager_full):
         """Update on non-existent dataset returns early."""
-        mock_manager._load_existing_dataset.return_value = None
+        mock_dataset_manager_full._load_existing_dataset.return_value = None
 
         df = pd.DataFrame({"unique_id": ["abc123"], "title": ["Updated"]})
 
         # Should not raise, just log and return
-        mock_manager.update(df)
+        mock_dataset_manager_full.update(df)
 
-        mock_manager._push_datasets.assert_not_called()
+        mock_dataset_manager_full._push_datasets.assert_not_called()
 
-    def test_update_applies_changes(self, mock_manager):
+    def test_update_applies_changes(self, mock_dataset_manager_full):
         """Update applies changes to existing rows."""
         existing = Dataset.from_dict(
             {
@@ -178,7 +153,7 @@ class TestDatasetManagerUpdate:
                 "published_at": ["2024-01-01"],
             }
         )
-        mock_manager._load_existing_dataset.return_value = existing
+        mock_dataset_manager_full._load_existing_dataset.return_value = existing
 
         df = pd.DataFrame(
             {
@@ -187,26 +162,19 @@ class TestDatasetManagerUpdate:
             }
         )
 
-        with patch.object(mock_manager, "_apply_updates") as mock_apply:
+        with patch.object(mock_dataset_manager_full, "_apply_updates") as mock_apply:
             mock_apply.return_value = existing
 
-            mock_manager.update(df)
+            mock_dataset_manager_full.update(df)
 
             mock_apply.assert_called_once()
-            mock_manager._push_datasets.assert_called_once()
+            mock_dataset_manager_full._push_datasets.assert_called_once()
 
 
 class TestDatasetManagerGet:
     """Tests for get() method."""
 
-    @pytest.fixture
-    def mock_manager(self):
-        with patch("data_platform.managers.dataset_manager.get_token") as mock_token:
-            mock_token.return_value = "hf_test"
-            manager = DatasetManager()
-            yield manager
-
-    def test_get_with_date_range(self, mock_manager):
+    def test_get_with_date_range(self, mock_dataset_manager_base):
         """Get filters by date range."""
         dataset = Dataset.from_dict(
             {
@@ -216,16 +184,16 @@ class TestDatasetManagerGet:
             }
         )
 
-        with patch.object(mock_manager, "_load_existing_dataset") as mock_load:
+        with patch.object(mock_dataset_manager_base, "_load_existing_dataset") as mock_load:
             mock_load.return_value = dataset
 
-            result = mock_manager.get("2024-01-01", "2024-01-20")
+            result = mock_dataset_manager_base.get("2024-01-01", "2024-01-20")
 
             assert len(result) == 2
             assert "abc" in result["unique_id"].values
             assert "def" in result["unique_id"].values
 
-    def test_get_with_agency_filter(self, mock_manager):
+    def test_get_with_agency_filter(self, mock_dataset_manager_base):
         """Get filters by agency."""
         dataset = Dataset.from_dict(
             {
@@ -235,20 +203,20 @@ class TestDatasetManagerGet:
             }
         )
 
-        with patch.object(mock_manager, "_load_existing_dataset") as mock_load:
+        with patch.object(mock_dataset_manager_base, "_load_existing_dataset") as mock_load:
             mock_load.return_value = dataset
 
-            result = mock_manager.get("2024-01-01", "2024-01-31", agency="mec")
+            result = mock_dataset_manager_base.get("2024-01-01", "2024-01-31", agency="mec")
 
             assert len(result) == 1
             assert result.iloc[0]["unique_id"] == "abc"
 
-    def test_get_empty_dataset_returns_empty_df(self, mock_manager):
+    def test_get_empty_dataset_returns_empty_df(self, mock_dataset_manager_base):
         """Get on empty dataset returns empty DataFrame."""
-        with patch.object(mock_manager, "_load_existing_dataset") as mock_load:
+        with patch.object(mock_dataset_manager_base, "_load_existing_dataset") as mock_load:
             mock_load.return_value = None
 
-            result = mock_manager.get("2024-01-01", "2024-01-31")
+            result = mock_dataset_manager_base.get("2024-01-01", "2024-01-31")
 
             assert isinstance(result, pd.DataFrame)
             assert len(result) == 0
@@ -257,34 +225,27 @@ class TestDatasetManagerGet:
 class TestDatasetManagerLoadExisting:
     """Tests for _load_existing_dataset() method."""
 
-    @pytest.fixture
-    def mock_manager(self):
-        with patch("data_platform.managers.dataset_manager.get_token") as mock_token:
-            mock_token.return_value = "hf_test"
-            manager = DatasetManager()
-            yield manager
-
     @patch("data_platform.managers.dataset_manager.load_dataset")
     @patch("data_platform.managers.dataset_manager.shutil.rmtree")
     @patch("data_platform.managers.dataset_manager.Path.home")
-    def test_load_clears_cache(self, mock_home, mock_rmtree, mock_load, mock_manager):
+    def test_load_clears_cache(self, mock_home, mock_rmtree, mock_load, mock_dataset_manager_base):
         """Load clears HF cache before loading."""
         mock_home.return_value = Path("/fake/home")
         mock_dataset = MagicMock()
         mock_load.return_value = mock_dataset
 
         with patch.object(Path, "exists", return_value=True):
-            result = mock_manager._load_existing_dataset()
+            result = mock_dataset_manager_base._load_existing_dataset()
 
             mock_rmtree.assert_called_once()
             mock_load.assert_called_once()
 
     @patch("data_platform.managers.dataset_manager.load_dataset")
-    def test_load_returns_none_on_not_found(self, mock_load, mock_manager):
+    def test_load_returns_none_on_not_found(self, mock_load, mock_dataset_manager_base):
         """Load returns None when dataset not found."""
         mock_load.side_effect = DatasetNotFoundError("Not found")
 
-        result = mock_manager._load_existing_dataset()
+        result = mock_dataset_manager_base._load_existing_dataset()
 
         assert result is None
 
@@ -292,28 +253,21 @@ class TestDatasetManagerLoadExisting:
 class TestDatasetManagerErrorHandling:
     """Tests for error handling scenarios."""
 
-    @pytest.fixture
-    def mock_manager(self):
-        with patch("data_platform.managers.dataset_manager.get_token") as mock_token:
-            mock_token.return_value = "hf_test"
-            manager = DatasetManager()
-            yield manager
-
-    def test_network_error_on_load(self, mock_manager):
+    def test_network_error_on_load(self, mock_dataset_manager_base):
         """Network error during load propagates."""
-        with patch.object(mock_manager, "_load_existing_dataset") as mock_load:
+        with patch.object(mock_dataset_manager_base, "_load_existing_dataset") as mock_load:
             mock_load.side_effect = ConnectionError("Network unreachable")
 
             with pytest.raises(ConnectionError):
-                mock_manager.get("2024-01-01", "2024-01-31")
+                mock_dataset_manager_base.get("2024-01-01", "2024-01-31")
 
-    def test_push_error_propagates(self, mock_manager):
+    def test_push_error_propagates(self, mock_dataset_manager_base):
         """Push error propagates to caller."""
-        mock_manager._load_existing_dataset = MagicMock(return_value=None)
+        mock_dataset_manager_base._load_existing_dataset = MagicMock(return_value=None)
         mock_dataset = MagicMock(spec=Dataset)
 
-        with patch.object(mock_manager, "_push_datasets") as mock_push, \
-             patch.object(mock_manager, "_sort_dataset", return_value=mock_dataset), \
+        with patch.object(mock_dataset_manager_base, "_push_datasets") as mock_push, \
+             patch.object(mock_dataset_manager_base, "_sort_dataset", return_value=mock_dataset), \
              patch("data_platform.managers.dataset_manager.Dataset.from_dict",
                    return_value=mock_dataset):
 
@@ -329,4 +283,4 @@ class TestDatasetManagerErrorHandling:
             )
 
             with pytest.raises(Exception, match="Hub API error"):
-                mock_manager.insert(new_data)
+                mock_dataset_manager_base.insert(new_data)

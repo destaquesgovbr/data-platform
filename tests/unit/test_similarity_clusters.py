@@ -1,5 +1,6 @@
 """Unit tests for similar article clustering."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -61,20 +62,11 @@ class TestGroupSimilarArticles:
         assert result == {"a": ["b"]}
 
 
-def _make_engine_mock():
-    """Build a mock SQLAlchemy engine that supports `with engine.begin() as conn`."""
-    mock_conn = MagicMock()
-    mock_engine = MagicMock()
-    mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
-    mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
-    return mock_engine, mock_conn
-
-
 class TestBatchUpsertClusters:
     """Tests for batch upserting clusters to news_features."""
 
-    def test_upserts_all_clusters(self):
-        mock_engine, mock_conn = _make_engine_mock()
+    def test_upserts_all_clusters(self, mock_sqlalchemy_engine):
+        mock_engine, mock_conn = mock_sqlalchemy_engine
 
         with patch("sqlalchemy.create_engine", return_value=mock_engine):
             clusters = {"art-1": ["art-2", "art-3"], "art-2": ["art-1"]}
@@ -83,8 +75,8 @@ class TestBatchUpsertClusters:
         assert count == 2
         mock_engine.dispose.assert_called_once()
 
-    def test_upserts_correct_feature_dict(self):
-        mock_engine, mock_conn = _make_engine_mock()
+    def test_upserts_correct_feature_dict(self, mock_sqlalchemy_engine):
+        mock_engine, mock_conn = mock_sqlalchemy_engine
 
         with patch("sqlalchemy.create_engine", return_value=mock_engine):
             batch_upsert_clusters("postgresql://test", {"art-1": ["art-2", "art-3"]})
@@ -92,12 +84,11 @@ class TestBatchUpsertClusters:
         execute_call = mock_conn.execute.call_args
         params = execute_call[0][1]
         assert params["uid"] == "art-1"
-        import json
         features = json.loads(params["features"])
         assert features == {"similar_articles": ["art-2", "art-3"]}
 
-    def test_empty_clusters(self):
-        mock_engine, _ = _make_engine_mock()
+    def test_empty_clusters(self, mock_sqlalchemy_engine):
+        mock_engine, _ = mock_sqlalchemy_engine
 
         with patch("sqlalchemy.create_engine", return_value=mock_engine):
             count = batch_upsert_clusters("postgresql://test", {})
@@ -105,8 +96,8 @@ class TestBatchUpsertClusters:
         assert count == 0
         mock_engine.dispose.assert_called_once()
 
-    def test_closes_engine_on_error(self):
-        mock_engine, mock_conn = _make_engine_mock()
+    def test_closes_engine_on_error(self, mock_sqlalchemy_engine):
+        mock_engine, mock_conn = mock_sqlalchemy_engine
         mock_conn.execute.side_effect = Exception("DB error")
 
         with patch("sqlalchemy.create_engine", return_value=mock_engine):
