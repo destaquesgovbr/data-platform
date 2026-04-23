@@ -165,6 +165,8 @@ class TestFeatureStoreUpsert:
         cleanup_news: list[str],
     ) -> None:
         """Trigger auto-updates updated_at timestamp on upsert."""
+        import time
+
         news = news_factory()
         cleanup_news.append(news.unique_id)
         postgres_manager.insert([news])
@@ -184,6 +186,9 @@ class TestFeatureStoreUpsert:
         finally:
             postgres_manager.put_connection(conn)
 
+        # Wait to ensure different timestamp
+        time.sleep(0.001)
+
         # Second upsert (should trigger updated_at update)
         postgres_manager.upsert_features(news.unique_id, {"word_count": 200})
 
@@ -199,9 +204,9 @@ class TestFeatureStoreUpsert:
         finally:
             postgres_manager.put_connection(conn)
 
-        # Verify timestamp changed
+        # Verify timestamp changed (strict inequality)
         assert (
-            second_timestamp >= first_timestamp
+            second_timestamp > first_timestamp
         ), "updated_at should be updated on upsert"
 
 
