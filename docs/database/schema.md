@@ -108,6 +108,9 @@ CREATE TABLE news (
     updated_at              TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     synced_to_hf_at         TIMESTAMP WITH TIME ZONE,
 
+    -- Deduplication
+    content_hash            VARCHAR(16),    -- SHA-256 truncated (title+content normalized)
+
     -- Denormalized (performance)
     agency_key              VARCHAR(100),
     agency_name             VARCHAR(500)
@@ -120,6 +123,10 @@ CREATE TABLE news (
 - `idx_news_agency_id` on `agency_id`
 - `idx_news_most_specific_theme` on `most_specific_theme_id`
 
+**Deduplication indexes**:
+- `idx_news_agency_url_unique` (UNIQUE, partial) on `(agency_key, url) WHERE url IS NOT NULL`
+- `idx_news_content_hash` (partial) on `content_hash WHERE content_hash IS NOT NULL`
+
 **Performance indexes**:
 - `idx_news_agency_key` on `agency_key` (denormalized)
 - `idx_news_agency_date` on `(agency_id, published_at DESC)`
@@ -129,7 +136,8 @@ CREATE TABLE news (
 - `idx_news_fts` (GIN) on `to_tsvector('portuguese', title || ' ' || content)`
 
 **Key fields**:
-- `unique_id`: MD5(agency + published_at + title)
+- `unique_id`: slugify(title) + "_" + MD5(agency + published_at + title)[:6]
+- `content_hash`: SHA-256(normalize(title) + "\n" + normalize(content))[:16] for cross-agency dedup
 - `most_specific_theme_id`: Most granular theme (L3 > L2 > L1)
 - `synced_to_hf_at`: Last sync to HuggingFace Dataset
 - `agency_key`, `agency_name`: Denormalized from agencies for performance
