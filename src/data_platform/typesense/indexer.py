@@ -166,6 +166,12 @@ def prepare_document(row: pd.Series) -> dict[str, Any]:
         if cleaned_tags:  # Só adiciona se houver tags válidas
             doc["tags"] = cleaned_tags
 
+    # content_hash for cross-agency deduplication (group_by)
+    if pd.notna(row.get("content_hash")):
+        val = str(row["content_hash"]).strip()
+        if val:
+            doc["content_hash"] = val
+
     # Feature fields (optional, from news_features JOIN)
     feature_fields = [
         ("sentiment_label", str),

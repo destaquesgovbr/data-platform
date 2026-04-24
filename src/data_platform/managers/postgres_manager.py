@@ -545,6 +545,7 @@ class PostgresManager:
                 tm.code as most_specific_theme_code,
                 tm.label as most_specific_theme_label,
                 n.tags,
+                n.content_hash,
                 n.content_embedding,
                 nf.features->'sentiment'->>'label' AS sentiment_label,
                 (nf.features->'sentiment'->>'score')::float AS sentiment_score,
