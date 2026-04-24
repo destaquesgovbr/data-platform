@@ -130,6 +130,9 @@ def migrate(conn, dry_run: bool = False, batch_size: int = BATCH_SIZE) -> dict:
         news_del = _delete_batch(conn, batch)
         total_news_deleted += news_del
 
+    # Commit PG (authoritative) before best-effort Typesense cleanup
+    conn.commit()
+
     typesense_deleted = _try_delete_from_typesense(all_to_delete)
 
     elapsed = time.time() - t0
@@ -171,8 +174,6 @@ if __name__ == "__main__":
     conn = psycopg2.connect(database_url)
     try:
         result = migrate(conn, dry_run=args.dry_run, batch_size=args.batch_size)
-        if not args.dry_run:
-            conn.commit()
         print(result)
     except Exception as e:
         conn.rollback()
