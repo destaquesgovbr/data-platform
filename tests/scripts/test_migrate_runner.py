@@ -8,9 +8,6 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-# Add scripts/ to path so we can import the migration runner
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
-
 
 # ---------------------------------------------------------------------------
 # Discovery
