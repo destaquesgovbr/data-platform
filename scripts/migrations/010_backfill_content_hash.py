@@ -16,6 +16,8 @@ import unicodedata
 BATCH_SIZE = 5000
 
 
+# Canonical implementation: scraper/src/govbr_scraper/scrapers/content_hash.py
+# Inlined here to avoid cross-repo dependency at migration time.
 def normalize_text(text: str | None) -> str:
     if not text:
         return ""
@@ -75,6 +77,7 @@ def migrate(conn, dry_run: bool = False) -> dict:
             page_size=1000,
         )
         total_updated += len(params)
+        conn.commit()
 
     cursor.close()
     elapsed = time.time() - t0

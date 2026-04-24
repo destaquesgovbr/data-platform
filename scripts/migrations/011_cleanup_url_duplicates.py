@@ -17,6 +17,7 @@ Ref: destaquesgovbr/portal#108, destaquesgovbr/data-platform#138
 """
 
 import argparse
+import logging
 import os
 import sys
 import time
@@ -56,12 +57,7 @@ def _find_duplicate_groups(conn):
 def _delete_batch(conn, unique_ids_to_delete):
     cursor = conn.cursor()
 
-    cursor.execute(
-        "DELETE FROM news_features WHERE unique_id = ANY(%s)",
-        (unique_ids_to_delete,),
-    )
-    features_deleted = cursor.rowcount
-
+    # news_features rows are cascade-deleted via FK ON DELETE CASCADE
     cursor.execute(
         "DELETE FROM news WHERE unique_id = ANY(%s)",
         (unique_ids_to_delete,),
@@ -69,7 +65,7 @@ def _delete_batch(conn, unique_ids_to_delete):
     news_deleted = cursor.rowcount
 
     cursor.close()
-    return news_deleted, features_deleted
+    return news_deleted
 
 
 def _try_delete_from_typesense(unique_ids):
@@ -91,8 +87,12 @@ def _try_delete_from_typesense(unique_ids):
             )
             if resp.status_code in (200, 404):
                 deleted += 1
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f"Typesense cleanup error: {e}")
+    if deleted < len(unique_ids):
+        logging.warning(
+            f"Typesense cleanup partial: {deleted}/{len(unique_ids)} documents deleted"
+        )
     return deleted
 
 
@@ -124,13 +124,11 @@ def migrate(conn, dry_run: bool = False, batch_size: int = BATCH_SIZE) -> dict:
 
     t0 = time.time()
     total_news_deleted = 0
-    total_features_deleted = 0
 
     for i in range(0, len(all_to_delete), batch_size):
         batch = all_to_delete[i : i + batch_size]
-        news_del, feat_del = _delete_batch(conn, batch)
+        news_del = _delete_batch(conn, batch)
         total_news_deleted += news_del
-        total_features_deleted += feat_del
 
     typesense_deleted = _try_delete_from_typesense(all_to_delete)
 
@@ -139,7 +137,6 @@ def migrate(conn, dry_run: bool = False, batch_size: int = BATCH_SIZE) -> dict:
     return {
         "groups": len(groups),
         "news_deleted": total_news_deleted,
-        "features_deleted": total_features_deleted,
         "typesense_deleted": typesense_deleted,
         "preserved_with_embedding": preserved_with_embedding,
         "elapsed_seconds": round(elapsed, 2),
