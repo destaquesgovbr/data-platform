@@ -14,15 +14,6 @@ def _make_pubsub_envelope(unique_id: str) -> dict:
     return {"message": {"data": data, "attributes": {}}}
 
 
-@pytest.fixture()
-def _mock_pg():
-    """Mock PostgresManager so lifespan doesn't connect to a real DB."""
-    with patch("data_platform.workers.thumbnail_worker.app.PostgresManager") as MockPG:
-        mock_pg = Mock()
-        MockPG.return_value = mock_pg
-        yield mock_pg
-
-
 class TestHealthEndpoint:
     """Tests for GET /health."""
 
