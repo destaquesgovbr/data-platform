@@ -28,7 +28,7 @@ from data_platform.models import Agency, News, NewsInsert, Theme
 # ---------------------------------------------------------------------------
 
 
-def _make_conn(fetchone_return=None, fetchall_return=None):
+def _make_conn_with_results(fetchone_return=None, fetchall_return=None):
     """Build a mock psycopg2 connection + cursor."""
     mock_cursor = MagicMock()
     mock_cursor.fetchone.return_value = fetchone_return
@@ -412,7 +412,7 @@ class TestBuildTypesenseQuery:
 
 class TestCountNewsForTypesense:
     def test_returns_count(self, pg):
-        mock_conn, mock_cursor = _make_conn(fetchone_return=(42,))
+        mock_conn, mock_cursor = _make_conn_with_results(fetchone_return=(42,))
         pg.pool.getconn.return_value = mock_conn
 
         result = pg.count_news_for_typesense("2024-01-01")
@@ -420,7 +420,7 @@ class TestCountNewsForTypesense:
         assert result == 42
 
     def test_end_date_defaults_to_start_date(self, pg):
-        mock_conn, mock_cursor = _make_conn(fetchone_return=(0,))
+        mock_conn, mock_cursor = _make_conn_with_results(fetchone_return=(0,))
         pg.pool.getconn.return_value = mock_conn
 
         pg.count_news_for_typesense("2024-01-15")
@@ -431,7 +431,7 @@ class TestCountNewsForTypesense:
         assert params[1] == "2024-01-15"
 
     def test_returns_zero_for_empty_range(self, pg):
-        mock_conn, mock_cursor = _make_conn(fetchone_return=(0,))
+        mock_conn, mock_cursor = _make_conn_with_results(fetchone_return=(0,))
         pg.pool.getconn.return_value = mock_conn
 
         result = pg.count_news_for_typesense("2024-01-01", "2024-01-01")
@@ -439,7 +439,7 @@ class TestCountNewsForTypesense:
         assert result == 0
 
     def test_connection_returned_to_pool(self, pg):
-        mock_conn, _ = _make_conn(fetchone_return=(5,))
+        mock_conn, _ = _make_conn_with_results(fetchone_return=(5,))
         pg.pool.getconn.return_value = mock_conn
 
         pg.count_news_for_typesense("2024-01-01")
