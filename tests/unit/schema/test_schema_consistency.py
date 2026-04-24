@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 # Root path for the project
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 
 
 class TestSQLSchemaConsistency:

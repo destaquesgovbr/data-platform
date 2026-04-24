@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-REGISTRY_PATH = Path(__file__).parent.parent.parent / "feature_registry.yaml"
+REGISTRY_PATH = Path(__file__).parent.parent.parent.parent / "feature_registry.yaml"
 
 VALID_TYPES = {"integer", "float", "boolean", "string", "object", "array"}
 REQUIRED_KEYS = {"version", "type", "description", "model", "compute"}
