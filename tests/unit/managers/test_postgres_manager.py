@@ -20,7 +20,6 @@ import pytest
 from pydantic import ValidationError
 
 from data_platform.managers import PostgresManager
-from data_platform.managers.postgres_manager import PostgresManager as PostgresManagerDirect
 from data_platform.models import Agency, News, NewsInsert, Theme
 
 
