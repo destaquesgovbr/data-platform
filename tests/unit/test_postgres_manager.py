@@ -4,6 +4,7 @@ Unit tests for PostgresManager.
 These tests mock the database connection to test logic without requiring a real database.
 """
 
+import os
 from datetime import datetime
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
@@ -120,8 +121,10 @@ class TestPostgresManagerConnectionString:
             check=True,
         )
 
-        # Mock pgrep finding cloud-sql-proxy
-        with patch("data_platform.managers.postgres_manager.subprocess.run") as mock_subprocess:
+        # Ensure DATABASE_URL is not set so the Cloud SQL Proxy path is exercised
+        env_without_db = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
+        with patch("data_platform.managers.postgres_manager.subprocess.run") as mock_subprocess, \
+             patch.dict(os.environ, env_without_db, clear=True):
 
             def run_side_effect(*args: Any, **kwargs: Any) -> Mock:
                 if args[0][0] == "pgrep":

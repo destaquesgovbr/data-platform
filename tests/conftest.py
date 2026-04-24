@@ -3,7 +3,7 @@ Pytest configuration and fixtures.
 """
 
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -15,16 +15,6 @@ def set_test_environment():
     """Set testing environment variables."""
     os.environ["TESTING"] = "1"
     os.environ["STORAGE_BACKEND"] = "huggingface"  # Default for tests
-
-
-@pytest.fixture
-def mock_sqlalchemy_engine():
-    """Build a mock SQLAlchemy engine that supports `with engine.begin() as conn`."""
-    mock_conn = MagicMock()
-    mock_engine = MagicMock()
-    mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
-    mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
-    return mock_engine, mock_conn
 
 
 @pytest.fixture
