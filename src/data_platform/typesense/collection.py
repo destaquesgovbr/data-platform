@@ -96,6 +96,8 @@ COLLECTION_SCHEMA: dict[str, Any] = {
             "facet": True,
             "optional": True,
         },
+        # Deduplication
+        {"name": "content_hash", "type": "string", "facet": True, "optional": True},
         # Feature fields (from news_features JSONB)
         {"name": "sentiment_label", "type": "string", "facet": True, "optional": True},
         {"name": "sentiment_score", "type": "float", "facet": False, "optional": True},
