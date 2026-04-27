@@ -8,7 +8,9 @@ Ref: destaquesgovbr/portal#108, destaquesgovbr/data-platform#138
 """
 
 import hashlib
+import os
 import re
+import sys
 import time
 import unicodedata
 
@@ -107,3 +109,34 @@ def rollback(conn, dry_run: bool = False) -> dict:
     cursor.close()
 
     return {"rows_cleared": cleared}
+
+
+if __name__ == "__main__":
+    import argparse
+
+    import psycopg2
+
+    parser = argparse.ArgumentParser(description=describe())
+    parser.add_argument("--dry-run", action="store_true", help="Preview without updating")
+    parser.add_argument("--confirm", action="store_true", help="Execute backfill")
+    args = parser.parse_args()
+
+    if not args.dry_run and not args.confirm:
+        print("Must specify --dry-run or --confirm")
+        sys.exit(1)
+
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        print("DATABASE_URL not set")
+        sys.exit(1)
+
+    conn = psycopg2.connect(database_url)
+    try:
+        result = migrate(conn, dry_run=args.dry_run)
+        print(result)
+    except Exception as e:
+        conn.rollback()
+        print(f"Error: {e}")
+        sys.exit(1)
+    finally:
+        conn.close()
