@@ -7,9 +7,6 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-# Add scripts/ to path so we can import the migration module
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
-
 from migrate_unique_ids import (
     build_id_mapping,
     dry_run,

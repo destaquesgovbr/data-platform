@@ -1,13 +1,9 @@
 """Unit tests for scripts/migrations/006_migrate_unique_ids.py — Python migration interface."""
 
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-# Add scripts/migrations to path for importing
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "migrations"))
 
 
 def _import_migration_006():
