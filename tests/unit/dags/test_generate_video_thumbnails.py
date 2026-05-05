@@ -143,14 +143,14 @@ class TestProcessOne:
             json=Mock(return_value={"status": "generated"}),
             raise_for_status=Mock(),
         )
-        uid, status = process_one({"unique_id": "a1"}, "http://worker")
+        uid, status = process_one({"unique_id": "a1"}, "http://worker", "fake-token")
         assert uid == "a1"
         assert status == "generated"
 
     @patch("requests.post")
     def test_returns_failed_on_exception(self, mock_post, process_one) -> None:
         mock_post.side_effect = Exception("connection refused")
-        uid, status = process_one({"unique_id": "a1"}, "http://worker")
+        uid, status = process_one({"unique_id": "a1"}, "http://worker", "fake-token")
         assert uid == "a1"
         assert status == "failed"
 
@@ -162,9 +162,22 @@ class TestProcessOne:
             json=Mock(return_value={"status": "generated"}),
             raise_for_status=Mock(),
         )
-        process_one({"unique_id": "test_uid"}, "http://worker")
+        process_one({"unique_id": "test_uid"}, "http://worker", "fake-token")
 
         call_kwargs = mock_post.call_args[1]
         envelope = call_kwargs["json"]
         decoded = json.loads(base64.b64decode(envelope["message"]["data"]))
         assert decoded == {"unique_id": "test_uid"}
+
+    @patch("requests.post")
+    def test_sends_auth_header(self, mock_post, process_one) -> None:
+        mock_post.return_value = Mock(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            json=Mock(return_value={"status": "generated"}),
+            raise_for_status=Mock(),
+        )
+        process_one({"unique_id": "a1"}, "http://worker", "my-token")
+
+        call_kwargs = mock_post.call_args[1]
+        assert call_kwargs["headers"]["Authorization"] == "Bearer my-token"
