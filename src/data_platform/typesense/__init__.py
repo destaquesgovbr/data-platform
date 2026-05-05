@@ -15,6 +15,7 @@ from data_platform.typesense.collection import (
     create_collection,
     delete_collection,
     list_collections,
+    update_schema,
 )
 from data_platform.typesense.indexer import (
     index_documents,
@@ -33,6 +34,7 @@ __all__ = [
     "create_collection",
     "delete_collection",
     "list_collections",
+    "update_schema",
     # Indexer
     "index_documents",
     "prepare_document",

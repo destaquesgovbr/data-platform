@@ -5,6 +5,7 @@ Commands:
 - sync-hf: Sync PostgreSQL data to HuggingFace
 - migrate: Migrate data from HuggingFace to PostgreSQL
 - sync-typesense: Sync news from PostgreSQL to Typesense
+- typesense-update-schema: Update collection schema (add missing fields)
 - typesense-delete: Delete a Typesense collection
 - typesense-list: List all Typesense collections
 
@@ -94,6 +95,33 @@ def sync_typesense(
         f"Typesense sync completed: {stats['total_indexed']} indexed, "
         f"{stats['errors']} errors, {stats['total_fetched']} fetched"
     )
+
+
+@app.command("typesense-update-schema")
+def typesense_update_schema(
+    collection_name: str = typer.Option("news", help="Collection name to update"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without applying"),
+) -> None:
+    """
+    Update Typesense collection schema by adding missing fields.
+
+    Compares the desired schema (defined in code) with the live collection
+    and adds any fields that are missing. Does not remove or alter existing fields.
+    """
+    from data_platform.jobs.typesense import update_typesense_schema
+
+    result = update_typesense_schema(collection_name=collection_name, dry_run=dry_run)
+
+    if result["errors"]:
+        logging.error(f"Schema update finished with {len(result['errors'])} error(s)")
+        for err in result["errors"]:
+            logging.error(f"  {err['field']}: {err['error']}")
+        raise typer.Exit(code=1)
+
+    if result["added"]:
+        logging.info(f"Added {len(result['added'])} field(s): {result['added']}")
+    else:
+        logging.info("Schema is up to date — no changes needed")
 
 
 @app.command("typesense-delete")

@@ -11,6 +11,7 @@ from data_platform.typesense import (
     get_client,
     delete_collection,
     list_collections,
+    update_schema,
     COLLECTION_NAME,
 )
 
@@ -46,6 +47,29 @@ def list_typesense_collections() -> list[dict[str, Any]]:
     """
     client = get_client()
     return list_collections(client)
+
+
+def update_typesense_schema(
+    collection_name: str = COLLECTION_NAME,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """
+    Atualiza o schema da coleção Typesense, adicionando campos faltantes.
+
+    Args:
+        collection_name: Nome da coleção
+        dry_run: Se True, apenas reporta diferenças sem aplicar
+
+    Returns:
+        Dicionário com resultado (added, already_exists, errors)
+    """
+    logger.info(
+        f"Atualizando schema da coleção '{collection_name}'"
+        f"{' [DRY-RUN]' if dry_run else ''}..."
+    )
+
+    client = get_client()
+    return update_schema(client, collection_name, dry_run=dry_run)
 
 
 def create_search_key(

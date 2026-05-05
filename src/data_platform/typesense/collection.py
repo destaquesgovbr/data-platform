@@ -251,6 +251,84 @@ def delete_collection(
         return False
 
 
+def update_schema(
+    client: typesense.Client,
+    collection_name: str = COLLECTION_NAME,
+    schema: dict[str, Any] | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """
+    Atualiza o schema de uma coleção existente, adicionando campos faltantes.
+
+    Compara o schema desejado (código) com o schema live (Typesense) e adiciona
+    campos que existem no código mas não na coleção. Não remove nem altera campos
+    existentes.
+
+    Args:
+        client: Cliente Typesense
+        collection_name: Nome da coleção
+        schema: Schema desejado (default: COLLECTION_SCHEMA)
+        dry_run: Se True, apenas reporta diferenças sem aplicar
+
+    Returns:
+        Dicionário com resultado:
+            - added: lista de nomes de campos adicionados
+            - already_exists: lista de campos que já existiam
+            - errors: lista de erros (campo + mensagem)
+    """
+    schema_to_use = schema or COLLECTION_SCHEMA
+    desired_fields = {f["name"]: f for f in schema_to_use["fields"]}
+
+    result: dict[str, Any] = {"added": [], "already_exists": [], "errors": []}
+
+    try:
+        collection_info = client.collections[collection_name].retrieve()
+    except ObjectNotFound:
+        raise ValueError(
+            f"Coleção '{collection_name}' não encontrada. "
+            "Use create_collection() para criar uma nova."
+        )
+
+    live_field_names = {f["name"] for f in collection_info.get("fields", [])}
+
+    missing_fields = []
+    for name, field_def in desired_fields.items():
+        if name in live_field_names:
+            result["already_exists"].append(name)
+        else:
+            missing_fields.append(field_def)
+
+    if not missing_fields:
+        logger.info("Schema está atualizado — nenhum campo faltante")
+        return result
+
+    logger.info(
+        f"Encontrados {len(missing_fields)} campo(s) faltante(s): "
+        f"{[f['name'] for f in missing_fields]}"
+    )
+
+    if dry_run:
+        result["added"] = [f["name"] for f in missing_fields]
+        logger.info("[DRY-RUN] Nenhuma alteração aplicada")
+        return result
+
+    for field_def in missing_fields:
+        field_name = field_def["name"]
+        try:
+            client.collections[collection_name].update({"fields": [field_def]})
+            result["added"].append(field_name)
+            logger.info(f"  + Campo '{field_name}' adicionado com sucesso")
+        except Exception as e:
+            result["errors"].append({"field": field_name, "error": str(e)})
+            logger.error(f"  ! Erro ao adicionar campo '{field_name}': {e}")
+
+    logger.info(
+        f"Schema update concluído: {len(result['added'])} adicionados, "
+        f"{len(result['errors'])} erros"
+    )
+    return result
+
+
 def list_collections(client: typesense.Client) -> list[dict[str, Any]]:
     """
     Lista todas as coleções disponíveis.
