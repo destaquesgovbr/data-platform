@@ -12,7 +12,7 @@ on:
         description: 'Run incremental sync after schema update to populate new fields'
         required: false
         type: boolean
-        default: false
+        default: true
       sync_start_date:
         description: 'Start date for sync (YYYY-MM-DD, default: 2024-01-01)'
         required: false
@@ -106,6 +106,15 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           poetry run data-platform typesense-update-schema --dry-run 2>&1 | tee -a $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Warn if sync not scheduled
+        if: ${{ !inputs.dry_run && !inputs.sync_after_update }}
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## WARNING" >> $GITHUB_STEP_SUMMARY
+          echo "Schema updated but data NOT synced." >> $GITHUB_STEP_SUMMARY
+          echo "Existing documents will have NULL values for new fields." >> $GITHUB_STEP_SUMMARY
+          echo "Run this workflow again with sync_after_update=true to populate values." >> $GITHUB_STEP_SUMMARY
 
   sync-data:
     name: Sync Data (populate new fields)

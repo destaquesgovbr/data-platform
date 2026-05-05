@@ -251,6 +251,19 @@ def delete_collection(
         return False
 
 
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 2
+
+
+def _sanitize_error(e: Exception) -> str:
+    """Remove detalhes sensíveis de mensagens de erro."""
+    msg = str(e)
+    sensitive_keywords = ["api_key", "apikey", "token", "password", "secret"]
+    if any(kw in msg.lower() for kw in sensitive_keywords):
+        return f"{type(e).__name__}: [details omitted for security]"
+    return msg
+
+
 def update_schema(
     client: typesense.Client,
     collection_name: str = COLLECTION_NAME,
@@ -261,8 +274,14 @@ def update_schema(
     Atualiza o schema de uma coleção existente, adicionando campos faltantes.
 
     Compara o schema desejado (código) com o schema live (Typesense) e adiciona
-    campos que existem no código mas não na coleção. Não remove nem altera campos
-    existentes.
+    campos que existem no código mas não na coleção via PATCH atômico.
+
+    Comportamento:
+    - Não remove campos que existem apenas no Typesense (safe)
+    - Não altera definição de campos existentes (type, facet, etc.)
+    - Apenas adiciona campos novos com base no nome
+    - Campos existentes nos documentos não são populados automaticamente
+      (rodar sync após update para popular valores)
 
     Args:
         client: Cliente Typesense
@@ -312,15 +331,31 @@ def update_schema(
         logger.info("[DRY-RUN] Nenhuma alteração aplicada")
         return result
 
-    for field_def in missing_fields:
-        field_name = field_def["name"]
+    # Batch update — adiciona todos os campos em uma única chamada PATCH (atômico)
+    for attempt in range(1, _MAX_RETRIES + 1):
         try:
-            client.collections[collection_name].update({"fields": [field_def]})
-            result["added"].append(field_name)
-            logger.info(f"  + Campo '{field_name}' adicionado com sucesso")
+            client.collections[collection_name].update({"fields": missing_fields})
+            result["added"] = [f["name"] for f in missing_fields]
+            for f in missing_fields:
+                logger.info(f"  + Campo '{f['name']}' adicionado")
+            break
         except Exception as e:
-            result["errors"].append({"field": field_name, "error": str(e)})
-            logger.error(f"  ! Erro ao adicionar campo '{field_name}': {e}")
+            error_msg = _sanitize_error(e)
+            if attempt < _MAX_RETRIES:
+                delay = _RETRY_BASE_DELAY ** attempt
+                logger.warning(
+                    f"Tentativa {attempt}/{_MAX_RETRIES} falhou: {error_msg}. "
+                    f"Retentando em {delay}s..."
+                )
+                time.sleep(delay)
+            else:
+                logger.error(
+                    f"Falha após {_MAX_RETRIES} tentativas: {error_msg}"
+                )
+                for f in missing_fields:
+                    result["errors"].append(
+                        {"field": f["name"], "error": error_msg}
+                    )
 
     logger.info(
         f"Schema update concluído: {len(result['added'])} adicionados, "

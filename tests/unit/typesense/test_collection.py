@@ -218,8 +218,32 @@ class TestUpdateSchema:
         with pytest.raises(ValueError, match="não encontrada"):
             update_schema(mock_client)
 
-    def test_handles_partial_failure(self):
-        """Records errors for fields that fail to add."""
+    @patch("data_platform.typesense.collection.time.sleep")
+    def test_retries_on_failure_then_succeeds(self, mock_sleep):
+        """Retries on transient failure and succeeds on subsequent attempt."""
+        mock_client = MagicMock()
+        mock_collection = MagicMock()
+        mock_collection.retrieve.return_value = {"fields": []}
+        mock_collection.update.side_effect = [Exception("Timeout"), {}]
+        mock_client.collections.__getitem__.return_value = mock_collection
+
+        schema = {
+            "name": "news",
+            "fields": [
+                {"name": "content_hash", "type": "string", "facet": True, "optional": True},
+            ],
+        }
+
+        result = update_schema(mock_client, schema=schema)
+
+        assert "content_hash" in result["added"]
+        assert result["errors"] == []
+        assert mock_collection.update.call_count == 2
+        mock_sleep.assert_called_once()
+
+    @patch("data_platform.typesense.collection.time.sleep")
+    def test_records_errors_after_max_retries(self, mock_sleep):
+        """Records errors for all fields after exhausting retries."""
         mock_client = MagicMock()
         mock_collection = MagicMock()
         mock_collection.retrieve.return_value = {"fields": []}
@@ -238,6 +262,38 @@ class TestUpdateSchema:
         assert result["added"] == []
         assert len(result["errors"]) == 1
         assert result["errors"][0]["field"] == "bad_field"
+        assert mock_collection.update.call_count == 3
+
+    def test_batch_adds_multiple_fields_atomically(self):
+        """Adds multiple fields in a single PATCH call."""
+        mock_client = MagicMock()
+        mock_collection = MagicMock()
+        mock_collection.retrieve.return_value = {"fields": []}
+        mock_collection.update.return_value = {}
+        mock_client.collections.__getitem__.return_value = mock_collection
+
+        schema = {
+            "name": "news",
+            "fields": [
+                {"name": "field_a", "type": "string", "facet": True, "optional": True},
+                {"name": "field_b", "type": "int32", "facet": False, "optional": True},
+            ],
+        }
+
+        result = update_schema(mock_client, schema=schema)
+
+        assert "field_a" in result["added"]
+        assert "field_b" in result["added"]
+        mock_collection.update.assert_called_once_with({"fields": schema["fields"]})
+
+    def test_sanitizes_sensitive_error_messages(self):
+        """Does not expose API keys in error messages."""
+        from data_platform.typesense.collection import _sanitize_error
+
+        e = Exception("Connection to host with api_key=abc123 failed")
+        sanitized = _sanitize_error(e)
+        assert "abc123" not in sanitized
+        assert "omitted" in sanitized
 
 
 class TestListCollections:
