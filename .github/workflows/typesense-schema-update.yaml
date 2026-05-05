@@ -1,0 +1,202 @@
+name: Typesense Schema Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview changes without applying (default: true)'
+        required: false
+        type: boolean
+        default: true
+      sync_after_update:
+        description: 'Run incremental sync after schema update to populate new fields'
+        required: false
+        type: boolean
+        default: true
+      sync_start_date:
+        description: 'Start date for sync (YYYY-MM-DD, default: 2024-01-01)'
+        required: false
+        type: string
+        default: '2024-01-01'
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  update-schema:
+    name: Update Typesense Schema
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Fetch Typesense Config
+        id: typesense
+        uses: destaquesgovbr/reusable-workflows/actions/fetch-typesense-config@v1
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          secret_name: typesense-write-conn
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --only main
+
+      - name: Update schema (dry-run)
+        if: inputs.dry_run
+        env:
+          TYPESENSE_HOST: ${{ steps.typesense.outputs.host }}
+          TYPESENSE_PORT: ${{ steps.typesense.outputs.port }}
+          TYPESENSE_API_KEY: ${{ steps.typesense.outputs.api_key }}
+        run: |
+          echo "## Schema Update (Dry Run)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          poetry run data-platform typesense-update-schema --dry-run 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Update schema (apply)
+        if: ${{ !inputs.dry_run }}
+        env:
+          TYPESENSE_HOST: ${{ steps.typesense.outputs.host }}
+          TYPESENSE_PORT: ${{ steps.typesense.outputs.port }}
+          TYPESENSE_API_KEY: ${{ steps.typesense.outputs.api_key }}
+        run: |
+          echo "## Schema Update (Applied)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          poetry run data-platform typesense-update-schema 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Verify schema
+        if: ${{ !inputs.dry_run }}
+        env:
+          TYPESENSE_HOST: ${{ steps.typesense.outputs.host }}
+          TYPESENSE_PORT: ${{ steps.typesense.outputs.port }}
+          TYPESENSE_API_KEY: ${{ steps.typesense.outputs.api_key }}
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Verification" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          poetry run data-platform typesense-update-schema --dry-run 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Warn if sync not scheduled
+        if: ${{ !inputs.dry_run && !inputs.sync_after_update }}
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## WARNING" >> $GITHUB_STEP_SUMMARY
+          echo "Schema updated but data NOT synced." >> $GITHUB_STEP_SUMMARY
+          echo "Existing documents will have NULL values for new fields." >> $GITHUB_STEP_SUMMARY
+          echo "Run this workflow again with sync_after_update=true to populate values." >> $GITHUB_STEP_SUMMARY
+
+  sync-data:
+    name: Sync Data (populate new fields)
+    needs: update-schema
+    if: ${{ !inputs.dry_run && inputs.sync_after_update }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Fetch Typesense Config
+        id: typesense
+        uses: destaquesgovbr/reusable-workflows/actions/fetch-typesense-config@v1
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          secret_name: typesense-write-conn
+
+      - name: Fetch Database URL
+        id: database
+        run: |
+          DATABASE_URL=$(gcloud secrets versions access latest --secret=govbrnews-postgres-connection-string)
+          echo "::add-mask::$DATABASE_URL"
+          echo "url=$DATABASE_URL" >> $GITHUB_OUTPUT
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --only main
+
+      - name: Run incremental sync
+        env:
+          TYPESENSE_HOST: ${{ steps.typesense.outputs.host }}
+          TYPESENSE_PORT: ${{ steps.typesense.outputs.port }}
+          TYPESENSE_API_KEY: ${{ steps.typesense.outputs.api_key }}
+          DATABASE_URL: ${{ steps.database.outputs.url }}
+        run: |
+          END_DATE=$(date +%Y-%m-%d)
+          echo "## Incremental Sync" >> $GITHUB_STEP_SUMMARY
+          echo "Date range: ${{ inputs.sync_start_date }} to $END_DATE" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          poetry run data-platform sync-typesense \
+            --start-date "${{ inputs.sync_start_date }}" \
+            --end-date "$END_DATE" \
+            --full-sync 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Verify collection
+        env:
+          TYPESENSE_HOST: ${{ steps.typesense.outputs.host }}
+          TYPESENSE_PORT: ${{ steps.typesense.outputs.port }}
+          TYPESENSE_API_KEY: ${{ steps.typesense.outputs.api_key }}
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Post-Sync Verification" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          poetry run data-platform typesense-list 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

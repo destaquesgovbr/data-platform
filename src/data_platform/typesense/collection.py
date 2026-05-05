@@ -251,6 +251,119 @@ def delete_collection(
         return False
 
 
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 2
+
+
+def _sanitize_error(e: Exception) -> str:
+    """Remove detalhes sensíveis de mensagens de erro."""
+    msg = str(e)
+    sensitive_keywords = ["api_key", "apikey", "token", "password", "secret"]
+    if any(kw in msg.lower() for kw in sensitive_keywords):
+        return f"{type(e).__name__}: [details omitted for security]"
+    return msg
+
+
+def update_schema(
+    client: typesense.Client,
+    collection_name: str = COLLECTION_NAME,
+    schema: dict[str, Any] | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """
+    Atualiza o schema de uma coleção existente, adicionando campos faltantes.
+
+    Compara o schema desejado (código) com o schema live (Typesense) e adiciona
+    campos que existem no código mas não na coleção via PATCH atômico.
+
+    Comportamento:
+    - Não remove campos que existem apenas no Typesense (safe)
+    - Não altera definição de campos existentes (type, facet, etc.)
+    - Apenas adiciona campos novos com base no nome
+    - Campos existentes nos documentos não são populados automaticamente
+      (rodar sync após update para popular valores)
+
+    Args:
+        client: Cliente Typesense
+        collection_name: Nome da coleção
+        schema: Schema desejado (default: COLLECTION_SCHEMA)
+        dry_run: Se True, apenas reporta diferenças sem aplicar
+
+    Returns:
+        Dicionário com resultado:
+            - added: lista de nomes de campos adicionados
+            - already_exists: lista de campos que já existiam
+            - errors: lista de erros (campo + mensagem)
+    """
+    schema_to_use = schema or COLLECTION_SCHEMA
+    desired_fields = {f["name"]: f for f in schema_to_use["fields"]}
+
+    result: dict[str, Any] = {"added": [], "already_exists": [], "errors": []}
+
+    try:
+        collection_info = client.collections[collection_name].retrieve()
+    except ObjectNotFound:
+        raise ValueError(
+            f"Coleção '{collection_name}' não encontrada. "
+            "Use create_collection() para criar uma nova."
+        )
+
+    live_field_names = {f["name"] for f in collection_info.get("fields", [])}
+
+    missing_fields = []
+    for name, field_def in desired_fields.items():
+        if name in live_field_names:
+            result["already_exists"].append(name)
+        else:
+            missing_fields.append(field_def)
+
+    if not missing_fields:
+        logger.info("Schema está atualizado — nenhum campo faltante")
+        return result
+
+    logger.info(
+        f"Encontrados {len(missing_fields)} campo(s) faltante(s): "
+        f"{[f['name'] for f in missing_fields]}"
+    )
+
+    if dry_run:
+        result["added"] = [f["name"] for f in missing_fields]
+        logger.info("[DRY-RUN] Nenhuma alteração aplicada")
+        return result
+
+    # Batch update — adiciona todos os campos em uma única chamada PATCH (atômico)
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            client.collections[collection_name].update({"fields": missing_fields})
+            result["added"] = [f["name"] for f in missing_fields]
+            for f in missing_fields:
+                logger.info(f"  + Campo '{f['name']}' adicionado")
+            break
+        except Exception as e:
+            error_msg = _sanitize_error(e)
+            if attempt < _MAX_RETRIES:
+                delay = _RETRY_BASE_DELAY ** attempt
+                logger.warning(
+                    f"Tentativa {attempt}/{_MAX_RETRIES} falhou: {error_msg}. "
+                    f"Retentando em {delay}s..."
+                )
+                time.sleep(delay)
+            else:
+                logger.error(
+                    f"Falha após {_MAX_RETRIES} tentativas: {error_msg}"
+                )
+                for f in missing_fields:
+                    result["errors"].append(
+                        {"field": f["name"], "error": error_msg}
+                    )
+
+    logger.info(
+        f"Schema update concluído: {len(result['added'])} adicionados, "
+        f"{len(result['errors'])} erros"
+    )
+    return result
+
+
 def list_collections(client: typesense.Client) -> list[dict[str, Any]]:
     """
     Lista todas as coleções disponíveis.
