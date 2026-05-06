@@ -9,10 +9,11 @@ delegando o trabalho HTTP para o Scraper Cloud Run via POST /verify/integrity.
 import logging
 from datetime import datetime, timedelta
 
-import requests
 from airflow.decorators import dag, task
 from airflow.hooks.base import BaseHook
 from airflow.models import Variable
+
+from data_platform.dags.utils.cloud_run import post as cloud_run_post
 
 logger = logging.getLogger(__name__)
 
@@ -79,12 +80,7 @@ def verify_news_integrity_dag():
         url = f"{scraper_url}/verify/integrity"
 
         logger.info(f"Enviando {len(articles)} artigos para {url}")
-        resp = requests.post(
-            url,
-            json={"articles": articles},
-            timeout=SCRAPER_REQUEST_TIMEOUT,
-        )
-        resp.raise_for_status()
+        resp = cloud_run_post(url, json={"articles": articles}, timeout=SCRAPER_REQUEST_TIMEOUT)
 
         data = resp.json()
         summary = data.get("summary", {})

@@ -18,17 +18,20 @@ from airflow.decorators import dag, task
 from airflow.hooks.base import BaseHook
 from airflow.models import Variable
 
+from data_platform.dags.utils.cloud_run import get_id_token
+
 logger = logging.getLogger(__name__)
 
 WORKER_REQUEST_TIMEOUT = 60
 
 
-def _process_one(article: dict, worker_url: str) -> tuple[str, str]:
+def _process_one(article: dict, worker_url: str, token: str) -> tuple[str, str]:
     """Envia um artigo para o thumbnail worker. Retorna (unique_id, status).
 
     Args:
         article: Dict with unique_id key.
         worker_url: Base URL of the thumbnail worker.
+        token: Identity token for Cloud Run authentication.
 
     Returns:
         Tuple of (unique_id, status).
@@ -45,6 +48,7 @@ def _process_one(article: dict, worker_url: str) -> tuple[str, str]:
                     "attributes": {},
                 }
             },
+            headers={"Authorization": f"Bearer {token}"},
             timeout=WORKER_REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
@@ -118,11 +122,13 @@ def generate_video_thumbnails_dag():
 
         worker_url = Variable.get("thumbnail_worker_url")
         max_workers = int(Variable.get("thumbnail_max_workers", default_var="5"))
+        token = get_id_token(worker_url)
         summary = {"processed": 0, "generated": 0, "failed": 0, "skipped": 0}
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
-                executor.submit(_process_one, article, worker_url): article for article in articles
+                executor.submit(_process_one, article, worker_url, token): article
+                for article in articles
             }
             for future in concurrent.futures.as_completed(futures):
                 unique_id, status = future.result()
