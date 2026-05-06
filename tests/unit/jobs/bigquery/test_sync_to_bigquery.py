@@ -23,6 +23,7 @@ class TestSyncQuery:
     def test_query_has_required_columns(self):
         required = [
             "unique_id", "title", "agency_key", "published_at",
+            "content_hash",
             "word_count", "sentiment_score", "sentiment_label",
             "has_image", "has_video", "readability_flesch",
             "theme_l1_code", "most_specific_theme_code",
