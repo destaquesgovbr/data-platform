@@ -66,6 +66,8 @@ jobs:
           cp src/data_platform/typesense/client.py /tmp/plugins/data_platform/typesense/
           cp src/data_platform/typesense/collection.py /tmp/plugins/data_platform/typesense/
           touch /tmp/plugins/data_platform/typesense/__init__.py
+          # Deploy shared utilities needed by DAGs
+          cp src/data_platform/cloud_run.py /tmp/plugins/data_platform/
           # Create package __init__.py
           touch /tmp/plugins/data_platform/__init__.py
 
