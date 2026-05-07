@@ -13,7 +13,7 @@ from airflow.decorators import dag, task
 from airflow.hooks.base import BaseHook
 from airflow.models import Variable
 
-from data_platform.dags.utils.cloud_run import post as cloud_run_post
+from data_platform.cloud_run import post as cloud_run_post
 
 logger = logging.getLogger(__name__)
 
