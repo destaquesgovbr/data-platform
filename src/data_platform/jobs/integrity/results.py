@@ -10,12 +10,12 @@ logger = logging.getLogger(__name__)
 
 UPSERT_SQL = text("""
     INSERT INTO news_features (unique_id, features)
-    VALUES (:uid, jsonb_build_object('integrity', :integrity_fields::jsonb))
+    VALUES (:uid, jsonb_build_object('integrity', CAST(:integrity_fields AS jsonb)))
     ON CONFLICT (unique_id) DO UPDATE
     SET features = jsonb_set(
         COALESCE(news_features.features, '{}'),
         '{integrity}',
-        COALESCE(news_features.features -> 'integrity', '{}') || :integrity_fields::jsonb
+        COALESCE(news_features.features -> 'integrity', '{}') || CAST(:integrity_fields AS jsonb)
     ),
         updated_at = NOW()
 """)
