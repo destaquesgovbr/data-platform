@@ -124,6 +124,38 @@ def typesense_update_schema(
         logging.info("Schema is up to date — no changes needed")
 
 
+@app.command("typesense-detect-orphans")
+def typesense_detect_orphans(
+    dry_run: bool = typer.Option(True, "--dry-run/--delete", help="Dry run (default) or delete orphans"),
+    collection_name: str = typer.Option("news", help="Typesense collection name"),
+) -> None:
+    """
+    Detect Typesense documents with no matching record in PostgreSQL.
+
+    By default runs in dry-run mode (reports only). Use --delete to remove orphans.
+    """
+    from data_platform.jobs.typesense import detect_typesense_orphans
+
+    result = detect_typesense_orphans(collection_name=collection_name, dry_run=dry_run)
+
+    logging.info(
+        f"Typesense: {result['typesense_docs']} docs | "
+        f"PostgreSQL: {result['pg_records']} records | "
+        f"Orphans: {result['orphans']}"
+    )
+
+    if dry_run and result["orphans"] > 0:
+        logging.info(f"Would delete {result.get('would_delete', result['orphans'])} documents. Use --delete to execute.")
+    elif not dry_run and result["orphans"] > 0:
+        logging.info(
+            f"Deleted: {result.get('deleted', 0)} | "
+            f"Not found: {result.get('not_found', 0)} | "
+            f"Errors: {result.get('errors', 0)}"
+        )
+        if result.get("errors", 0) > 0:
+            raise typer.Exit(code=1)
+
+
 @app.command("typesense-delete")
 def typesense_delete(
     collection_name: str = typer.Option("news", help="Collection name to delete"),
