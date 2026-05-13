@@ -1,271 +1,247 @@
 # DestaquesGovBr Data Platform
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![PostgreSQL 15](https://img.shields.io/badge/postgresql-15-blue.svg)](https://www.postgresql.org/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-> **Status**: 🚧 Em desenvolvimento - Fase 1: Infraestrutura ✅ | Fase 2: PostgresManager 🚧
->
-> Plataforma de dados para agregação, enriquecimento e disponibilização de notícias governamentais brasileiras.
+> Plataforma de dados event-driven para agregação, enriquecimento e disponibilização de notícias governamentais brasileiras, com arquitetura Medallion (Bronze/Silver/Gold).
 
 📚 **[Ver Documentação Completa](docs/README.md)** | 🗃️ **[Dataset Público](https://huggingface.co/datasets/nitaibezerra/govbrnews)**
 
 ---
 
-## 🎯 Sobre o Projeto
+## Sobre o Projeto
 
-A **Data Platform** centraliza toda a infraestrutura de dados do [DestaquesGovBr](https://destaques.gov.br), incluindo:
+A **Data Platform** centraliza toda a infraestrutura de dados do [DestaquesGovBr](https://destaques.gov.br):
 
-- 📰 Coleta de notícias de ~160 sites governamentais (gov.br)
-- 🤖 Enriquecimento com IA (classificação temática, sumários)
-- 🗄️ Armazenamento e gerenciamento de dados
-- 🔄 Sincronização com HuggingFace (dados abertos)
-- 🔍 Indexação para busca (Typesense)
-
-### Migração em Andamento
-
-Este projeto está migrando de **HuggingFace Dataset** (usado como banco de dados) para **PostgreSQL** (Cloud SQL) como fonte de verdade.
-
-**Progresso**:
-- [x] Fase 0: Setup Inicial
-- [x] Fase 1: Infraestrutura (Cloud SQL provisionado ✅)
-- [ ] Fase 2: PostgresManager
-- [ ] Fase 3: Migração de Dados
-- [ ] Fase 4: Dual-Write
-- [ ] Fase 5: PostgreSQL Primary
-- [ ] Fase 6: Consumidores
-
-Ver detalhes em [_plan/README.md](_plan/README.md) e [_plan/PROGRESS.md](_plan/PROGRESS.md).
+- Recepção de eventos de scraping via Pub/Sub
+- Armazenamento raw em GCS (Bronze layer) e PostgreSQL (Silver layer)
+- Enriquecimento com IA (classificação temática, sumários) via AWS Bedrock
+- Geração de embeddings (768-dim) para busca semântica
+- Computação de features (trending, engagement, similaridade, thumbnails)
+- Indexação para busca (Typesense)
+- Agregação analítica em BigQuery (Gold layer)
+- Sincronização com HuggingFace (dados abertos)
 
 ---
 
-## 📂 Estrutura do Repositório
+## Arquitetura
+
+```
+Scrapers (repo scraper, via Airflow)
+    ↓ Pub/Sub: dgb.news.scraped
+    ↓
+┌──────────────────────────────────────────────────────────────────┐
+│                        Cloud Run Workers                          │
+├──────────────────┬───────────────┬──────────────┬────────────────┤
+│ Bronze Writer    │ Feature Worker│ Thumbnail    │ Typesense Sync │
+│ → GCS raw JSON   │ → news_features│ Worker       │ → Typesense    │
+│                  │               │ → GCS thumbs │                │
+└──────────────────┴───────────────┴──────────────┴────────────────┘
+    ↑ Pub/Sub: dgb.news.enriched / dgb.news.embedded
+    │
+Enriquecimento IA (Bedrock) + Embeddings
+    ↑
+PostgreSQL (Cloud SQL) ← Fonte de verdade (Silver)
+    ↓
+┌──────────────────────────────────────────────────────────────────┐
+│                     Airflow DAGs (Composer)                       │
+├─────────────────┬──────────────┬─────────────────────────────────┤
+│ sync_pg_to_     │ compute_     │ aggregate_engagement            │
+│ bigquery        │ trending     │ compute_clusters                │
+│                 │              │ generate_video_thumbnails       │
+│ sync_umami_to_  │ verify_news_ │                                 │
+│ bigquery        │ integrity    │                                 │
+└─────────────────┴──────────────┴─────────────────────────────────┘
+    ↓
+BigQuery (Gold layer) ← Dados analíticos
+    ↓
+Portal Web (Next.js)
+```
+
+---
+
+## Estrutura do Repositório
 
 ```
 data-platform/
-├── docs/                   # 📚 Documentação
-│   ├── architecture/       # Arquitetura do sistema
-│   ├── database/           # Schemas e migrações
-│   └── development/        # Guias de desenvolvimento
-├── _plan/                  # 📋 Documentação da migração
-├── src/data_platform/      # 🐍 Código Python
-│   ├── managers/           # Gerenciadores de storage (PostgreSQL, HF)
-│   ├── jobs/               # Jobs de processamento
-│   ├── models/             # Modelos Pydantic
-│   └── dags/               # DAGs Airflow (futuro)
-├── tests/                  # 🧪 Testes unitários e integração
-├── scripts/                # 🛠️ Scripts de migração e manutenção
-└── pyproject.toml          # Dependências e configuração
+├── src/data_platform/
+│   ├── workers/              # Cloud Run workers (event-driven)
+│   │   ├── bronze_writer/    # GCS raw JSON storage
+│   │   ├── feature_worker/   # Feature computation
+│   │   ├── thumbnail_worker/ # Video thumbnail generation
+│   │   └── typesense_sync/   # Search index sync
+│   ├── dags/                 # Airflow DAGs (7 em produção)
+│   ├── jobs/                 # Job modules
+│   │   ├── bigquery/         # PG→BigQuery, trending, engagement, umami
+│   │   ├── enrichment/       # AI enrichment
+│   │   ├── embeddings/       # Embedding generation
+│   │   ├── integrity/        # Content verification
+│   │   ├── similarity/       # Article clustering
+│   │   ├── thumbnail/        # Thumbnail extraction
+│   │   ├── typesense/        # Typesense sync
+│   │   └── hf_sync/          # HuggingFace sync
+│   ├── managers/             # Storage managers (PostgreSQL, HF)
+│   ├── models/               # Pydantic models
+│   ├── typesense/            # Typesense client/collection/indexer
+│   └── config.py             # Centralized settings (pydantic-settings)
+├── tests/                    # Unit + integration tests
+├── scripts/
+│   ├── migrations/           # Database migrations (001-012)
+│   └── bigquery/             # BigQuery table creation SQL
+├── docker/                   # Dockerfiles for workers
+├── docs/                     # Documentation
+├── .github/workflows/        # CI/CD workflows
+├── feature_registry.yaml     # Feature definitions (versioned)
+├── docker-compose.yml        # Local dev (PostgreSQL + Typesense)
+├── Makefile                  # Development commands
+└── pyproject.toml            # Dependencies (Poetry)
 ```
 
 ---
 
-## 🚀 Quick Start
+## Workers (Cloud Run)
+
+| Worker | Pub/Sub Topic | Função | Deploy Workflow |
+|--------|---------------|--------|-----------------|
+| **bronze-writer** | `dgb.news.scraped` | Grava raw JSON em GCS Bronze layer | `bronze-writer-deploy.yaml` |
+| **feature-worker** | `dgb.news.enriched` | Computa features locais → `news_features` | `feature-worker-deploy.yaml` |
+| **thumbnail-worker** | `dgb.news.enriched` | Gera thumbnails para vídeos sem imagem | `thumbnail-worker-deploy.yaml` |
+| **typesense-sync** | `dgb.news.enriched`, `dgb.news.embedded` | Upsert em Typesense | `typesense-sync-worker-deploy.yaml` |
+
+---
+
+## Airflow DAGs (Cloud Composer)
+
+| DAG | Schedule | Camada | Descrição |
+|-----|----------|--------|-----------|
+| `sync_pg_to_bigquery` | Diário 7 AM | Gold | Sincroniza PG → BigQuery |
+| `compute_trending` | A cada 6h | Gold | Calcula trending scores |
+| `aggregate_engagement` | Diário 8 AM | Gold | Agrega pageviews (view_count) |
+| `compute_clusters` | Diário 7:30 AM | Silver | Clustering por similaridade (pgvector) |
+| `generate_video_thumbnails` | `0 */4 * * *` | Silver | Gera thumbnails de vídeo |
+| `sync_umami_to_bigquery` | Diário 9 AM | Gold | Umami analytics → BigQuery |
+| `verify_news_integrity` | A cada 30 min | Silver | Verifica integridade de conteúdo |
+
+Deploy: `composer-deploy-dags.yaml` (automático ao modificar `src/data_platform/dags/`)
+
+---
+
+## BigQuery (Medallion Architecture)
+
+| Camada | Storage | Conteúdo |
+|--------|---------|----------|
+| **Bronze** | GCS (`bronze/news/YYYY/MM/DD/`) | Raw JSON dos scrapers |
+| **Silver** | PostgreSQL (Cloud SQL) | Tabelas normalizadas: `news`, `news_features`, `agencies`, `themes` |
+| **Gold** | BigQuery (`dgb_gold`) | `fato_noticias`, `umami_pageviews`, `umami_events` |
+
+---
+
+## Feature Registry
+
+O arquivo `feature_registry.yaml` na raiz define todas as features computadas, incluindo:
+- Quem computa (worker/DAG)
+- Tipo de dado
+- Modelo/versão
+- Schedule de atualização
+
+---
+
+## Quick Start
 
 ### Pré-requisitos
 
-- Python 3.11+
-- Poetry ou pip
-- PostgreSQL (para testes locais)
+- Python 3.12+
+- Poetry
+- Docker (para PostgreSQL + Typesense locais)
 
 ### Instalação
 
 ```bash
-# Clonar repositório
 git clone https://github.com/destaquesgovbr/data-platform.git
 cd data-platform
 
-# Instalar dependências com Poetry
+# Instalar dependências
 poetry install
 
-# OU com pip
-pip install -e .
+# Instalar pre-commit hooks (obrigatório)
+pre-commit install
+
+# Subir serviços locais (PostgreSQL + Typesense)
+make docker-up
+
+# Ver todos os comandos disponíveis
+make help
 ```
 
 ### Executar Testes
 
 ```bash
 # Todos os testes
-poetry run pytest
-
-# Com cobertura
-poetry run pytest --cov=data_platform
+pytest
 
 # Apenas unitários
-poetry run pytest tests/unit/
+pytest tests/unit/
+
+# Apenas integração
+pytest tests/integration/
 ```
 
 ---
 
-## 🗄️ Arquitetura de Dados
-
-### Schema PostgreSQL
-
-- **`agencies`**: Dados mestres de agências governamentais (158 registros)
-- **`themes`**: Taxonomia hierárquica de temas (3 níveis)
-- **`news`**: Notícias (~300k registros)
-- **`sync_log`**: Log de sincronizações
-
-Ver schema completo em [_plan/SCHEMA.md](_plan/SCHEMA.md).
-
-### Fluxo de Dados (Alvo)
-
-```
-┌─────────────────┐
-│ Scrapers        │
-│ (Gov.br + EBC)  │
-└────────┬────────┘
-         ↓
-┌────────────────────┐
-│ PostgreSQL         │ ← Fonte de verdade
-│ (Cloud SQL)        │
-└────────┬───────────┘
-         │
-    ┌────┴────┬──────────────┐
-    ↓         ↓              ↓
-┌─────────┐ ┌──────────┐  ┌────────────┐
-│HuggingFace│ │Typesense │  │Portal Web │
-│(dados    │ │(busca)   │  │(Next.js)  │
-│ abertos) │ │          │  │           │
-└─────────┘ └──────────┘  └────────────┘
-```
-
----
-
-## 🛠️ Desenvolvimento
-
-### Padrões de Código
+## Padrões de Código
 
 - **Type hints**: Obrigatórios em todas as funções
-- **Docstrings**: Formato Google
 - **Formatação**: Black (linha máxima 100)
 - **Linting**: Ruff
-- **Type checking**: MyPy
-
-### Exemplo
-
-```python
-def insert(self, data: OrderedDict, allow_update: bool = False) -> int:
-    """
-    Insere registros no banco.
-
-    Args:
-        data: Dados a inserir (OrderedDict)
-        allow_update: Se True, atualiza registros existentes
-
-    Returns:
-        Número de registros inseridos/atualizados
-
-    Raises:
-        ValueError: Se data estiver vazio
-    """
-    ...
-```
-
-### Rodar Linters
+- **Type checking**: MyPy (strict)
+- **Pre-commit**: Roda automaticamente Black, Ruff e MyPy
 
 ```bash
-# Black (formatação)
-poetry run black src/ tests/
-
-# Ruff (linting)
-poetry run ruff check src/ tests/
-
-# MyPy (type checking)
-poetry run mypy src/
+# Rodar manualmente
+make lint    # ou: poetry run ruff check src/ tests/
+make format  # ou: poetry run black src/ tests/
 ```
 
-### Uso do Pre-Commit (Obrigatório)
-
-Este projeto utiliza o framework [pre-commit](https://pre-commit.com) para automatizar a verificação de padrões de código antes de cada commit. As ferramentas de linting (`ruff-check`), formatação (`ruff-format`) e type checking (`mypy`) são executadas automaticamente.
-
-**Primeiros passos após clonar o repositório:**
-1.  **Instale** o hook do git: `pre-commit install`
-
-A partir de então, o `pre-commit` rodará automaticamente ao tentar fazer um `git commit`, garantindo que apenas código que passe pelas verificações seja versionado.
-
 ---
 
-## 📚 Documentação
-
-### Documentação Principal
-
-📖 **[Ver Documentação Completa em docs/](docs/README.md)**
+## Documentação
 
 | Documento | Descrição |
 |-----------|-----------|
-| [docs/README.md](./docs/README.md) | Índice completo da documentação |
+| [docs/README.md](./docs/README.md) | Índice completo |
 | [docs/architecture/overview.md](./docs/architecture/overview.md) | Arquitetura do sistema |
-| [docs/database/schema.md](./docs/database/schema.md) | Schemas das tabelas |
-| [docs/database/migrations.md](./docs/database/migrations.md) | Guia de setup e migrações |
-| [docs/development/setup.md](./docs/development/setup.md) | Setup do ambiente de desenvolvimento |
-
-### Documentação da Migração
-
-| Documento | Descrição |
-|-----------|-----------|
-| [_plan/README.md](./_plan/README.md) | Plano completo de migração (6 fases) |
-| [_plan/PROGRESS.md](./_plan/PROGRESS.md) | Log de progresso |
-| [_plan/DECISIONS.md](./_plan/DECISIONS.md) | Decisões arquiteturais (ADRs) |
-| [_plan/CHECKLIST.md](./_plan/CHECKLIST.md) | Checklist de verificação por fase |
-| [_plan/CONTEXT.md](./_plan/CONTEXT.md) | Contexto técnico para LLMs |
+| [docs/database/schema.md](./docs/database/schema.md) | Schema PostgreSQL |
+| [docs/database/migrations.md](./docs/database/migrations.md) | Migrações (001-012) |
+| [docs/development/setup.md](./docs/development/setup.md) | Setup do ambiente |
+| [docs/typesense/](./docs/typesense/) | Typesense (busca) |
+| [docs/runbooks/](./docs/runbooks/) | Runbooks operacionais |
 
 ---
 
-## 🔗 Repositórios Relacionados
+## Repositórios Relacionados
 
-- [destaquesgovbr/infra](https://github.com/destaquesgovbr/infra) - Terraform (privado)
-- [destaquesgovbr/scraper](https://github.com/destaquesgovbr/scraper) - Scrapers
-- [destaquesgovbr/portal](https://github.com/destaquesgovbr/portal) - Frontend
-- [destaquesgovbr/typesense](https://github.com/destaquesgovbr/typesense) - Search
+| Repositório | Descrição |
+|-------------|-----------|
+| [destaquesgovbr/infra](https://github.com/destaquesgovbr/infra) | Terraform / GCP (privado) |
+| [destaquesgovbr/scraper](https://github.com/destaquesgovbr/scraper) | Scrapers gov.br + EBC (Airflow + Cloud Run) |
+| [destaquesgovbr/portal](https://github.com/destaquesgovbr/portal) | Frontend Next.js |
+| [destaquesgovbr/telegram-bot](https://github.com/destaquesgovbr/telegram-bot) | Bot Telegram |
 
 ---
 
-## 📊 Dados Abertos
-
-O dataset completo está disponível no HuggingFace:
+## Dados Abertos
 
 - **Dataset completo**: [nitaibezerra/govbrnews](https://huggingface.co/datasets/nitaibezerra/govbrnews)
 - **Dataset reduzido**: [nitaibezerra/govbrnews-reduced](https://huggingface.co/datasets/nitaibezerra/govbrnews-reduced)
 
 ---
 
-## 🤝 Como Contribuir
+## Licença
 
-### Para LLMs (Claude, GPT, etc)
-
-1. Leia [_plan/CONTEXT.md](_plan/CONTEXT.md)
-2. Verifique [_plan/PROGRESS.md](_plan/PROGRESS.md)
-3. Consulte [_plan/DECISIONS.md](_plan/DECISIONS.md)
-4. Siga [_plan/CHECKLIST.md](_plan/CHECKLIST.md)
-5. Atualize PROGRESS.md ao completar tarefas
-
-### Para Desenvolvedores
-
-1. Fork o repositório
-2. Crie uma branch (`git checkout -b feature/nova-feature`)
-3. Faça suas alterações seguindo os padrões
-4. Adicione testes
-5. Rode linters e testes
-6. Commit (`git commit -m 'feat: adiciona nova feature'`)
-7. Push (`git push origin feature/nova-feature`)
-8. Abra um Pull Request
+GPLv3 - ver [LICENSE](LICENSE) para detalhes.
 
 ---
 
-## 📝 Licença
-
-MIT License - ver [LICENSE](LICENSE) para detalhes.
-
----
-
-## 📞 Contato
-
-- **Projeto**: DestaquesGovBr
-- **Repositório**: [github.com/destaquesgovbr/data-platform](https://github.com/destaquesgovbr/data-platform)
-- **Dados**: [huggingface.co/datasets/nitaibezerra/govbrnews](https://huggingface.co/datasets/nitaibezerra/govbrnews)
-
----
-
-*Última atualização: 2024-12-24*
+*Última atualização: 2026-05-13*

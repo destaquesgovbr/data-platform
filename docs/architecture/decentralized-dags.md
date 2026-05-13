@@ -9,8 +9,13 @@ O DestaquesGovBr utiliza Cloud Composer (Airflow) para orquestrar pipelines de d
 ```
 Cloud Composer DAGs Bucket
 ├── data-platform/                    ← Repo: destaquesgovbr/data-platform
-│   ├── sync_postgres_to_huggingface.py
-│   └── test_postgres_connection.py
+│   ├── sync_pg_to_bigquery.py
+│   ├── compute_trending.py
+│   ├── aggregate_engagement.py
+│   ├── compute_clusters.py
+│   ├── generate_video_thumbnails.py
+│   ├── sync_umami_to_bigquery.py
+│   └── verify_news_integrity.py
 ├── scraper/                          ← Repo: destaquesgovbr/scraper
 │   ├── scrape_agencies.py            (~155 DAGs dinâmicas)
 │   ├── scrape_ebc.py
@@ -94,7 +99,7 @@ Para que um novo repositório deploye DAGs no Composer:
 
 | Repo | Subdiretório | DAGs | Owner |
 |------|-------------|------|-------|
-| `data-platform` | `data-platform/` | sync_postgres_to_huggingface, test_postgres_connection | `data-platform` |
+| `data-platform` | `data-platform/` | sync_pg_to_bigquery, compute_trending, aggregate_engagement, compute_clusters, generate_video_thumbnails, sync_umami_to_bigquery, verify_news_integrity | `data-platform` |
 | `scraper` | `scraper/` | ~155 scrape_agencies + scrape_ebc | `scraper` |
 | `activitypub-server` | `activitypub-server/` | federation_publish | `activitypub-server` |
 

@@ -6,9 +6,10 @@ Guide for setting up the development environment for the DestaquesGovBr Data Pla
 
 ## Prerequisites
 
-- Python 3.11+
-- Poetry (or pip)
+- Python 3.12+
+- Poetry
 - Git
+- Docker (para PostgreSQL + Typesense locais)
 - Access to GCP project `inspire-7-finep`
 - gcloud CLI configured
 
@@ -23,14 +24,17 @@ cd /path/to/destaquesgovbr/data-platform
 # Install dependencies
 poetry install
 
-# Activate virtual environment
-poetry shell
+# Install pre-commit hooks (mandatory)
+pre-commit install
+
+# Start local services (PostgreSQL + Typesense)
+make docker-up
 
 # Run tests
 pytest
 
-# Setup database (first time only)
-./scripts/setup_database.sh
+# See all available make targets
+make help
 ```
 
 ---
@@ -56,7 +60,7 @@ poetry shell
 
 ```bash
 # Create virtual environment
-python3.11 -m venv venv
+python3.12 -m venv venv
 source venv/bin/activate
 
 # Install dependencies
@@ -97,24 +101,38 @@ brew install postgresql@15
 
 ```
 data-platform/
-├── docs/                   # Documentation
-│   ├── database/          # Database schemas and migrations
-│   ├── development/       # Development guides
-│   └── architecture/      # Architecture docs
-├── _plan/                 # Migration plan and progress
-├── src/
-│   └── data_platform/
-│       ├── managers/      # Database managers (PostgresManager, etc)
-│       ├── jobs/          # Data pipeline jobs
-│       │   ├── scraper/
-│       │   ├── enrichment/
-│       │   └── hf_sync/
-│       └── models/        # Data models
+├── src/data_platform/
+│   ├── workers/           # Cloud Run workers (event-driven)
+│   │   ├── bronze_writer/
+│   │   ├── feature_worker/
+│   │   ├── thumbnail_worker/
+│   │   └── typesense_sync/
+│   ├── dags/              # Airflow DAGs (7 in production)
+│   ├── jobs/              # Processing modules
+│   │   ├── bigquery/
+│   │   ├── enrichment/
+│   │   ├── embeddings/
+│   │   ├── integrity/
+│   │   ├── similarity/
+│   │   ├── thumbnail/
+│   │   ├── typesense/
+│   │   └── hf_sync/
+│   ├── managers/          # Storage managers (PostgreSQL, HF)
+│   ├── models/            # Pydantic models
+│   ├── typesense/         # Typesense client module
+│   └── config.py          # Centralized settings
 ├── tests/
-│   ├── unit/             # Unit tests
-│   └── integration/      # Integration tests
-├── scripts/              # Utility scripts
-└── pyproject.toml        # Dependencies and config
+│   ├── unit/
+│   └── integration/
+├── scripts/
+│   ├── migrations/        # Database migrations (001-012)
+│   └── bigquery/          # BigQuery table creation SQL
+├── docker/                # Dockerfiles for workers
+├── docs/                  # Documentation
+├── feature_registry.yaml  # Feature definitions
+├── docker-compose.yml     # Local: PostgreSQL + Typesense
+├── Makefile               # Dev commands (make help)
+└── pyproject.toml         # Dependencies (Poetry, Python ^3.12)
 ```
 
 ---
