@@ -29,7 +29,7 @@ O `docker-compose.yml` na raiz do projeto inclui:
 
 | Serviço | Imagem | Porta | Descrição |
 |---------|--------|-------|-----------|
-| PostgreSQL | `postgres:15` | 5433 | Banco de desenvolvimento |
+| PostgreSQL | `pgvector/pgvector:pg15` | 5433 | Banco de desenvolvimento com pgvector |
 | Typesense | `typesense/typesense:27.1` | 8108 | Motor de busca local |
 
 ```bash
@@ -54,6 +54,7 @@ Cada worker tem seu próprio Dockerfile usado pelo CI/CD para build e deploy:
 
 | Worker | Dockerfile | Deploy Workflow |
 |--------|-----------|-----------------|
+| bronze-writer | `docker/bronze-writer/Dockerfile` | `bronze-writer-deploy.yaml` |
 | feature-worker | `docker/feature-worker/Dockerfile` | `feature-worker-deploy.yaml` |
 | thumbnail-worker | `docker/thumbnail-worker/Dockerfile` | `thumbnail-worker-deploy.yaml` |
 | typesense-sync-worker | `docker/typesense-sync-worker/Dockerfile` | `typesense-sync-worker-deploy.yaml` |

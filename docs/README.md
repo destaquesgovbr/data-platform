@@ -11,6 +11,9 @@ Comprehensive documentation for the DestaquesGovBr Data Platform.
 | **Getting Started** | [Development Setup](development/setup.md) | Set up your development environment |
 | **Architecture** | [Overview](architecture/overview.md) | System architecture (event-driven, Medallion) |
 | **Architecture** | [Decentralized DAGs](architecture/decentralized-dags.md) | DAG deploy convention per repo |
+| **Architecture** | [Feature Registry](architecture/feature-registry.md) | Feature definitions and management |
+| **Workers** | [Cloud Run Workers](workers/README.md) | Event-driven worker services |
+| **DAGs** | [Airflow DAGs](dags/README.md) | Airflow DAG documentation |
 | **Database** | [Schema](database/schema.md) | Database tables, indexes, and queries |
 | **Database** | [Migrations](database/migrations.md) | Setup and manage the database |
 | **Development** | [Docker Setup](development/docker-setup.md) | Local PostgreSQL + Typesense |
@@ -29,7 +32,12 @@ docs/
 ├── README.md                           # This file (index)
 ├── architecture/
 │   ├── overview.md                     # System architecture
-│   └── decentralized-dags.md           # DAG deploy convention
+│   ├── decentralized-dags.md           # DAG deploy convention
+│   └── feature-registry.md             # Feature definitions
+├── dags/
+│   └── README.md                       # Airflow DAG documentation
+├── workers/
+│   └── README.md                       # Cloud Run worker services
 ├── database/
 │   ├── schema.md                       # Database schema reference
 │   └── migrations.md                   # Database setup and migrations

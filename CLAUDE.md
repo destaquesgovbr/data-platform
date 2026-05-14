@@ -70,12 +70,12 @@ data-platform/
 │   ├── jobs/                       # Módulos de processamento
 │   │   ├── bigquery/               # sync_to_bigquery, trending, engagement, umami_sync
 │   │   ├── enrichment/             # AI enrichment (Bedrock)
-│   │   ├── embeddings/             # Embedding generation
+│   │   ├── hf_sync/                # HuggingFace sync
 │   │   ├── integrity/              # Content verification
+│   │   ├── scraper/                # Scraper job utilities
 │   │   ├── similarity/             # Article clustering (pgvector)
 │   │   ├── thumbnail/              # Thumbnail extraction
-│   │   ├── typesense/              # Typesense sync jobs
-│   │   └── hf_sync/                # HuggingFace sync
+│   │   └── typesense/              # Typesense sync jobs
 │   ├── managers/                   # Storage managers
 │   │   ├── postgres_manager.py     # PostgreSQL (principal)
 │   │   ├── dataset_manager.py      # HuggingFace
@@ -96,6 +96,8 @@ data-platform/
 │   ├── migrations/                 # Database migrations (001-012)
 │   └── bigquery/                   # BigQuery table creation SQL
 ├── docker/                         # Dockerfiles
+│   ├── postgres/                   # PostgreSQL init scripts
+│   ├── bronze-writer/
 │   ├── feature-worker/
 │   ├── thumbnail-worker/
 │   └── typesense-sync-worker/
@@ -181,10 +183,10 @@ Scripts SQL em `scripts/bigquery/`: `create_tables.sql`, `create_pageviews.sql`,
 ## Feature Registry
 
 Arquivo `feature_registry.yaml` na raiz define todas as features computadas:
-- Quem computa (worker / DAG)
-- Tipo de dado e default
-- Modelo/versão
-- Schedule de atualização
+- Tipo de dado (`type`)
+- Descrição (`description`)
+- Modelo/versão (`model`, `version`)
+- Quem computa (`compute`: worker ou DAG)
 
 Features são armazenadas na tabela `news_features` (JSONB).
 
@@ -252,7 +254,6 @@ settings = get_settings()
 - `news` — Notícias (~300k registros, com embedding pgvector 768-dim)
 - `news_features` — Features computadas (JSONB)
 - `scrape_runs` — Tracking de execuções de scraping
-- `sync_log` — Log de sincronizações
 
 Ver detalhes em [docs/database/schema.md](docs/database/schema.md).
 
@@ -288,7 +289,7 @@ pytest --cov=data_platform
 ### Docker Compose (local)
 
 ```bash
-make docker-up    # PostgreSQL 15 (porta 5432) + Typesense 27.1 (porta 8108)
+make docker-up    # PostgreSQL 15 (porta 5433) + Typesense 27.1 (porta 8108)
 make docker-down  # Para serviços
 ```
 

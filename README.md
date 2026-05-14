@@ -76,15 +76,16 @@ data-platform/
 │   ├── jobs/                 # Job modules
 │   │   ├── bigquery/         # PG→BigQuery, trending, engagement, umami
 │   │   ├── enrichment/       # AI enrichment
-│   │   ├── embeddings/       # Embedding generation
+│   │   ├── hf_sync/          # HuggingFace sync
 │   │   ├── integrity/        # Content verification
+│   │   ├── scraper/          # Scraper job utilities
 │   │   ├── similarity/       # Article clustering
 │   │   ├── thumbnail/        # Thumbnail extraction
-│   │   ├── typesense/        # Typesense sync
-│   │   └── hf_sync/          # HuggingFace sync
+│   │   └── typesense/        # Typesense sync
 │   ├── managers/             # Storage managers (PostgreSQL, HF)
 │   ├── models/               # Pydantic models
 │   ├── typesense/            # Typesense client/collection/indexer
+│   ├── utils/                # Shared utilities
 │   └── config.py             # Centralized settings (pydantic-settings)
 ├── tests/                    # Unit + integration tests
 ├── scripts/

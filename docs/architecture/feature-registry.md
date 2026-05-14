@@ -97,5 +97,5 @@ Quando um modelo muda (ex: trocar textstat por outro lib para readability):
 ---
 
 See also:
-- [Feature Worker](../workers/feature-worker.md)
+- [Feature Worker](../workers/README.md#feature-worker)
 - [DAGs](../dags/README.md)
