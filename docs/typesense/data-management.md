@@ -6,7 +6,7 @@ Este documento descreve os workflows e comandos disponíveis para gerenciar os d
 
 O projeto possui três formas de gerenciar dados no Typesense:
 
-1. **Daily Incremental Load** - Carregamento incremental diário automático
+1. **Event-Driven Sync** - Sincronização em tempo real via Typesense Sync Worker (Pub/Sub)
 2. **Full Data Reload** - Recarregamento completo manual (workflow dispatcher)
 3. **CLI Commands** - Comandos para operações manuais
 
@@ -17,24 +17,14 @@ Os dados são lidos do **PostgreSQL** (não mais do HuggingFace) e incluem:
 - Temas classificados por IA (3 níveis hierárquicos)
 - Embeddings semânticos (768 dimensões)
 
-## 1. Carregamento Incremental Diário
+## 1. Sync Event-Driven (principal)
 
-### Descrição
-Workflow que executa automaticamente todos os dias às 10:00 AM UTC (7:00 AM horário de Brasília) para carregar notícias dos últimos 7 dias.
+O **Typesense Sync Worker** (Cloud Run) recebe mensagens Pub/Sub dos topics `dgb.news.enriched` e `dgb.news.embedded`, fazendo upsert em tempo real no Typesense. Este é o mecanismo principal de sincronização — não há mais workflow de carga incremental diária.
 
-### Workflow
-`.github/workflows/typesense-daily-load.yaml`
+### Workflow de manutenção
+`.github/workflows/typesense-maintenance-sync.yaml`
 
-### Execução Manual
-Você pode executar manualmente via GitHub Actions:
-1. Acesse: Actions → "Typesense Daily Incremental Load" → "Run workflow"
-2. Opcionalmente, especifique o número de dias para carregar (padrão: 7)
-
-### Comportamento
-- Modo: `incremental`
-- Ação: `upsert` (atualiza documentos existentes ou insere novos)
-- Não deleta dados existentes
-- Atualiza o cache do portal automaticamente após sucesso
+Usado apenas para corrigir inconsistências ou reprocessar períodos específicos. Execução manual via GitHub Actions.
 
 ## 2. Recarregamento Completo (Full Reload)
 
@@ -49,7 +39,7 @@ Este workflow **deleta completamente** a collection existente e recarrega todos 
 - Para limpar dados inconsistentes
 
 ### Workflow
-`.github/workflows/typesense-full-reload.yaml`
+`.github/workflows/typesense-schema-update.yaml`
 
 ### Como Executar
 

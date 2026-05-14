@@ -49,9 +49,15 @@ poetry run data-platform typesense-delete --confirm
 
 | Workflow | Descrição | Trigger |
 |----------|-----------|---------|
-| `typesense-daily-load.yaml` | Carga incremental (7 dias) | Diário 10:00 UTC |
-| `typesense-full-reload.yaml` | Recarga completa | Manual |
-| `typesense-docker-build.yaml` | Build da imagem Docker | Push em `docker/typesense/` |
+| `typesense-sync-worker-deploy.yaml` | Deploy do Typesense Sync Worker | Push to main |
+| `typesense-maintenance-sync.yaml` | Sync de manutenção (batch) | Manual |
+| `typesense-schema-update.yaml` | Atualização de schema da collection | Manual |
+
+### Sync Event-Driven (principal)
+
+O **Typesense Sync Worker** (Cloud Run) recebe mensagens Pub/Sub dos topics `dgb.news.enriched` e `dgb.news.embedded`, fazendo upsert em tempo real no Typesense. Este é o mecanismo principal de sincronização.
+
+Os workflows manuais (`maintenance-sync`, `schema-update`) são usados apenas para operações de manutenção ou correção.
 
 ## Estrutura do Código
 

@@ -18,23 +18,23 @@ Crie uma nova DAG seguindo o padrao estabelecido do projeto DGB.
 - **Airflow**: 3.0.1 (Cloud Composer)
 - **Composer**: `destaquesgovbr-composer` (southamerica-east1)
 - **GCP Project**: `inspire-7-finep`
-- **Python**: 3.11
+- **Python**: 3.12
 
 ### Pipeline de Dados
 
 ```
-Scrapers (Cloud Run, a cada 15 min)
-    |
-PostgreSQL (Cloud SQL, private IP)
-    |
-Enriquecimento IA (Cogfy) — temas + summaries
-    |
-Embeddings API (Cloud Run) — 768-dim vectors (pgvector)
-    |
-Typesense (busca textual + semantica)
-    |
-HuggingFace (dados abertos — sync diario)
-    |
+Scrapers (Cloud Run, a cada 10 min)
+    ↓ Pub/Sub: dgb.news.scraped
+Bronze Writer → GCS (raw JSON)
+    ↓
+PostgreSQL (Cloud SQL, private IP) ← Silver layer
+    ↓ Pub/Sub: dgb.news.enriched
+Feature Worker → news_features
+Thumbnail Worker → GCS (thumbnails)
+Typesense Sync → Typesense (busca)
+    ↓
+Airflow DAGs → BigQuery (Gold layer)
+    ↓
 Portal Web (Next.js)
 ```
 
@@ -93,9 +93,14 @@ records = pg_hook.get_records(SQL_QUERY, parameters=[param1])
 
 | Repo | DAG | Schedule | Descricao |
 |---|---|---|---|
-| `scraper` | `scrape_{agency}` (~158 DAGs) | `*/15 * * * *` | Scraping dinamico |
-| `data-publishing` | `sync_postgres_to_huggingface` | `0 6 * * *` | PG → HuggingFace |
-| `embeddings` | `generate_embeddings` | `0 5 * * *` | Gera embeddings via API |
+| `scraper` | `scrape_{agency}` (~155 DAGs) | `*/10 * * * *` | Scraping dinamico |
+| `data-platform` | `sync_pg_to_bigquery` | `0 7 * * *` | PG → BigQuery (Gold) |
+| `data-platform` | `compute_trending` | `0 */6 * * *` | Trending scores |
+| `data-platform` | `aggregate_engagement` | `0 8 * * *` | Pageview aggregation |
+| `data-platform` | `compute_clusters` | `30 7 * * *` | Similarity clustering |
+| `data-platform` | `generate_video_thumbnails` | A cada 4h | Thumbnails de video |
+| `data-platform` | `sync_umami_to_bigquery` | `0 9 * * *` | Umami → BigQuery |
+| `data-platform` | `verify_news_integrity` | `*/30 * * * *` | Verificacao integridade |
 
 ### Padrao de Deploy
 

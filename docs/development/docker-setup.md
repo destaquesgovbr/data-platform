@@ -7,20 +7,21 @@ Guia completo para configurar ambiente de desenvolvimento local com Docker.
 ## Visão Geral
 
 O ambiente Docker local fornece:
-- **PostgreSQL 15** isolado para desenvolvimento
+- **PostgreSQL 15** isolado para desenvolvimento (porta 5433)
+- **Typesense 27.1** para busca local (porta 8108)
 - **Dados de teste** (agencies e themes pré-populados)
 - **Persistência** de dados entre reinicializações
-- **Compatibilidade** total com Cloud SQL (mesma versão)
+- **Compatibilidade** total com Cloud SQL (mesma versão PG)
 
 ---
 
 ## Componentes
 
 ### docker-compose.yml
-- PostgreSQL 15
-- Volume persistente para dados
-- Portas expostas (5432)
-- Configuração de usuário/senha/database
+- PostgreSQL 15 (porta 5433)
+- Typesense 27.1 (porta 8108)
+- Volumes persistentes para dados
+- Health checks configurados
 
 ### setup_local_db.sh
 - Cria schema completo
@@ -28,10 +29,10 @@ O ambiente Docker local fornece:
 - Popula themes (588 registros)
 - Configura índices e triggers
 
-### .env.local
-- Variáveis de ambiente para desenvolvimento local
+### .env.example
+- Template de variáveis de ambiente
 - Connection strings
-- Configurações de teste
+- Configurações de serviços
 
 ---
 
@@ -39,12 +40,15 @@ O ambiente Docker local fornece:
 
 ```
 data-platform/
-├── docker-compose.yml           # Orquestração de containers
-├── .env.local                   # Variáveis locais (gitignored)
+├── docker-compose.yml           # PostgreSQL + Typesense
+├── docker/                      # Dockerfiles dos workers
+│   ├── postgres/                # PostgreSQL custom image
+│   ├── feature-worker/
+│   ├── thumbnail-worker/
+│   └── typesense-sync-worker/
 ├── .env.example                 # Template de variáveis
 ├── scripts/
-│   ├── setup_local_db.sh       # Setup completo do banco local
-│   └── reset_local_db.sh       # Reset completo (DROP + CREATE)
+│   └── setup_local_db.sh       # Setup completo do banco local
 └── docs/
     └── development/
         └── docker-setup.md     # Este arquivo
@@ -54,17 +58,18 @@ data-platform/
 
 ## Quick Start
 
-### 1. Iniciar PostgreSQL
+### 1. Iniciar Serviços
 
 ```bash
 # Copiar template de variáveis
-cp .env.example .env.local
+cp .env.example .env
 
-# Iniciar container
-docker-compose up -d
+# Iniciar containers (PostgreSQL + Typesense)
+make docker-up
+# ou: docker-compose up -d
 
 # Verificar logs
-docker-compose logs -f postgres
+docker-compose logs -f
 ```
 
 ### 2. Setup do Banco
@@ -82,16 +87,18 @@ python scripts/populate_themes.py --local
 ### 3. Testar Conexão
 
 ```bash
-# Via psql
-docker exec -it destaquesgovbr-postgres psql -U govbrnews_dev -d govbrnews_dev
+# PostgreSQL via psql
+docker exec -it destaquesgovbr-postgres psql -U destaquesgovbr_dev -d destaquesgovbr_dev
+
+# Typesense health check
+curl http://localhost:8108/health
 
 # Via Python
 PYTHONPATH=src python -c "
-from data_platform.managers import PostgresManager
-manager = PostgresManager(connection_string='postgresql://govbrnews_dev:dev_password@localhost:5432/govbrnews_dev')
-manager.load_cache()
-print(f'Agencies: {len(manager._agencies_by_key)}')
-print(f'Themes: {len(manager._themes_by_code)}')
+from data_platform.config import get_settings
+settings = get_settings()
+print(f'DB: {settings.database_url}')
+print(f'Typesense: {settings.typesense_url}')
 "
 ```
 
@@ -205,22 +212,15 @@ python scripts/validate_migration.py \
 
 4. **Resetar banco se necessário**
    ```bash
-   ./scripts/reset_local_db.sh
+   docker-compose down -v
+   make docker-up
+   ./scripts/setup_local_db.sh
    ```
 
 5. **Parar ambiente ao final**
    ```bash
-   docker-compose stop
+   make docker-down
    ```
-
-### Reset Completo
-
-```bash
-# Remover tudo e começar do zero
-docker-compose down -v
-docker-compose up -d
-./scripts/setup_local_db.sh
-```
 
 ---
 
@@ -372,4 +372,4 @@ steps:
 
 ---
 
-**Última atualização**: 2024-12-24
+**Última atualização**: 2026-05-13

@@ -155,6 +155,12 @@ The `db-migrate.yaml` workflow runs migrations via GitHub Actions with:
 | 004 | `004_create_news_features.sql` | SQL | JSONB feature store table |
 | 005 | `005_alter_unique_id_varchar.sql` | SQL | Widen unique_id to VARCHAR(120) |
 | 006 | `006_migrate_unique_ids.py` | Python | Migrate ~300k unique_ids to readable slugs |
+| 007 | `007_create_idx_news_video_no_image.sql` | SQL | Partial index for thumbnail batch query optimization |
+| 008 | `008_create_scrape_runs.sql` | SQL | Scrape runs tracking table (per-agency execution results) |
+| 009 | `009_add_content_hash_and_url_index.sql` | SQL | Content hash column + URL index for deduplication |
+| 010 | `010_backfill_content_hash.py` | Python | Backfill SHA-256 content_hash for existing rows |
+| 011 | `011_cleanup_url_duplicates.py` | Python | Remove URL-based duplicates (keep records with embeddings) |
+| 012 | `012_add_url_unique_index.sql` | SQL | Unique partial index on (agency_key, url) |
 
 ---
 
