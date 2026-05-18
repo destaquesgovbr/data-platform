@@ -7,6 +7,6 @@ BEGIN;
 UPDATE news
 SET image_url = NULL
 WHERE image_url IS NOT NULL
-  AND image_url NOT LIKE 'https://%';
+  AND image_url NOT LIKE 'http%';
 
 COMMIT;
