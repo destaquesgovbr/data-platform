@@ -70,6 +70,25 @@ PRIORITY_QUERY = text("""
 # Proporção de artigos que devem ter check_content ativado (os mais recentes)
 CONTENT_CHECK_RATIO = 0.25
 
+# Allowlist de domínios aceitos pelo endpoint /verify/integrity do scraper.
+# Espelha _ALLOWED_URL_PREFIXES em govbr_scraper/api.py.
+ALLOWED_URL_PREFIXES = (
+    "https://www.gov.br/",
+    "https://agenciabrasil.ebc.com.br/",
+    "https://imagens.ebc.com.br/",
+    "https://memoria.ebc.com.br/",
+    "https://tvbrasil.ebc.com.br/",
+    "https://live.staticflickr.com/",
+    "https://storage.googleapis.com/destaquesgovbr-thumbnails/",
+)
+
+
+def _is_allowed_url(url: str | None) -> bool:
+    """Verifica se uma URL pertence à allowlist de domínios aceitos."""
+    if not url:
+        return True
+    return any(url.startswith(prefix) for prefix in ALLOWED_URL_PREFIXES)
+
 
 def fetch_priority_batch(db_url: str, batch_size: int = 400) -> list[dict]:
     """Busca artigos priorizados para verificação de integridade.
@@ -97,20 +116,38 @@ def fetch_priority_batch(db_url: str, batch_size: int = 400) -> list[dict]:
     content_check_count = max(1, int(len(rows) * CONTENT_CHECK_RATIO))
 
     articles = []
+    filtered_count = 0
     for i, row in enumerate(rows):
         integrity = row.integrity or {}
         if isinstance(integrity, str):
             integrity = json.loads(integrity)
 
+        image_url = row.image_url
+        article_url = row.url
+
+        if not _is_allowed_url(image_url):
+            logger.warning(f"image_url filtrada (fora da allowlist): {image_url[:80]}")
+            image_url = None
+            filtered_count += 1
+
+        if not _is_allowed_url(article_url):
+            logger.warning(f"url filtrada (fora da allowlist): {article_url[:80]}")
+            article_url = None
+
         article = {
             "unique_id": row.unique_id,
-            "url": row.url,
-            "image_url": row.image_url,
+            "url": article_url,
+            "image_url": image_url,
             "content_hash": integrity.get("content_hash"),
             "source_etag": integrity.get("source_etag"),
             "check_content": i < content_check_count,
         }
         articles.append(article)
+
+    if filtered_count:
+        logger.warning(
+            f"{filtered_count}/{len(rows)} artigos com image_url filtrada por allowlist"
+        )
 
     logger.info(
         f"Batch de verificação: {len(articles)} artigos "
