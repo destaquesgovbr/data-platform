@@ -1,9 +1,17 @@
 """Testes unitários para priorização de verificação de integridade."""
 
+import logging
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 from data_platform.jobs.integrity.priority import (
+    ALLOWED_URL_PREFIXES,
     CONTENT_CHECK_RATIO,
     PRIORITY_TIERS,
     PRIORITY_QUERY,
+    _is_allowed_url,
+    fetch_priority_batch,
 )
 
 
@@ -79,3 +87,141 @@ class TestContentCheckRatio:
 
     def test_ratio_is_quarter(self):
         assert CONTENT_CHECK_RATIO == 0.25
+
+
+class TestIsAllowedUrl:
+    """Testes para a funcao de validacao de URL."""
+
+    def test_none_is_allowed(self):
+        assert _is_allowed_url(None) is True
+
+    def test_empty_string_is_allowed(self):
+        assert _is_allowed_url("") is True
+
+    def test_gov_br_is_allowed(self):
+        assert _is_allowed_url("https://www.gov.br/mec/pt-br/imagem.jpg") is True
+
+    def test_ebc_is_allowed(self):
+        assert _is_allowed_url("https://agenciabrasil.ebc.com.br/img.jpg") is True
+
+    def test_imagens_ebc_is_allowed(self):
+        assert _is_allowed_url("https://imagens.ebc.com.br/photo.jpg") is True
+
+    def test_staticflickr_is_allowed(self):
+        assert _is_allowed_url("https://live.staticflickr.com/123/img.jpg") is True
+
+    def test_gcs_thumbnails_is_allowed(self):
+        assert _is_allowed_url("https://storage.googleapis.com/destaquesgovbr-thumbnails/x.jpg") is True
+
+    def test_random_domain_is_rejected(self):
+        assert _is_allowed_url("https://cdn.example.com/img.jpg") is False
+
+    def test_http_gov_br_is_rejected(self):
+        assert _is_allowed_url("http://www.gov.br/img.jpg") is False
+
+    def test_gov_br_without_www_is_rejected(self):
+        assert _is_allowed_url("https://gov.br/img.jpg") is False
+
+    def test_other_gcs_bucket_is_rejected(self):
+        assert _is_allowed_url("https://storage.googleapis.com/other-bucket/x.jpg") is False
+
+
+def _make_row(unique_id="art-1", url="https://www.gov.br/mec/noticia",
+              image_url="https://www.gov.br/mec/img.jpg", published_at=None,
+              integrity=None):
+    """Cria um mock de row do SQLAlchemy."""
+    row = MagicMock()
+    row.unique_id = unique_id
+    row.url = url
+    row.image_url = image_url
+    row.published_at = published_at
+    row.integrity = integrity
+    return row
+
+
+@pytest.fixture
+def mock_db():
+    """Mock do engine e conexao SQLAlchemy."""
+    with patch("data_platform.jobs.integrity.priority.create_engine") as mock_engine_cls:
+        mock_engine = MagicMock()
+        mock_engine_cls.return_value = mock_engine
+        mock_conn = MagicMock()
+        mock_engine.connect.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_engine.connect.return_value.__exit__ = MagicMock(return_value=False)
+        yield mock_conn, mock_engine
+
+
+class TestFetchPriorityBatchUrlFiltering:
+    """Testes para filtragem de URLs fora da allowlist."""
+
+    def test_filters_disallowed_image_url(self, mock_db):
+        mock_conn, _ = mock_db
+        row = _make_row(image_url="https://cdn.example.com/photo.jpg")
+        mock_conn.execute.return_value.fetchall.return_value = [row]
+
+        articles = fetch_priority_batch("postgresql://test", batch_size=10)
+
+        assert len(articles) == 1
+        assert articles[0]["image_url"] is None
+
+    def test_keeps_allowed_image_url(self, mock_db):
+        mock_conn, _ = mock_db
+        expected_url = "https://www.gov.br/mec/pt-br/imagem.jpg"
+        row = _make_row(image_url=expected_url)
+        mock_conn.execute.return_value.fetchall.return_value = [row]
+
+        articles = fetch_priority_batch("postgresql://test", batch_size=10)
+
+        assert articles[0]["image_url"] == expected_url
+
+    def test_none_image_url_stays_none(self, mock_db):
+        mock_conn, _ = mock_db
+        row = _make_row(image_url=None)
+        mock_conn.execute.return_value.fetchall.return_value = [row]
+
+        articles = fetch_priority_batch("postgresql://test", batch_size=10)
+
+        assert articles[0]["image_url"] is None
+
+    def test_logs_filtered_urls(self, mock_db, caplog):
+        mock_conn, _ = mock_db
+        row = _make_row(image_url="https://cdn.example.com/photo.jpg")
+        mock_conn.execute.return_value.fetchall.return_value = [row]
+
+        with caplog.at_level(logging.WARNING):
+            fetch_priority_batch("postgresql://test", batch_size=10)
+
+        assert any("image_url filtrada" in msg for msg in caplog.messages)
+
+    def test_filters_disallowed_article_url(self, mock_db):
+        mock_conn, _ = mock_db
+        row = _make_row(url="https://external-site.org/news/123")
+        mock_conn.execute.return_value.fetchall.return_value = [row]
+
+        articles = fetch_priority_batch("postgresql://test", batch_size=10)
+
+        assert articles[0]["url"] is None
+
+    def test_keeps_allowed_article_url(self, mock_db):
+        mock_conn, _ = mock_db
+        expected_url = "https://www.gov.br/mec/pt-br/noticias/artigo"
+        row = _make_row(url=expected_url)
+        mock_conn.execute.return_value.fetchall.return_value = [row]
+
+        articles = fetch_priority_batch("postgresql://test", batch_size=10)
+
+        assert articles[0]["url"] == expected_url
+
+    def test_summary_log_with_filtered_count(self, mock_db, caplog):
+        mock_conn, _ = mock_db
+        rows = [
+            _make_row(unique_id="a1", image_url="https://cdn.x.com/1.jpg"),
+            _make_row(unique_id="a2", image_url="https://www.gov.br/ok.jpg"),
+            _make_row(unique_id="a3", image_url="https://evil.org/x.jpg"),
+        ]
+        mock_conn.execute.return_value.fetchall.return_value = rows
+
+        with caplog.at_level(logging.WARNING):
+            fetch_priority_batch("postgresql://test", batch_size=10)
+
+        assert any("2/3" in msg and "allowlist" in msg for msg in caplog.messages)
