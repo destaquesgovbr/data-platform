@@ -21,6 +21,22 @@ from datetime import date, timedelta
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger(__name__)
 
+DATASET = "dgb_gold"
+TABLE = "fato_noticias"
+
+
+def date_already_loaded(project_id: str, target_date: date) -> bool:
+    """Check if data for a given date already exists in BigQuery."""
+    from google.cloud import bigquery
+
+    client = bigquery.Client(project=project_id)
+    query = (
+        f"SELECT COUNT(*) as cnt FROM `{project_id}.{DATASET}.{TABLE}` "
+        f"WHERE DATE(published_at) = '{target_date}'"
+    )
+    result = list(client.query(query).result())[0]
+    return result.cnt > 0
+
 
 def main():
     db_url = os.environ.get("DATABASE_URL")
@@ -41,12 +57,20 @@ def main():
     end = date(2026, 5, 20)
     current = start
     total_rows = 0
+    skipped = 0
 
     logger.info(f"Backfilling BigQuery fato_noticias: {start} to {end}")
     logger.info(f"Project: {project_id} | Bucket: {bucket}")
 
     while current < end:
         next_day = current + timedelta(days=1)
+
+        if date_already_loaded(project_id, current):
+            logger.info(f"  {current}: already loaded, skipping")
+            skipped += 1
+            current = next_day
+            continue
+
         df = fetch_news_for_bigquery(db_url, str(current), str(next_day))
         if not df.empty:
             gcs_uri = write_to_parquet_gcs(df, bucket, str(current))
@@ -54,10 +78,12 @@ def main():
             total_rows += rows
             logger.info(f"  {current}: {rows} rows loaded")
         else:
-            logger.info(f"  {current}: no data")
+            logger.info(f"  {current}: no data in PG")
         current = next_day
 
-    logger.info(f"Backfill complete: {total_rows} total rows loaded across {(end - start).days} days")
+    logger.info(
+        f"Backfill complete: {total_rows} rows loaded, {skipped} days skipped (already existed)"
+    )
 
 
 if __name__ == "__main__":
