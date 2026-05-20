@@ -1,0 +1,102 @@
+name: BigQuery Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Migration command to execute'
+        required: true
+        type: choice
+        options:
+          - status
+          - migrate
+          - history
+          - validate
+      dry_run:
+        description: 'Preview changes without applying (default: true)'
+        required: false
+        type: boolean
+        default: true
+      confirm:
+        description: 'Required for migrate with dry_run=false'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: inspire-7-finep
+
+jobs:
+  validate-inputs:
+    name: Validate Inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation for destructive operations
+        run: |
+          COMMAND="${{ inputs.command }}"
+          DRY_RUN="${{ inputs.dry_run }}"
+          CONFIRM="${{ inputs.confirm }}"
+
+          echo "## BigQuery Migration Request" >> $GITHUB_STEP_SUMMARY
+          echo "- **Command:** $COMMAND" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry run:** $DRY_RUN" >> $GITHUB_STEP_SUMMARY
+          echo "- **Confirm:** $CONFIRM" >> $GITHUB_STEP_SUMMARY
+          echo "- **Actor:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "$COMMAND" == "migrate" && "$DRY_RUN" == "false" && "$CONFIRM" != "true" ]]; then
+            echo "::error::migrate requires confirm=true when dry_run=false"
+            exit 1
+          fi
+
+  run-migration:
+    name: Run BigQuery Migration
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --only main
+
+      - name: Execute migration command
+        env:
+          GCP_PROJECT_ID: ${{ env.PROJECT_ID }}
+        run: |
+          COMMAND="${{ inputs.command }}"
+          DRY_RUN="${{ inputs.dry_run }}"
+
+          ARGS=("$COMMAND")
+
+          if [[ "$COMMAND" == "migrate" && "$DRY_RUN" == "true" ]]; then
+            ARGS+=(--dry-run)
+          fi
+
+          echo "Executing: python scripts/bq_migrate.py ${ARGS[*]}"
+          echo "## Output" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          poetry run python scripts/bq_migrate.py "${ARGS[@]}" | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
