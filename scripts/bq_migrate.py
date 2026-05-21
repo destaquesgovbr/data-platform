@@ -152,11 +152,17 @@ def cmd_migrate(client, dry_run: bool = False) -> None:
         try:
             client.query(sql).result()
             duration_ms = int((time.time() - start) * 1000)
-            record_migration(client, m["version"], m["name"], "success", duration_ms)
+            try:
+                record_migration(client, m["version"], m["name"], "success", duration_ms)
+            except Exception as record_err:
+                print(f"    WARNING: Migration applied but failed to record: {record_err}")
             print(f"    Applied ({duration_ms}ms)")
         except Exception as e:
             duration_ms = int((time.time() - start) * 1000)
-            record_migration(client, m["version"], m["name"], "failed", duration_ms, str(e))
+            try:
+                record_migration(client, m["version"], m["name"], "failed", duration_ms, str(e))
+            except Exception:
+                pass
             print(f"    FAILED: {e}")
             sys.exit(1)
 

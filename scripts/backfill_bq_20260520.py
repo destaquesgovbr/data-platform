@@ -58,6 +58,7 @@ def main():
     current = start
     total_rows = 0
     skipped = 0
+    failed_dates: list[date] = []
 
     logger.info(f"Backfilling BigQuery fato_noticias: {start} to {end}")
     logger.info(f"Project: {project_id} | Bucket: {bucket}")
@@ -71,19 +72,32 @@ def main():
             current = next_day
             continue
 
-        df = fetch_news_for_bigquery(db_url, str(current), str(next_day))
-        if not df.empty:
-            gcs_uri = write_to_parquet_gcs(df, bucket, str(current))
-            rows = load_parquet_to_bigquery(gcs_uri, project_id)
-            total_rows += rows
-            logger.info(f"  {current}: {rows} rows loaded")
-        else:
-            logger.info(f"  {current}: no data in PG")
+        try:
+            df = fetch_news_for_bigquery(db_url, str(current), str(next_day))
+            if not df.empty:
+                null_hash_count = df["content_hash"].isna().sum()
+                if null_hash_count > 0:
+                    raise ValueError(
+                        f"{null_hash_count}/{len(df)} rows have NULL content_hash"
+                    )
+                gcs_uri = write_to_parquet_gcs(df, bucket, str(current))
+                rows = load_parquet_to_bigquery(gcs_uri, project_id)
+                total_rows += rows
+                logger.info(f"  {current}: {rows} rows loaded")
+            else:
+                logger.info(f"  {current}: no data in PG")
+        except Exception as e:
+            logger.error(f"  {current}: FAILED — {e}")
+            failed_dates.append(current)
+
         current = next_day
 
     logger.info(
         f"Backfill complete: {total_rows} rows loaded, {skipped} days skipped (already existed)"
     )
+    if failed_dates:
+        logger.error(f"FAILED dates (need manual retry): {failed_dates}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
