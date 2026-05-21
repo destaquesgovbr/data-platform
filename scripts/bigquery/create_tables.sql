@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS dgb_gold.fato_noticias (
   unique_id STRING NOT NULL,
   title STRING,
   url STRING,
+  content_hash STRING,
 
   -- Agency (denormalized)
   agency_key STRING,
