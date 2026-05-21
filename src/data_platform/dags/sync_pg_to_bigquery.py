@@ -43,6 +43,28 @@ logger = logging.getLogger(__name__)
 def sync_pg_to_bigquery():
 
     @task
+    def ensure_schema(**context):
+        """Apply pending BigQuery schema migrations before syncing.
+
+        Runs ALTER TABLE ... ADD COLUMN IF NOT EXISTS for each pending migration.
+        Idempotent — safe to re-run even if columns already exist.
+        """
+        from google.cloud import bigquery
+
+        project_id = Variable.get("gcp_project_id", default_var="inspire-7-finep")
+        client = bigquery.Client(project=project_id)
+
+        migrations = [
+            f"ALTER TABLE `{project_id}.dgb_gold.fato_noticias` ADD COLUMN IF NOT EXISTS content_hash STRING",
+        ]
+
+        for sql in migrations:
+            client.query(sql).result()
+            logger.info(f"Schema migration applied: {sql[:80]}...")
+
+        return {"status": "success", "migrations": len(migrations)}
+
+    @task
     def sync_facts(**context):
         """Query PG for previous day's news + features, load into BigQuery."""
         from data_platform.jobs.bigquery.sync_to_bigquery import (
@@ -92,8 +114,9 @@ def sync_pg_to_bigquery():
         sync_dimensions(db_url, project_id)
         return {"status": "success"}
 
-    # Tasks run in parallel (no dependency between facts and dims)
-    sync_facts()
+    # ensure_schema runs first, then facts and dims in parallel
+    schema = ensure_schema()
+    sync_facts(schema)
     sync_dims()
 
 
