@@ -98,7 +98,10 @@ class TestProcessEndpoint:
         """Valid Pub/Sub message triggers upsert and returns 200."""
         resp = client.post("/process", json=pubsub_envelope)
         assert resp.status_code == 200
-        mock_upsert.assert_called_once_with("mec-2026-01-01-noticia-1", pg=mock_pg.return_value)
+        # Após migração GraphQL, app passa gql_client=None quando GRAPHQL_API_URL não está setado.
+        mock_upsert.assert_called_once_with(
+            "mec-2026-01-01-noticia-1", pg=mock_pg.return_value, gql_client=None
+        )
 
     def test_invalid_json_returns_400(self, client):
         """Non-JSON body returns 400."""
