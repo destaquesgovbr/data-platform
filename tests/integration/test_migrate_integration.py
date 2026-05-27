@@ -146,18 +146,19 @@ def _reset_database():
     """Drop and recreate the test database schema."""
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = True
-    cur = conn.cursor()
-    cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-    cur.close()
-    conn.close()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+    finally:
+        conn.close()
 
     conn = psycopg2.connect(DATABASE_URL)
-    conn.autocommit = False
-    cur = conn.cursor()
-    cur.execute(BASELINE_SQL)
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(BASELINE_SQL)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @pytest.fixture(autouse=True)
@@ -168,7 +169,12 @@ def fresh_database():
 
 
 def _apply_all_migrations():
-    """Apply all migrations, handling CONCURRENTLY ones specially."""
+    """Apply all migrations in 3 phases to handle CONCURRENTLY limitations.
+
+    Phase 1: Apply migrations up to the first CONCURRENTLY one via runner.
+    Phase 2: Apply each CONCURRENTLY migration manually (outside transaction) + stamp.
+    Phase 3: Apply remaining migrations via runner.
+    """
     if not CONCURRENT_MIGRATIONS:
         result = _run_migrate("migrate", "--yes")
         assert result.returncode == 0, f"Migration failed:\n{result.stdout}\n{result.stderr}"
