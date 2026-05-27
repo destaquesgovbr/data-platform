@@ -104,6 +104,7 @@ SELECT DISTINCT version FROM migration_status WHERE operation = 'migrate'
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MigrationInfo:
     version: str
@@ -116,6 +117,7 @@ class MigrationInfo:
 # ---------------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------------
+
 
 def discover_migrations(migrations_dir: Path) -> list[MigrationInfo]:
     """Discover migration files in a directory by naming convention."""
@@ -157,8 +159,22 @@ def discover_migrations(migrations_dir: Path) -> list[MigrationInfo]:
 
 
 # ---------------------------------------------------------------------------
+# Autocommit detection
+# ---------------------------------------------------------------------------
+
+
+def _requires_autocommit(migration: MigrationInfo) -> bool:
+    """Check if a SQL migration requires autocommit mode (e.g. CONCURRENTLY)."""
+    if migration.migration_type != "sql":
+        return False
+    first_line = migration.path.read_text().split("\n", 1)[0]
+    return "-- migrate: autocommit" in first_line
+
+
+# ---------------------------------------------------------------------------
 # Bootstrap
 # ---------------------------------------------------------------------------
+
 
 def bootstrap(conn) -> None:
     """Create migration_history table and import schema_version if present."""
@@ -194,6 +210,7 @@ def bootstrap(conn) -> None:
 # Status / Pending
 # ---------------------------------------------------------------------------
 
+
 def get_pending(
     conn, migrations: list[MigrationInfo], target: str | None = None
 ) -> list[MigrationInfo]:
@@ -216,6 +233,7 @@ def get_pending(
 # ---------------------------------------------------------------------------
 # Record history
 # ---------------------------------------------------------------------------
+
 
 def _record_history(
     conn,
@@ -261,6 +279,7 @@ def _record_history(
 # Execute migration
 # ---------------------------------------------------------------------------
 
+
 def _load_python_module(path: Path):
     """Dynamically load a Python migration module."""
     module_name = f"migration_{path.stem}"
@@ -297,15 +316,29 @@ def _execute_with_history(
 
         if dry_run:
             _record_history(
-                conn, migration, effective_op, "success", started_at,
-                applied_by, run_id, description, execution_details,
+                conn,
+                migration,
+                effective_op,
+                "success",
+                started_at,
+                applied_by,
+                run_id,
+                description,
+                execution_details,
             )
             conn.rollback()
             logger.info(f"[DRY RUN] {migration.version} previewed (rolled back)")
         else:
             _record_history(
-                conn, migration, effective_op, "success", started_at,
-                applied_by, run_id, description, execution_details,
+                conn,
+                migration,
+                effective_op,
+                "success",
+                started_at,
+                applied_by,
+                run_id,
+                description,
+                execution_details,
             )
             conn.commit()
             logger.info(f"{migration.version}_{migration.name} {operation}d successfully")
@@ -316,8 +349,14 @@ def _execute_with_history(
         conn.rollback()
         try:
             _record_history(
-                conn, migration, effective_op, "failed", started_at,
-                applied_by, run_id, error_message=str(e),
+                conn,
+                migration,
+                effective_op,
+                "failed",
+                started_at,
+                applied_by,
+                run_id,
+                error_message=str(e),
             )
             conn.commit()
         except Exception:
@@ -333,6 +372,16 @@ def execute_migration(
     run_id: str | None,
 ) -> None:
     """Execute a single migration (SQL or Python) with atomic commit."""
+
+    if _requires_autocommit(migration):
+        if dry_run:
+            logger.info(
+                f"[DRY RUN] Skipping {migration.version}_{migration.name} "
+                f"(autocommit migration cannot be previewed)"
+            )
+            return
+        _execute_autocommit(conn, migration, applied_by, run_id)
+        return
 
     def action(conn):
         if migration.migration_type == "sql":
@@ -355,9 +404,82 @@ def execute_migration(
     _execute_with_history(conn, migration, "migrate", dry_run, applied_by, run_id, action)
 
 
+def _execute_autocommit(
+    conn,
+    migration: MigrationInfo,
+    applied_by: str,
+    run_id: str | None,
+) -> None:
+    """Execute a migration requiring autocommit (e.g. CREATE INDEX CONCURRENTLY).
+
+    Statements are executed individually because PostgreSQL does not allow
+    CONCURRENTLY within a multi-statement query block.
+
+    Autocommit migrations cannot be rolled back automatically. If the operation
+    fails midway (e.g. partial index), the operator must clean up manually.
+    """
+    started_at = time.time()
+    logger.info(
+        f"Executing {migration.version}_{migration.name} ({migration.migration_type}, autocommit)"
+    )
+
+    conn.commit()
+    conn.autocommit = True
+    try:
+        sql = migration.path.read_text()
+        statements = _split_sql_statements(sql)
+        cursor = conn.cursor()
+        try:
+            for stmt in statements:
+                cursor.execute(stmt)
+        finally:
+            cursor.close()
+    except Exception as e:
+        conn.autocommit = False
+        _record_history(
+            conn,
+            migration,
+            "migrate",
+            "failed",
+            started_at,
+            applied_by,
+            run_id,
+            error_message=str(e),
+        )
+        conn.commit()
+        raise
+    finally:
+        conn.autocommit = False
+
+    _record_history(
+        conn,
+        migration,
+        "migrate",
+        "success",
+        started_at,
+        applied_by,
+        run_id,
+    )
+    conn.commit()
+    logger.info(f"{migration.version}_{migration.name} migrated successfully (autocommit)")
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    """Split SQL into individual statements, skipping comments and empty lines."""
+    statements = []
+    for raw in sql.split(";"):
+        # Remove comment-only lines and whitespace
+        lines = [ln for ln in raw.split("\n") if ln.strip() and not ln.strip().startswith("--")]
+        stmt = "\n".join(lines).strip()
+        if stmt:
+            statements.append(stmt)
+    return statements
+
+
 # ---------------------------------------------------------------------------
 # Execute rollback
 # ---------------------------------------------------------------------------
+
 
 def execute_rollback(
     conn,
@@ -388,8 +510,14 @@ def execute_rollback(
                 return None, result if isinstance(result, dict) else None
             except NotImplementedError as nie:
                 _record_history(
-                    conn, migration, "rollback", "unavailable", time.time(),
-                    applied_by, run_id, error_message=str(nie),
+                    conn,
+                    migration,
+                    "rollback",
+                    "unavailable",
+                    time.time(),
+                    applied_by,
+                    run_id,
+                    error_message=str(nie),
                 )
                 conn.commit()
                 logger.warning(f"{migration.version} rollback unavailable: {nie}")
@@ -407,6 +535,7 @@ def execute_rollback(
 # ---------------------------------------------------------------------------
 # Validate
 # ---------------------------------------------------------------------------
+
 
 def validate_migrations(migrations: list[MigrationInfo]) -> list[str]:
     """Check for sequence gaps and other issues."""
@@ -426,6 +555,7 @@ def validate_migrations(migrations: list[MigrationInfo]) -> list[str]:
 # ---------------------------------------------------------------------------
 # CLI (typer)
 # ---------------------------------------------------------------------------
+
 
 def _get_applied_by() -> str:
     """Determine who is running the migration."""
@@ -508,7 +638,9 @@ def main():
             for m in pending:
                 execute_migration(conn, m, dry_run=dry_run, applied_by=applied_by, run_id=run_id)
 
-            typer.echo(f"\n{'[DRY RUN] ' if dry_run else ''}Done: {len(pending)} migration(s) processed.")
+            typer.echo(
+                f"\n{'[DRY RUN] ' if dry_run else ''}Done: {len(pending)} migration(s) processed."
+            )
         finally:
             conn.close()
 
@@ -564,12 +696,16 @@ def main():
                 typer.echo("No migration history.")
                 return
 
-            typer.echo(f"{'Ver':>5} {'Name':<30} {'Type':<8} {'Op':<10} {'Status':<12} {'By':<15} {'Duration':>10}")
+            typer.echo(
+                f"{'Ver':>5} {'Name':<30} {'Type':<8} {'Op':<10} {'Status':<12} {'By':<15} {'Duration':>10}"
+            )
             typer.echo("-" * 95)
             for row in rows:
                 ver, name, mtype, op, st, by, at, dur, err = row
                 dur_str = f"{dur}ms" if dur else "-"
-                typer.echo(f"{ver:>5} {name:<30} {mtype:<8} {op:<10} {st:<12} {by:<15} {dur_str:>10}")
+                typer.echo(
+                    f"{ver:>5} {name:<30} {mtype:<8} {op:<10} {st:<12} {by:<15} {dur_str:>10}"
+                )
                 if err:
                     typer.echo(f"      Error: {err[:80]}")
         finally:
@@ -621,17 +757,20 @@ def main():
                 typer.echo(f"  {m.version}_{m.name} ({m.migration_type})")
 
             if not yes:
-                typer.confirm(
-                    "Stamp these migrations as applied without running them?", abort=True
-                )
+                typer.confirm("Stamp these migrations as applied without running them?", abort=True)
 
             applied_by = _get_applied_by()
             run_id = _get_run_id()
 
             for m in pending:
                 _record_history(
-                    conn, m, "migrate", "success", time.time(),
-                    applied_by, run_id,
+                    conn,
+                    m,
+                    "migrate",
+                    "success",
+                    time.time(),
+                    applied_by,
+                    run_id,
                     description="Stamped as applied — existing database bootstrap",
                 )
                 conn.commit()

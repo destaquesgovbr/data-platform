@@ -102,7 +102,9 @@ class TestBootstrap:
 
         # Should have executed CREATE TABLE
         executed_sqls = [c[0][0] for c in cursor.execute.call_args_list]
-        create_calls = [s for s in executed_sqls if "CREATE TABLE" in s and "migration_history" in s]
+        create_calls = [
+            s for s in executed_sqls if "CREATE TABLE" in s and "migration_history" in s
+        ]
         assert len(create_calls) >= 1
 
         conn.commit.assert_called()
@@ -163,9 +165,27 @@ class TestGetPending:
         from migrate import MigrationInfo, get_pending
 
         migrations = [
-            MigrationInfo(version="001", name="first", path=Path("001.sql"), migration_type="sql", rollback_path=None),
-            MigrationInfo(version="002", name="second", path=Path("002.sql"), migration_type="sql", rollback_path=None),
-            MigrationInfo(version="003", name="third", path=Path("003.py"), migration_type="python", rollback_path=None),
+            MigrationInfo(
+                version="001",
+                name="first",
+                path=Path("001.sql"),
+                migration_type="sql",
+                rollback_path=None,
+            ),
+            MigrationInfo(
+                version="002",
+                name="second",
+                path=Path("002.sql"),
+                migration_type="sql",
+                rollback_path=None,
+            ),
+            MigrationInfo(
+                version="003",
+                name="third",
+                path=Path("003.py"),
+                migration_type="python",
+                rollback_path=None,
+            ),
         ]
         pending = get_pending(conn, migrations)
         assert [m.version for m in pending] == ["002", "003"]
@@ -181,8 +201,20 @@ class TestGetPending:
         from migrate import MigrationInfo, get_pending
 
         migrations = [
-            MigrationInfo(version="001", name="first", path=Path("001.sql"), migration_type="sql", rollback_path=None),
-            MigrationInfo(version="002", name="second", path=Path("002.sql"), migration_type="sql", rollback_path=None),
+            MigrationInfo(
+                version="001",
+                name="first",
+                path=Path("001.sql"),
+                migration_type="sql",
+                rollback_path=None,
+            ),
+            MigrationInfo(
+                version="002",
+                name="second",
+                path=Path("002.sql"),
+                migration_type="sql",
+                rollback_path=None,
+            ),
         ]
         pending = get_pending(conn, migrations)
         assert pending == []
@@ -198,9 +230,27 @@ class TestGetPending:
         from migrate import MigrationInfo, get_pending
 
         migrations = [
-            MigrationInfo(version="001", name="first", path=Path("001.sql"), migration_type="sql", rollback_path=None),
-            MigrationInfo(version="002", name="second", path=Path("002.sql"), migration_type="sql", rollback_path=None),
-            MigrationInfo(version="003", name="third", path=Path("003.sql"), migration_type="sql", rollback_path=None),
+            MigrationInfo(
+                version="001",
+                name="first",
+                path=Path("001.sql"),
+                migration_type="sql",
+                rollback_path=None,
+            ),
+            MigrationInfo(
+                version="002",
+                name="second",
+                path=Path("002.sql"),
+                migration_type="sql",
+                rollback_path=None,
+            ),
+            MigrationInfo(
+                version="003",
+                name="third",
+                path=Path("003.sql"),
+                migration_type="sql",
+                rollback_path=None,
+            ),
         ]
         pending = get_pending(conn, migrations, target="002")
         assert [m.version for m in pending] == ["001", "002"]
@@ -224,8 +274,11 @@ class TestExecuteMigrationSQL:
         from migrate import MigrationInfo, execute_migration
 
         migration = MigrationInfo(
-            version="001", name="test", path=sql_file,
-            migration_type="sql", rollback_path=None,
+            version="001",
+            name="test",
+            path=sql_file,
+            migration_type="sql",
+            rollback_path=None,
         )
         execute_migration(conn, migration, dry_run=False, applied_by="test", run_id=None)
 
@@ -253,8 +306,11 @@ class TestExecuteMigrationSQL:
         from migrate import MigrationInfo, execute_migration
 
         migration = MigrationInfo(
-            version="001", name="test", path=sql_file,
-            migration_type="sql", rollback_path=None,
+            version="001",
+            name="test",
+            path=sql_file,
+            migration_type="sql",
+            rollback_path=None,
         )
         execute_migration(conn, migration, dry_run=True, applied_by="test", run_id=None)
 
@@ -284,8 +340,11 @@ class TestExecuteMigrationSQL:
         from migrate import MigrationInfo, execute_migration
 
         migration = MigrationInfo(
-            version="001", name="bad", path=sql_file,
-            migration_type="sql", rollback_path=None,
+            version="001",
+            name="bad",
+            path=sql_file,
+            migration_type="sql",
+            rollback_path=None,
         )
         with pytest.raises(Exception, match="syntax error"):
             execute_migration(conn, migration, dry_run=False, applied_by="test", run_id=None)
@@ -302,7 +361,7 @@ class TestExecuteMigrationPython:
         py_file.write_text(
             'def describe(): return "Test migration"\n'
             'def migrate(conn, dry_run=False): return {"rows_affected": 42}\n'
-            'def rollback(conn, dry_run=False): return {}\n'
+            "def rollback(conn, dry_run=False): return {}\n"
         )
 
         conn = MagicMock()
@@ -314,8 +373,11 @@ class TestExecuteMigrationPython:
         from migrate import MigrationInfo, execute_migration
 
         migration = MigrationInfo(
-            version="001", name="test_migration", path=py_file,
-            migration_type="python", rollback_path=None,
+            version="001",
+            name="test_migration",
+            path=py_file,
+            migration_type="python",
+            rollback_path=None,
         )
         execute_migration(conn, migration, dry_run=False, applied_by="test", run_id=None)
         conn.commit.assert_called()
@@ -325,7 +387,7 @@ class TestExecuteMigrationPython:
         py_file.write_text(
             'def describe(): return "Test"\n'
             'def migrate(conn, dry_run=False): return {"rows_affected": 42, "collisions": 0}\n'
-            'def rollback(conn, dry_run=False): return {}\n'
+            "def rollback(conn, dry_run=False): return {}\n"
         )
 
         conn = MagicMock()
@@ -337,8 +399,11 @@ class TestExecuteMigrationPython:
         from migrate import MigrationInfo, execute_migration
 
         migration = MigrationInfo(
-            version="001", name="test_migration", path=py_file,
-            migration_type="python", rollback_path=None,
+            version="001",
+            name="test_migration",
+            path=py_file,
+            migration_type="python",
+            rollback_path=None,
         )
         execute_migration(conn, migration, dry_run=False, applied_by="test", run_id=None)
 
@@ -352,9 +417,7 @@ class TestExecuteMigrationPython:
 
     def test_module_without_describe_raises(self, tmp_path):
         py_file = tmp_path / "001_bad.py"
-        py_file.write_text(
-            'def migrate(conn, dry_run=False): return {}\n'
-        )
+        py_file.write_text("def migrate(conn, dry_run=False): return {}\n")
 
         conn = MagicMock()
         cursor = MagicMock()
@@ -365,8 +428,11 @@ class TestExecuteMigrationPython:
         from migrate import MigrationInfo, execute_migration
 
         migration = MigrationInfo(
-            version="001", name="bad", path=py_file,
-            migration_type="python", rollback_path=None,
+            version="001",
+            name="bad",
+            path=py_file,
+            migration_type="python",
+            rollback_path=None,
         )
         with pytest.raises((AttributeError, Exception)):
             execute_migration(conn, migration, dry_run=False, applied_by="test", run_id=None)
@@ -391,8 +457,11 @@ class TestExecuteRollback:
         from migrate import MigrationInfo, execute_rollback
 
         migration = MigrationInfo(
-            version="001", name="create", path=migration_file,
-            migration_type="sql", rollback_path=rollback_file,
+            version="001",
+            name="create",
+            path=migration_file,
+            migration_type="sql",
+            rollback_path=rollback_file,
         )
         execute_rollback(conn, migration, dry_run=False, applied_by="test", run_id=None)
 
@@ -405,7 +474,7 @@ class TestExecuteRollback:
         py_file = tmp_path / "001_data.py"
         py_file.write_text(
             'def describe(): return "Test"\n'
-            'def migrate(conn, dry_run=False): return {}\n'
+            "def migrate(conn, dry_run=False): return {}\n"
             'def rollback(conn, dry_run=False): return {"restored": 10}\n'
         )
 
@@ -418,8 +487,11 @@ class TestExecuteRollback:
         from migrate import MigrationInfo, execute_rollback
 
         migration = MigrationInfo(
-            version="001", name="data", path=py_file,
-            migration_type="python", rollback_path=None,
+            version="001",
+            name="data",
+            path=py_file,
+            migration_type="python",
+            rollback_path=None,
         )
         execute_rollback(conn, migration, dry_run=False, applied_by="test", run_id=None)
         conn.commit.assert_called()
@@ -433,8 +505,11 @@ class TestExecuteRollback:
         from migrate import MigrationInfo, execute_rollback
 
         migration = MigrationInfo(
-            version="001", name="create", path=migration_file,
-            migration_type="sql", rollback_path=None,
+            version="001",
+            name="create",
+            path=migration_file,
+            migration_type="sql",
+            rollback_path=None,
         )
         with pytest.raises((FileNotFoundError, ValueError)):
             execute_rollback(conn, migration, dry_run=False, applied_by="test", run_id=None)
@@ -443,7 +518,7 @@ class TestExecuteRollback:
         py_file = tmp_path / "001_data.py"
         py_file.write_text(
             'def describe(): return "Test"\n'
-            'def migrate(conn, dry_run=False): return {}\n'
+            "def migrate(conn, dry_run=False): return {}\n"
             'def rollback(conn, dry_run=False): raise NotImplementedError("Cannot rollback")\n'
         )
 
@@ -456,8 +531,11 @@ class TestExecuteRollback:
         from migrate import MigrationInfo, execute_rollback
 
         migration = MigrationInfo(
-            version="001", name="data", path=py_file,
-            migration_type="python", rollback_path=None,
+            version="001",
+            name="data",
+            path=py_file,
+            migration_type="python",
+            rollback_path=None,
         )
         # Should not raise — records unavailable instead
         execute_rollback(conn, migration, dry_run=False, applied_by="test", run_id=None)
@@ -480,8 +558,11 @@ class TestExecuteRollback:
         from migrate import MigrationInfo, execute_rollback
 
         migration = MigrationInfo(
-            version="001", name="create", path=migration_file,
-            migration_type="sql", rollback_path=rollback_file,
+            version="001",
+            name="create",
+            path=migration_file,
+            migration_type="sql",
+            rollback_path=rollback_file,
         )
         execute_rollback(conn, migration, dry_run=False, applied_by="test", run_id=None)
 
@@ -542,12 +623,15 @@ class TestStamp:
         import migrate
 
         with patch.object(
-            sys, "argv",
+            sys,
+            "argv",
             ["migrate.py", "stamp", target, "--db-url", "postgresql://test", "--yes"],
         ), patch("psycopg2.connect", return_value=mock_conn), patch.object(
             migrate, "bootstrap"
         ), patch.object(
-            migrate, "discover_migrations", return_value=self._make_migrations(
+            migrate,
+            "discover_migrations",
+            return_value=self._make_migrations(
                 [m.version for m in pending]
                 + [v for v in ["001", "002", "003", "004", "005"] if v <= target]
             ),
@@ -557,9 +641,7 @@ class TestStamp:
             migrate, "_record_history"
         ) as mock_record, patch.object(
             migrate, "_get_applied_by", return_value="test-user"
-        ), patch.object(
-            migrate, "_get_run_id", return_value=None
-        ):
+        ), patch.object(migrate, "_get_run_id", return_value=None):
             with pytest.raises(SystemExit) as exc_info:
                 migrate.main()
             assert exc_info.value.code in (None, 0)
@@ -575,8 +657,8 @@ class TestStamp:
         for c in mock_record.call_args_list:
             args, kwargs = c
             # positional: conn, migration, "migrate", "success", started_at, applied_by, run_id
-            assert args[2] == "migrate"       # operation
-            assert args[3] == "success"       # status
+            assert args[2] == "migrate"  # operation
+            assert args[3] == "success"  # status
             assert "Stamped" in kwargs.get("description", "")
 
     def test_stamp_skips_already_applied(self):
@@ -600,7 +682,9 @@ class TestStamp:
         gp_call = mock_get_pending.call_args
         gp_positional = gp_call[0]
         gp_kwargs = gp_call[1]
-        target_arg = gp_kwargs.get("target") or (gp_positional[2] if len(gp_positional) > 2 else None)
+        target_arg = gp_kwargs.get("target") or (
+            gp_positional[2] if len(gp_positional) > 2 else None
+        )
         assert target_arg == "003"
 
         # Only 001-003 stamped (as returned by mocked get_pending)
@@ -617,3 +701,171 @@ class TestStamp:
         assert mock_record.call_count == 0
         captured = capsys.readouterr()
         assert "Nothing to stamp" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Autocommit detection and execution
+# ---------------------------------------------------------------------------
+class TestAutocommit:
+    def test_requires_autocommit_detects_flag(self, tmp_path):
+        sql_file = tmp_path / "012_create_index.sql"
+        sql_file.write_text("-- migrate: autocommit\nCREATE INDEX CONCURRENTLY ...;")
+
+        from migrate import MigrationInfo, _requires_autocommit
+
+        migration = MigrationInfo(
+            version="012",
+            name="create_index",
+            path=sql_file,
+            migration_type="sql",
+            rollback_path=None,
+        )
+        assert _requires_autocommit(migration) is True
+
+    def test_requires_autocommit_ignores_normal_sql(self, tmp_path):
+        sql_file = tmp_path / "001_normal.sql"
+        sql_file.write_text("-- Normal migration\nCREATE TABLE IF NOT EXISTS t (id INT);")
+
+        from migrate import MigrationInfo, _requires_autocommit
+
+        migration = MigrationInfo(
+            version="001",
+            name="normal",
+            path=sql_file,
+            migration_type="sql",
+            rollback_path=None,
+        )
+        assert _requires_autocommit(migration) is False
+
+    def test_requires_autocommit_ignores_python(self, tmp_path):
+        py_file = tmp_path / "006_migrate.py"
+        py_file.write_text("# -- migrate: autocommit\ndef migrate(conn, dry_run=False): pass")
+
+        from migrate import MigrationInfo, _requires_autocommit
+
+        migration = MigrationInfo(
+            version="006",
+            name="migrate",
+            path=py_file,
+            migration_type="python",
+            rollback_path=None,
+        )
+        assert _requires_autocommit(migration) is False
+
+    def test_execute_autocommit_sets_and_restores(self, tmp_path):
+        sql_file = tmp_path / "012_idx.sql"
+        sql_file.write_text("-- migrate: autocommit\nCREATE INDEX CONCURRENTLY idx ON t(c);")
+
+        from migrate import MigrationInfo, _execute_autocommit
+
+        migration = MigrationInfo(
+            version="012",
+            name="idx",
+            path=sql_file,
+            migration_type="sql",
+            rollback_path=None,
+        )
+
+        autocommit_log = []
+
+        class FakeConn:
+            _autocommit = False
+
+            @property
+            def autocommit(self):
+                return self._autocommit
+
+            @autocommit.setter
+            def autocommit(self, value):
+                autocommit_log.append(value)
+                self._autocommit = value
+
+            def commit(self):
+                pass
+
+            def cursor(self):
+                cursor = MagicMock()
+                return cursor
+
+        conn = FakeConn()
+        with patch("migrate._record_history"):
+            _execute_autocommit(conn, migration, "test_user", None)
+
+        # autocommit should have been set True then False
+        assert autocommit_log == [True, False]
+        assert conn.autocommit is False
+
+    def test_execute_autocommit_records_history_on_success(self, tmp_path):
+        sql_file = tmp_path / "012_idx.sql"
+        sql_file.write_text("-- migrate: autocommit\nSELECT 1;")
+
+        from migrate import MigrationInfo, _execute_autocommit
+
+        migration = MigrationInfo(
+            version="012",
+            name="idx",
+            path=sql_file,
+            migration_type="sql",
+            rollback_path=None,
+        )
+
+        conn = MagicMock()
+        cursor = MagicMock()
+        conn.cursor.return_value = cursor
+
+        with patch("migrate._record_history") as mock_record:
+            _execute_autocommit(conn, migration, "test_user", "run123")
+
+        mock_record.assert_called_once()
+        call_kwargs = mock_record.call_args
+        assert call_kwargs[0][3] == "success"  # status arg
+        assert call_kwargs[0][4] is not None  # started_at
+
+    def test_execute_autocommit_records_failure_and_reraises(self, tmp_path):
+        sql_file = tmp_path / "012_idx.sql"
+        sql_file.write_text("-- migrate: autocommit\nINVALID SQL;")
+
+        from migrate import MigrationInfo, _execute_autocommit
+
+        migration = MigrationInfo(
+            version="012",
+            name="idx",
+            path=sql_file,
+            migration_type="sql",
+            rollback_path=None,
+        )
+
+        conn = MagicMock()
+        cursor = MagicMock()
+        cursor.execute.side_effect = Exception("syntax error")
+        conn.cursor.return_value = cursor
+
+        with patch("migrate._record_history") as mock_record:
+            with pytest.raises(Exception, match="syntax error"):
+                _execute_autocommit(conn, migration, "test_user", None)
+
+        mock_record.assert_called_once()
+        call_args = mock_record.call_args[0]
+        assert call_args[3] == "failed"  # status
+        call_kwargs = mock_record.call_args[1]
+        assert "syntax error" in call_kwargs["error_message"]
+
+    def test_execute_migration_skips_autocommit_on_dry_run(self, tmp_path, capsys):
+        sql_file = tmp_path / "012_idx.sql"
+        sql_file.write_text("-- migrate: autocommit\nCREATE INDEX CONCURRENTLY idx ON t(c);")
+
+        from migrate import MigrationInfo, execute_migration
+
+        migration = MigrationInfo(
+            version="012",
+            name="idx",
+            path=sql_file,
+            migration_type="sql",
+            rollback_path=None,
+        )
+
+        conn = MagicMock()
+        execute_migration(conn, migration, dry_run=True, applied_by="test", run_id=None)
+
+        # Should not execute anything on the connection
+        conn.cursor.assert_not_called()

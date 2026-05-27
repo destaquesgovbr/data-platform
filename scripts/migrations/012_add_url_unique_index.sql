@@ -1,3 +1,4 @@
+-- migrate: autocommit
 -- 012_add_url_unique_index.sql
 -- Cria indice unico parcial em (agency_key, url) para prevenir duplicatas.
 -- DEVE ser executado DEPOIS do cleanup de duplicatas (011).
