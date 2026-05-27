@@ -164,6 +164,89 @@ The `db-migrate.yaml` workflow runs migrations via GitHub Actions with:
 
 ---
 
+## Stamp Command
+
+The `stamp` command marks migrations as applied **without executing them**. Use it when migrations were already applied outside of the runner.
+
+### When to Use
+
+| Scenario | Example |
+|----------|---------|
+| Existing DB before the runner was introduced | Migrations 001-007 were applied by a previous workflow that didn't record history |
+| Restored from backup | Backup has schema changes but `migration_history` was truncated or absent |
+| Staging from production snapshot | Clone production DB for testing — schema is current, history may differ |
+
+### Usage
+
+```bash
+# Via CLI (local)
+python scripts/migrate.py stamp 007 --yes --db-url "$DATABASE_URL"
+
+# Via GitHub Actions workflow
+# Inputs: command=stamp, target_version=007, confirm=true
+```
+
+### How It Differs from Migrate
+
+| | `migrate` | `stamp` |
+|-|-----------|---------|
+| Executes SQL/Python | Yes | No |
+| Records in `migration_history` | Yes (operation=migrate) | Yes (operation=migrate, description=stamped) |
+| Requires confirmation | Yes (dry_run=false) | Always |
+| Use case | Normal deployment | Bootstrap existing databases |
+
+### Important
+
+- `stamp` bypasses all safety checks — incorrect use can cause schema drift
+- Always run `status` first to verify which migrations will be stamped
+- After stamping, run `validate` to confirm consistency
+
+---
+
+## Idempotency Convention
+
+All SQL migrations MUST be safe to re-execute. This prevents cascading failures when `migration_history` gets out of sync with actual schema state.
+
+### Patterns
+
+| Operation | Idempotent Pattern |
+|-----------|--------------------|
+| Create table | `CREATE TABLE IF NOT EXISTS` |
+| Create index | `CREATE INDEX IF NOT EXISTS` |
+| Add column | `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` |
+| Create/replace function | `CREATE OR REPLACE FUNCTION` |
+| Create/replace view | `CREATE OR REPLACE VIEW` |
+| Create/replace trigger | `CREATE OR REPLACE TRIGGER` |
+| Alter column type | `DO $$ BEGIN IF EXISTS (SELECT ... WHERE character_maximum_length < N) THEN ALTER ... END IF; END $$` |
+| Insert reference data | `INSERT ... ON CONFLICT DO NOTHING` |
+| Update data | Use WHERE clauses that make repeated execution a no-op |
+
+### PostgreSQL Limitations
+
+`ALTER COLUMN TYPE` has no `IF NOT EXISTS` equivalent. Use a conditional block:
+
+```sql
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'news' AND column_name = 'unique_id'
+      AND character_maximum_length < 120
+  ) THEN
+    ALTER TABLE news ALTER COLUMN unique_id TYPE VARCHAR(120);
+  END IF;
+END $$;
+```
+
+### Code Review Checklist
+
+When reviewing a PR that adds or modifies migrations:
+
+1. Every DDL statement uses `IF NOT EXISTS` / `CREATE OR REPLACE`
+2. Data mutations (UPDATE/INSERT) have WHERE clauses that make them no-ops on re-run
+3. If the migration ran twice by accident, would it produce the same end state?
+
+---
+
 See also:
 - [Database Schema](./schema.md)
 - [Migration Rollback Runbook](../runbooks/migration-rollback.md)

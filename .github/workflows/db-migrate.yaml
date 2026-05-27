@@ -187,6 +187,32 @@ jobs:
           fi
           echo "Cloud SQL Proxy started successfully"
 
+      - name: Pre-flight migration status
+        if: inputs.command == 'migrate'
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ steps.db.outputs.url }}
+        run: |
+          LOCAL_URL=$(echo "$DATABASE_URL" | sed -E 's|@[^:]+:|@127.0.0.1:|')
+          echo "::add-mask::$LOCAL_URL"
+
+          echo "## Pre-flight: Pending Migrations" >> $GITHUB_STEP_SUMMARY
+
+          STATUS_OUTPUT=$(poetry run python scripts/migrate.py status --db-url "$LOCAL_URL" 2>&1) || true
+          echo "$STATUS_OUTPUT"
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$STATUS_OUTPUT" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          PENDING_COUNT=$(echo "$STATUS_OUTPUT" | grep -c "PENDING" || true)
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Pending: ${PENDING_COUNT} migration(s)**" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$PENDING_COUNT" -gt 3 ] && [ "${{ inputs.dry_run }}" = "false" ]; then
+            echo "::warning::High pending migration count (${PENDING_COUNT}). Verify migration_history is intact before proceeding."
+          fi
+
       - name: Execute migration command
         env:
           DATABASE_URL: ${{ steps.db.outputs.url }}
