@@ -6,6 +6,7 @@ Syncs news + features from previous day into BigQuery Gold layer.
 """
 
 import logging
+import os
 from datetime import datetime, timedelta
 
 from airflow.decorators import dag, task
@@ -91,8 +92,18 @@ def sync_pg_to_bigquery():
         project_id = Variable.get("gcp_project_id", default_var="inspire-7-finep")
         bucket_name = Variable.get("data_lake_bucket", default_var="inspire-7-finep-dgb-data-lake")
 
-        # 1. Fetch from PG
-        df = fetch_news_for_bigquery(db_url, target_date, end_date)
+        # 1. Fetch from PG (via GraphQL if configured, else direct SQL)
+        graphql_url = os.environ.get("GRAPHQL_API_URL")
+        if graphql_url:
+            from data_platform.clients.graphql_client import GraphQLClient
+            from data_platform.jobs.bigquery.sync_to_bigquery import (
+                fetch_news_for_bigquery_via_graphql,
+            )
+
+            with GraphQLClient(graphql_url) as gql_client:
+                df = fetch_news_for_bigquery_via_graphql(gql_client, target_date, end_date)
+        else:
+            df = fetch_news_for_bigquery(db_url, target_date, end_date)
 
         if df.empty:
             logger.info(f"No data for {target_date}, skipping")

@@ -1,5 +1,6 @@
 """DAG: Aggregate pageview engagement from BigQuery and sync to PG news_features."""
 
+import os
 from datetime import datetime, timedelta
 
 try:
@@ -40,7 +41,17 @@ def aggregate_engagement_dag():
         if metrics_df.empty:
             return {"status": "no_data", "count": 0}
 
-        count = batch_upsert_engagement(db_url, metrics_df)
+        graphql_url = os.environ.get("GRAPHQL_API_URL")
+        if graphql_url:
+            from data_platform.clients.graphql_client import GraphQLClient
+            from data_platform.jobs.bigquery.engagement import (
+                batch_upsert_engagement_via_graphql,
+            )
+
+            with GraphQLClient(graphql_url) as gql_client:
+                count = batch_upsert_engagement_via_graphql(gql_client, metrics_df)
+        else:
+            count = batch_upsert_engagement(db_url, metrics_df)
         return {"status": "ok", "count": count}
 
     aggregate_and_sync()

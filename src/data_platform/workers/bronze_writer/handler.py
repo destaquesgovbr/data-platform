@@ -1,4 +1,4 @@
-"""Bronze Writer handler — fetches article from PG, writes raw JSON to GCS."""
+"""Bronze Writer handler — fetches article from PG/GraphQL, writes raw JSON to GCS."""
 
 import logging
 import os
@@ -9,15 +9,54 @@ from data_platform.workers.bronze_writer.storage import build_gcs_path, write_to
 logger = logging.getLogger(__name__)
 
 
-def handle_bronze_write(unique_id: str, pg: PostgresManager) -> dict:
+def _fetch_full_article_via_graphql(unique_id: str, gql_client) -> dict | None:
+    """Fetch full article via GraphQL, mapping camelCase to snake_case for compatibility."""
+    from data_platform.clients.graphql_client import NEWS_BY_ID_QUERY
+
+    data = gql_client.query(NEWS_BY_ID_QUERY, {"uniqueId": unique_id})
+    article = data.get("newsById")
+    if not article:
+        return None
+    return {
+        "unique_id": article.get("uniqueId"),
+        "title": article.get("title"),
+        "url": article.get("url"),
+        "image_url": article.get("imageUrl"),
+        "video_url": article.get("videoUrl"),
+        "content": article.get("content"),
+        "summary": article.get("summary"),
+        "subtitle": article.get("subtitle"),
+        "editorial_lead": article.get("editorialLead"),
+        "category": article.get("category"),
+        "tags": article.get("tags"),
+        "agency_key": article.get("agencyKey"),
+        "agency_name": article.get("agencyName"),
+        "published_at": article.get("publishedAt"),
+        "extracted_at": article.get("extractedAt"),
+        "theme_l1_code": article.get("themL1Code"),
+        "theme_l1_label": article.get("themL1Label"),
+        "theme_l2_code": article.get("themL2Code"),
+        "theme_l2_label": article.get("themL2Label"),
+        "theme_l3_code": article.get("themL3Code"),
+        "theme_l3_label": article.get("themL3Label"),
+        "most_specific_theme_code": article.get("mostSpecificThemeCode"),
+        "most_specific_theme_label": article.get("mostSpecificThemeLabel"),
+        "features": article.get("features"),
+    }
+
+
+def handle_bronze_write(unique_id: str, pg: PostgresManager, gql_client=None) -> dict:
     """
-    Fetch full article from PostgreSQL and write raw JSON to GCS Bronze layer.
+    Fetch full article and write raw JSON to GCS Bronze layer.
+
+    Uses GraphQL if gql_client is provided, otherwise falls back to PostgresManager.
 
     Path: gs://{bucket}/bronze/news/YYYY/MM/DD/{unique_id}.json
 
     Args:
         unique_id: Article unique_id
         pg: PostgresManager instance
+        gql_client: Optional GraphQLClient instance
 
     Returns:
         dict with status and gcs_path
@@ -28,7 +67,10 @@ def handle_bronze_write(unique_id: str, pg: PostgresManager) -> dict:
         return {"status": "error", "unique_id": unique_id, "reason": "GCS_BUCKET not set"}
 
     # 1. Fetch full article
-    article = _fetch_full_article(unique_id, pg)
+    if gql_client:
+        article = _fetch_full_article_via_graphql(unique_id, gql_client)
+    else:
+        article = _fetch_full_article(unique_id, pg)
     if not article:
         logger.warning(f"Article {unique_id} not found")
         return {"status": "not_found", "unique_id": unique_id}

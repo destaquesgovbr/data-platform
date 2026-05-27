@@ -8,6 +8,7 @@ and writes raw JSON to GCS Bronze layer.
 import base64
 import json
 import logging
+import os
 
 from fastapi import FastAPI, Request, Response
 
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Bronze Writer", version="1.0.0")
 
 _pg: PostgresManager | None = None
+_gql_client = None
 
 
 def _get_pg() -> PostgresManager:
@@ -29,6 +31,17 @@ def _get_pg() -> PostgresManager:
     if _pg is None:
         _pg = PostgresManager()
     return _pg
+
+
+def _get_gql_client():
+    global _gql_client
+    if _gql_client is None:
+        graphql_url = os.environ.get("GRAPHQL_API_URL")
+        if graphql_url:
+            from data_platform.clients.graphql_client import GraphQLClient
+
+            _gql_client = GraphQLClient(url=graphql_url)
+    return _gql_client
 
 
 @app.get("/health")
@@ -62,7 +75,7 @@ async def process(request: Request) -> Response:
     logger.info(f"Processing {unique_id} (trace={trace_id})")
 
     try:
-        result = handle_bronze_write(unique_id, _get_pg())
+        result = handle_bronze_write(unique_id, _get_pg(), gql_client=_get_gql_client())
         logger.info(f"Result for {unique_id}: {result['status']}")
         return Response(status_code=200, content=json.dumps(result))
     except Exception as e:

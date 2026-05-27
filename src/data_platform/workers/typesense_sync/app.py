@@ -11,17 +11,22 @@ Subscribes to:
 
 import base64
 import json
+import os
 
 from fastapi import FastAPI, Request, Response
 from loguru import logger
 
+from data_platform.clients.graphql_client import GraphQLClient
 from data_platform.managers.postgres_manager import PostgresManager
 from data_platform.workers.typesense_sync.handler import upsert_to_typesense
 
 app = FastAPI(title="Typesense Sync Worker", version="1.0.0")
 
-# Lazy-initialized shared PostgresManager
+# Lazy-initialized shared PostgresManager (fallback)
 _pg: PostgresManager | None = None
+
+# GraphQL client (initialized if GRAPHQL_API_URL is set)
+_gql_client: GraphQLClient | None = None
 
 
 def _get_pg() -> PostgresManager:
@@ -29,6 +34,18 @@ def _get_pg() -> PostgresManager:
     if _pg is None:
         _pg = PostgresManager(max_connections=5)
     return _pg
+
+
+def _get_gql_client() -> GraphQLClient | None:
+    """Return the shared GraphQL client, or None if not configured."""
+    global _gql_client
+    graphql_url = os.environ.get("GRAPHQL_API_URL")
+    if not graphql_url:
+        return None
+    if _gql_client is None:
+        _gql_client = GraphQLClient(url=graphql_url)
+        logger.info(f"GraphQL client initialized: {graphql_url}")
+    return _gql_client
 
 
 @app.get("/health")
@@ -79,7 +96,8 @@ async def process(request: Request) -> Response:
     trace_id = message.get("attributes", {}).get("trace_id", "")
     logger.info(f"Processing {unique_id} (trace={trace_id})")
 
-    success = upsert_to_typesense(unique_id, pg=_get_pg())
+    gql = _get_gql_client()
+    success = upsert_to_typesense(unique_id, pg=_get_pg(), gql_client=gql)
 
     if success:
         return Response(status_code=200, content="OK")
