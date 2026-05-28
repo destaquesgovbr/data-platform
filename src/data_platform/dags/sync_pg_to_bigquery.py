@@ -44,32 +44,6 @@ logger = logging.getLogger(__name__)
 def sync_pg_to_bigquery():
 
     @task
-    def ensure_schema(**context) -> dict[str, str]:
-        """Workaround: apply ALTER TABLE via Airflow SA (bq-migrate.yaml SA lacks permissions).
-
-        Remove this task once bq-migrate.yaml has bigquery.jobs.create permission.
-        """
-        from google.cloud import bigquery
-        from google.cloud.exceptions import Forbidden
-
-        project_id = Variable.get("gcp_project_id", default_var="inspire-7-finep")
-        client = bigquery.Client(project=project_id)
-
-        sql = (
-            f"ALTER TABLE `{project_id}.dgb_gold.fato_noticias` "
-            f"ADD COLUMN IF NOT EXISTS content_hash STRING"
-        )
-
-        try:
-            client.query(sql).result()
-            logger.info("ensure_schema: content_hash column ensured")
-        except Forbidden as e:
-            logger.error(f"ensure_schema: permission denied — {e}")
-            raise
-
-        return {"status": "success"}
-
-    @task
     def sync_facts(**context):
         """Query PG for previous day's news + features, load into BigQuery."""
         from data_platform.jobs.bigquery.sync_to_bigquery import (
@@ -129,9 +103,8 @@ def sync_pg_to_bigquery():
         sync_dimensions(db_url, project_id)
         return {"status": "success"}
 
-    # ensure_schema runs first, then facts and dims in parallel
-    schema = ensure_schema()
-    schema >> [sync_facts(), sync_dims()]
+    sync_facts()
+    sync_dims()
 
 
 dag_instance = sync_pg_to_bigquery()

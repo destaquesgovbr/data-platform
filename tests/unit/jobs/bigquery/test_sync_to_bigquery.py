@@ -159,3 +159,19 @@ class TestDagStructure:
         from data_platform.dags.sync_pg_to_bigquery import dag_instance
 
         assert dag_instance.catchup is False
+
+    def test_dag_does_not_have_ensure_schema_task(self):
+        """ensure_schema was a workaround removed in issue #163."""
+        pytest.importorskip("airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)")
+        from data_platform.dags.sync_pg_to_bigquery import dag_instance
+
+        task_ids = [t.task_id for t in dag_instance.tasks]
+        assert "ensure_schema" not in task_ids
+
+    def test_sync_tasks_have_no_upstream(self):
+        """After removing ensure_schema, sync tasks have no upstream deps."""
+        pytest.importorskip("airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)")
+        from data_platform.dags.sync_pg_to_bigquery import dag_instance
+
+        for task in dag_instance.tasks:
+            assert len(task.upstream_list) == 0
