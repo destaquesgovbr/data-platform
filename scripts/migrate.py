@@ -167,7 +167,8 @@ def _requires_autocommit(migration: MigrationInfo) -> bool:
     """Check if a SQL migration requires autocommit mode (e.g. CONCURRENTLY)."""
     if migration.migration_type != "sql":
         return False
-    first_line = migration.path.read_text().split("\n", 1)[0]
+    content = migration.path.read_text().lstrip("﻿ \t\n\r")
+    first_line = content.split("\n", 1)[0]
     return "-- migrate: autocommit" in first_line
 
 
@@ -415,60 +416,99 @@ def _execute_autocommit(
     Statements are executed individually because PostgreSQL does not allow
     CONCURRENTLY within a multi-statement query block.
 
+    History is pre-recorded before execution to avoid audit loss if the process
+    crashes between SQL commit (autocommit) and history recording. On crash,
+    history retains the pre-recorded entry; on success/failure, it is updated.
+
     Autocommit migrations cannot be rolled back automatically. If the operation
-    fails midway (e.g. partial index), the operator must clean up manually.
+    fails midway (e.g. partial index marked INVALID), the operator must DROP
+    the index and retry.
     """
     started_at = time.time()
+
+    sql = migration.path.read_text()
+    statements = _split_sql_statements(sql)
     logger.info(
-        f"Executing {migration.version}_{migration.name} ({migration.migration_type}, autocommit)"
+        f"Executing {migration.version}_{migration.name} "
+        f"(autocommit, {len(statements)} statement(s))"
     )
 
+    # Pre-record history before executing (avoids audit loss on crash)
+    _record_history(
+        conn,
+        migration,
+        "migrate",
+        "failed",
+        started_at,
+        applied_by,
+        run_id,
+        description="autocommit: pre-recorded before execution",
+    )
     conn.commit()
+
+    # Execute SQL in autocommit mode
     conn.autocommit = True
     try:
-        sql = migration.path.read_text()
-        statements = _split_sql_statements(sql)
         cursor = conn.cursor()
         try:
-            for stmt in statements:
+            for i, stmt in enumerate(statements, 1):
+                logger.debug(f"[{i}/{len(statements)}] {stmt[:80].replace(chr(10), ' ')}...")
                 cursor.execute(stmt)
         finally:
             cursor.close()
     except Exception as e:
         conn.autocommit = False
-        _record_history(
-            conn,
-            migration,
-            "migrate",
-            "failed",
-            started_at,
-            applied_by,
-            run_id,
-            error_message=str(e),
-        )
+        _update_autocommit_history(conn, migration, "failed", started_at, str(e))
         conn.commit()
         raise
     finally:
         conn.autocommit = False
 
-    _record_history(
-        conn,
-        migration,
-        "migrate",
-        "success",
-        started_at,
-        applied_by,
-        run_id,
-    )
+    # Update pre-recorded entry to success
+    _update_autocommit_history(conn, migration, "success", started_at)
     conn.commit()
     logger.info(f"{migration.version}_{migration.name} migrated successfully (autocommit)")
 
 
+def _update_autocommit_history(
+    conn,
+    migration: MigrationInfo,
+    status: str,
+    started_at: float,
+    error_message: str | None = None,
+) -> None:
+    """Update the pre-recorded history entry for an autocommit migration."""
+    duration_ms = int((time.time() - started_at) * 1000)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE migration_history
+            SET status = %s,
+                duration_ms = %s,
+                finished_at = NOW(),
+                error_message = %s,
+                description = NULL
+            WHERE version = %s
+              AND operation = 'migrate'
+              AND description = 'autocommit: pre-recorded before execution'
+            """,
+            (status, duration_ms, error_message, migration.version),
+        )
+    finally:
+        cursor.close()
+
+
 def _split_sql_statements(sql: str) -> list[str]:
-    """Split SQL into individual statements, skipping comments and empty lines."""
+    """Split SQL into individual statements for autocommit execution.
+
+    Simple split by ';' — does NOT handle semicolons inside string literals,
+    dollar-quoted blocks ($$...$$), or multi-line comments. Autocommit migrations
+    should contain only simple DDL (CREATE INDEX, CREATE DATABASE, VACUUM).
+    For PL/pgSQL or complex SQL, use standard transactional migrations.
+    """
     statements = []
     for raw in sql.split(";"):
-        # Remove comment-only lines and whitespace
         lines = [ln for ln in raw.split("\n") if ln.strip() and not ln.strip().startswith("--")]
         stmt = "\n".join(lines).strip()
         if stmt:

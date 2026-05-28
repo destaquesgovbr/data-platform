@@ -2,6 +2,7 @@
 
 import json
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -788,14 +789,14 @@ class TestAutocommit:
                 return cursor
 
         conn = FakeConn()
-        with patch("migrate._record_history"):
+        with patch("migrate._record_history"), patch("migrate._update_autocommit_history"):
             _execute_autocommit(conn, migration, "test_user", None)
 
         # autocommit should have been set True then False
         assert autocommit_log == [True, False]
         assert conn.autocommit is False
 
-    def test_execute_autocommit_records_history_on_success(self, tmp_path):
+    def test_execute_autocommit_prerecords_then_updates_success(self, tmp_path):
         sql_file = tmp_path / "012_idx.sql"
         sql_file.write_text("-- migrate: autocommit\nSELECT 1;")
 
@@ -813,15 +814,21 @@ class TestAutocommit:
         cursor = MagicMock()
         conn.cursor.return_value = cursor
 
-        with patch("migrate._record_history") as mock_record:
+        with (
+            patch("migrate._record_history") as mock_record,
+            patch("migrate._update_autocommit_history") as mock_update,
+        ):
             _execute_autocommit(conn, migration, "test_user", "run123")
 
+        # Pre-records with status="failed" as safety net
         mock_record.assert_called_once()
-        call_kwargs = mock_record.call_args
-        assert call_kwargs[0][3] == "success"  # status arg
-        assert call_kwargs[0][4] is not None  # started_at
+        assert mock_record.call_args[0][3] == "failed"
 
-    def test_execute_autocommit_records_failure_and_reraises(self, tmp_path):
+        # Updates to success after execution
+        mock_update.assert_called_once()
+        assert mock_update.call_args[0][2] == "success"
+
+    def test_execute_autocommit_updates_failure_and_reraises(self, tmp_path):
         sql_file = tmp_path / "012_idx.sql"
         sql_file.write_text("-- migrate: autocommit\nINVALID SQL;")
 
@@ -840,15 +847,60 @@ class TestAutocommit:
         cursor.execute.side_effect = Exception("syntax error")
         conn.cursor.return_value = cursor
 
-        with patch("migrate._record_history") as mock_record:
+        with (
+            patch("migrate._record_history") as mock_record,
+            patch("migrate._update_autocommit_history") as mock_update,
+        ):
             with pytest.raises(Exception, match="syntax error"):
                 _execute_autocommit(conn, migration, "test_user", None)
 
+        # Pre-record happened
         mock_record.assert_called_once()
-        call_args = mock_record.call_args[0]
-        assert call_args[3] == "failed"  # status
-        call_kwargs = mock_record.call_args[1]
-        assert "syntax error" in call_kwargs["error_message"]
+
+        # Updated to failed with error message
+        mock_update.assert_called_once()
+        assert mock_update.call_args[0][2] == "failed"
+        assert "syntax error" in mock_update.call_args[0][4]
+
+    def test_requires_autocommit_handles_bom(self, tmp_path):
+        sql_file = tmp_path / "012_bom.sql"
+        sql_file.write_text("﻿-- migrate: autocommit\nCREATE INDEX CONCURRENTLY ...;")
+
+        from migrate import MigrationInfo, _requires_autocommit
+
+        migration = MigrationInfo(
+            version="012",
+            name="bom",
+            path=sql_file,
+            migration_type="sql",
+            rollback_path=None,
+        )
+        assert _requires_autocommit(migration) is True
+
+    def test_update_autocommit_history(self):
+        from migrate import MigrationInfo, _update_autocommit_history
+
+        migration = MigrationInfo(
+            version="012",
+            name="idx",
+            path=Path("/dummy"),
+            migration_type="sql",
+            rollback_path=None,
+        )
+
+        conn = MagicMock()
+        cursor = MagicMock()
+        conn.cursor.return_value = cursor
+
+        _update_autocommit_history(conn, migration, "success", time.time() - 1.5)
+
+        cursor.execute.assert_called_once()
+        sql = cursor.execute.call_args[0][0]
+        params = cursor.execute.call_args[0][1]
+        assert "UPDATE migration_history" in sql
+        assert params[0] == "success"  # status
+        assert params[1] >= 1500  # duration_ms >= 1.5s
+        assert params[3] == "012"  # version
 
     def test_execute_migration_skips_autocommit_on_dry_run(self, tmp_path, capsys):
         sql_file = tmp_path / "012_idx.sql"
