@@ -73,7 +73,8 @@ def get_applied_versions(client) -> set[str]:
     try:
         rows = client.query(query).result()
         return {row.version for row in rows}
-    except Exception:
+    except Exception as e:
+        print(f"  WARNING: could not read migration history: {e}", file=sys.stderr)
         return set()
 
 
