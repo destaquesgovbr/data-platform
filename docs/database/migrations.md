@@ -78,6 +78,45 @@ def rollback(conn, dry_run: bool = False) -> dict:
 
 The runner manages the connection and transaction. The migration must not call `conn.commit()` or `conn.rollback()`.
 
+### Autocommit Migrations (CONCURRENTLY)
+
+Migrations that use `CREATE INDEX CONCURRENTLY` or other DDL that cannot run inside a transaction must opt into autocommit mode.
+
+#### Marking a Migration as Autocommit
+
+Add `-- migrate: autocommit` as the **first line** of the `.sql` file:
+
+```sql
+-- migrate: autocommit
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_news_agency_url_unique
+    ON news (agency_key, url)
+    WHERE url IS NOT NULL;
+```
+
+#### How the Runner Handles Autocommit
+
+1. **Detection**: checks first line for `-- migrate: autocommit`
+2. **Pre-records history** as `status=failed` (audit trail in case of crash)
+3. **Sets `autocommit=True`** on the connection
+4. **Splits SQL by `;`** and executes each statement individually
+5. On success: updates history to `status=success`
+6. On failure: updates history to `status=failed` with error message, re-raises
+
+#### Limitations
+
+| Aspect | Behavior |
+|--------|----------|
+| Dry-run | **Skipped** — logged as "cannot be previewed" |
+| Rollback | Not automatic — must be handled manually |
+| SQL splitting | Simple `;` split — no support for `$$` blocks or string literals containing `;` |
+| Suitable DDL | `CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY`, `VACUUM`, `CREATE DATABASE` |
+
+#### Failure Modes
+
+- **Process crash during execution**: pre-recorded `failed` entry remains in history; index may be in INVALID state
+- **Statement failure**: history updated to `failed` with error; partial state may persist (e.g., INVALID index)
+- **Recovery**: see [Migration Rollback Runbook — Scenario E](../runbooks/migration-rollback.md#scenario-e-concurrently-failure-invalid-index)
+
 ---
 
 ## Migration History

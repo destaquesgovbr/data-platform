@@ -266,6 +266,50 @@ class TestMigrationSequence:
         assert result.returncode == 0
         assert "migration(s) processed" in result.stdout
 
+    def test_migrate_after_manual_application(self):
+        """Migration applied manually (no history) is re-executed safely (idempotent)."""
+        # Apply migrations 001-007 via runner
+        result = _run_migrate("migrate", "--target", "007", "--yes")
+        assert result.returncode == 0, f"Setup failed:\n{result.stdout}\n{result.stderr}"
+
+        # Apply migration 008 SQL directly (simulating DBA in Cloud Console)
+        conn = psycopg2.connect(DATABASE_URL)
+        try:
+            with conn.cursor() as cur:
+                sql = (MIGRATIONS_DIR / "008_create_scrape_runs.sql").read_text()
+                cur.execute(sql)
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Verify: table exists but NO history record for 008
+        conn = psycopg2.connect(DATABASE_URL)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+                    "WHERE table_name = 'scrape_runs')"
+                )
+                assert cur.fetchone()[0] is True
+                cur.execute(
+                    "SELECT COUNT(*) FROM migration_history "
+                    "WHERE version = '008' AND operation = 'migrate' "
+                    "AND status = 'success'"
+                )
+                assert cur.fetchone()[0] == 0
+        finally:
+            conn.close()
+
+        # Run migrate — should detect 008 as pending, re-execute (no-op), succeed
+        result = _run_migrate("migrate", "--yes")
+        assert result.returncode == 0, f"Migrate failed:\n{result.stdout}\n{result.stderr}"
+        assert "failed" not in result.stdout.lower()
+
+        # Verify: status shows 0 pending (all migrations applied)
+        result = _run_migrate("status")
+        assert result.returncode == 0
+        assert "Pending: 0" in result.stdout
+
     def test_stamp_then_migrate(self):
         """Stamp first N migrations, then migrate applies only the rest."""
         result = _run_migrate("stamp", "007", "--yes")

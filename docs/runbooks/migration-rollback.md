@@ -94,6 +94,54 @@ python scripts/migrate.py status
 
 ---
 
+## Scenario E: CONCURRENTLY Failure (INVALID Index)
+
+When a `CREATE INDEX CONCURRENTLY` fails (timeout, deadlock, crash), PostgreSQL leaves the index in an INVALID state. INVALID indexes are not used by the query planner but consume space and block retries.
+
+### Diagnosis
+
+```bash
+# Check for INVALID indexes
+psql "$DATABASE_URL" -c "
+SELECT indexrelid::regclass AS index_name,
+       indrelid::regclass AS table_name,
+       pg_size_pretty(pg_relation_size(indexrelid)) AS size
+FROM pg_index
+WHERE NOT indisvalid;
+"
+```
+
+### Recovery Steps
+
+```bash
+# 1. Drop the INVALID index
+psql "$DATABASE_URL" -c "DROP INDEX CONCURRENTLY IF EXISTS idx_news_agency_url_unique;"
+
+# 2. Verify migration_history shows the failed attempt
+python scripts/migrate.py history --limit 5
+
+# 3. Re-run the migration (runner will detect it as pending due to pre-recorded failed status)
+python scripts/migrate.py migrate --yes
+
+# 4. Verify success
+python scripts/migrate.py status
+```
+
+### Via CI/CD
+
+1. Drop the INVALID index manually via Cloud SQL Console or Cloud Shell
+2. Go to Actions > Database Migration
+3. Set: command=`migrate`, dry_run=`false`, confirm=`true`
+
+### Important Notes
+
+- `DROP INDEX CONCURRENTLY` also cannot run inside a transaction — execute it directly via `psql`
+- The pre-recorded `failed` entry in `migration_history` means the runner still sees the migration as "not successfully applied" and will retry
+- If the migration has multiple statements and one succeeded before the failure, the idempotent patterns (`IF NOT EXISTS`) ensure safe re-execution
+- Monitor for lock contention on large tables when retrying CONCURRENTLY indexes
+
+---
+
 ## Emergency: Restore from Backup
 
 If rollback is not possible or data corruption occurred:
