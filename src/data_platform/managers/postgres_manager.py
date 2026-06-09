@@ -553,7 +553,9 @@ class PostgresManager:
                 (nf.features->>'word_count')::int AS word_count,
                 (nf.features->>'has_image')::boolean AS has_image,
                 (nf.features->>'has_video')::boolean AS has_video,
-                (nf.features->>'readability_flesch')::float AS readability_flesch
+                (nf.features->>'readability_flesch')::float AS readability_flesch,
+                (nf.features->>'view_count')::int AS view_count,
+                nf.features->'entities' AS entities
         """
 
         query += """

@@ -55,6 +55,15 @@ SAMPLE_GRAPHQL_RESPONSE = {
     "hasVideo": False,
     "imageBroken": False,
     "readabilityFlesch": 45.2,
+    "features": {
+        "sentiment": {"label": "positive", "score": 0.85},
+        "word_count": 350,
+        "view_count": 1234,
+        "entities": [
+            {"text": "Ministério da Saúde", "type": "ORG", "count": 3},
+            {"text": "Lula", "type": "PER", "count": 2},
+        ],
+    },
 }
 
 
@@ -98,6 +107,31 @@ class TestMapGraphqlRow:
         assert mapped["theme_1_level_1_code"] == "SAUDE"
         assert mapped["theme_1_level_2_label"] == "Saúde Pública"
         assert mapped["most_specific_theme_code"] == "SAUDE_PUBLICA"
+
+    def test_entities_extracted_from_features(self):
+        """entities are pulled out of the `features` JSON blob."""
+        mapped = _map_graphql_row(SAMPLE_GRAPHQL_RESPONSE)
+        assert mapped["entities"] == [
+            {"text": "Ministério da Saúde", "type": "ORG", "count": 3},
+            {"text": "Lula", "type": "PER", "count": 2},
+        ]
+
+    def test_view_count_extracted_from_features(self):
+        """view_count is pulled out of the `features` JSON blob."""
+        mapped = _map_graphql_row(SAMPLE_GRAPHQL_RESPONSE)
+        assert mapped["view_count"] == 1234
+
+    def test_features_blob_itself_not_kept(self):
+        """The raw `features` blob is not forwarded to prepare_document."""
+        mapped = _map_graphql_row(SAMPLE_GRAPHQL_RESPONSE)
+        assert "features" not in mapped
+
+    def test_missing_features_is_safe(self):
+        """A response with no `features` key omits entities/view_count."""
+        row = {k: v for k, v in SAMPLE_GRAPHQL_RESPONSE.items() if k != "features"}
+        mapped = _map_graphql_row(row)
+        assert "entities" not in mapped
+        assert "view_count" not in mapped
 
 
 # ---------------------------------------------------------------------------

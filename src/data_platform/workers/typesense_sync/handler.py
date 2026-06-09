@@ -54,6 +54,10 @@ _GRAPHQL_TO_SNAKE: dict[str, str] = {
     "readabilityFlesch": "readability_flesch",
 }
 
+# Feature keys (dentro do JSON `features`) que prepare_document consome diretamente.
+# entities → lista de {text, type, count}; view_count → int.
+_FEATURES_PASSTHROUGH: tuple[str, ...] = ("entities", "view_count")
+
 
 def _parse_iso_to_epoch(iso_str: str | None) -> int:
     """Convert an ISO-8601 datetime string to a Unix epoch integer."""
@@ -77,6 +81,15 @@ def _map_graphql_row(gql_row: dict) -> dict:
     for gql_key, snake_key in _GRAPHQL_TO_SNAKE.items():
         if gql_key in gql_row and gql_row[gql_key] is not None:
             mapped[snake_key] = gql_row[gql_key]
+
+    # Extrai entidades e view_count do JSON `features` (não expostos como campos
+    # escalares pelo schema graphql; chegam dentro do blob `features`).
+    features = gql_row.get("features")
+    if isinstance(features, dict):
+        for key in _FEATURES_PASSTHROUGH:
+            value = features.get(key)
+            if value is not None:
+                mapped[key] = value
 
     # Convert ISO datetime strings to epoch timestamps (prepare_document expects these)
     if "published_at" in mapped:

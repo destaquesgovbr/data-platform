@@ -46,6 +46,25 @@ class TestCollectionSchema:
         )
         assert pub_field["type"] == "int64"
 
+    def test_schema_has_entity_fields(self):
+        """Schema includes combined + per-type entity fields as facetable string[]."""
+        fields = {f["name"]: f for f in COLLECTION_SCHEMA["fields"]}
+        for name in ("entities", "entity_org", "entity_per", "entity_loc", "entity_misc"):
+            assert name in fields, f"missing entity field {name}"
+            assert fields[name]["type"] == "string[]"
+            assert fields[name]["facet"] is True
+            assert fields[name]["optional"] is True
+
+    def test_schema_has_view_count_sortable(self):
+        """view_count is an optional, sortable int32."""
+        fields = {f["name"]: f for f in COLLECTION_SCHEMA["fields"]}
+        assert "view_count" in fields
+        vc = fields["view_count"]
+        assert vc["type"] == "int32"
+        assert vc["optional"] is True
+        assert vc["sort"] is True
+        assert vc["facet"] is False
+
 
 class TestCreateCollection:
     """Tests for create_collection() function."""
