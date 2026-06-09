@@ -17,6 +17,88 @@ logger = logging.getLogger(__name__)
 # Limite máximo de caracteres para uma tag válida
 MAX_TAG_LENGTH = 100
 
+# Mapeamento de tipo de entidade (news_features.features.entities) → campo Typesense.
+# Tipos não listados (MISC, EVENT, PROGRAM, ...) caem em entity_misc.
+_ENTITY_TYPE_TO_FIELD: dict[str, str] = {
+    "ORG": "entity_org",
+    "PER": "entity_per",
+    "LOC": "entity_loc",
+}
+
+
+def _dedup_preserving_order(values: list[str]) -> list[str]:
+    """Remove duplicados preservando a ordem de primeira ocorrência."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for v in values:
+        if v not in seen:
+            seen.add(v)
+            result.append(v)
+    return result
+
+
+def extract_entity_fields(entities_value: Any) -> dict[str, list[str]]:
+    """
+    Constrói os campos de entidade do Typesense a partir da lista de entidades.
+
+    A lista (de `news_features.features.entities`) tem o formato
+    ``[{"text": str, "type": str, "count": int}, ...]``. O match é exato pelo
+    texto bruto da entidade (v1, sem normalização/canonicalização).
+
+    Args:
+        entities_value: Lista de dicts de entidades (ou None / valor inválido).
+
+    Returns:
+        Dicionário com as chaves ``entities`` (todos os textos, dedup) e
+        ``entity_org``/``entity_per``/``entity_loc``/``entity_misc`` (por tipo).
+        Chaves com lista vazia são omitidas para não popular campos sem dado.
+    """
+    # JSONB pode chegar como string (dependendo do driver/adaptador); tenta parsear.
+    if isinstance(entities_value, str):
+        try:
+            entities_value = json.loads(entities_value)
+        except json.JSONDecodeError:
+            return {}
+
+    if not isinstance(entities_value, list):
+        return {}
+
+    buckets: dict[str, list[str]] = {
+        "entity_org": [],
+        "entity_per": [],
+        "entity_loc": [],
+        "entity_misc": [],
+    }
+    all_texts: list[str] = []
+
+    for entity in entities_value:
+        if not isinstance(entity, dict):
+            continue
+        text = entity.get("text")
+        if not isinstance(text, str):
+            continue
+        text = text.strip()
+        if not text:
+            continue
+
+        entity_type = entity.get("type")
+        entity_type = entity_type.strip().upper() if isinstance(entity_type, str) else ""
+        field = _ENTITY_TYPE_TO_FIELD.get(entity_type, "entity_misc")
+
+        buckets[field].append(text)
+        all_texts.append(text)
+
+    result: dict[str, list[str]] = {}
+    combined = _dedup_preserving_order(all_texts)
+    if combined:
+        result["entities"] = combined
+    for field, texts in buckets.items():
+        deduped = _dedup_preserving_order(texts)
+        if deduped:
+            result[field] = deduped
+
+    return result
+
 
 def clean_tags(tags_value) -> list[str]:
     """
@@ -186,6 +268,17 @@ def prepare_document(row: pd.Series) -> dict[str, Any]:
         val = row.get(field_name)
         if val is not None and not (isinstance(val, float) and pd.isna(val)):
             doc[field_name] = field_type(val)
+
+    # view_count (engagement, de news_features.features.view_count)
+    view_count = row.get("view_count")
+    if view_count is not None and not (isinstance(view_count, float) and pd.isna(view_count)):
+        doc["view_count"] = int(view_count)
+
+    # Entidades nomeadas (de news_features.features.entities)
+    # Usa `in` + acesso direto para evitar o ValueError de pd.notna() sobre listas.
+    if "entities" in row and row["entities"] is not None:
+        for field_name, values in extract_entity_fields(row["entities"]).items():
+            doc[field_name] = values
 
     # Campo de embedding (vetor de floats para busca semântica)
     if "content_embedding" in row and row["content_embedding"] is not None:

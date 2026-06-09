@@ -107,6 +107,15 @@ COLLECTION_SCHEMA: dict[str, Any] = {
         {"name": "has_video", "type": "bool", "facet": True, "optional": True},
         {"name": "image_broken", "type": "bool", "facet": True, "optional": True},
         {"name": "readability_flesch", "type": "float", "facet": False, "optional": True},
+        # Named entities (from news_features.features.entities: [{text, type, count}])
+        # `entities` carries all entity texts (any type); `entity_*` are per-type buckets.
+        {"name": "entities", "type": "string[]", "facet": True, "optional": True},
+        {"name": "entity_org", "type": "string[]", "facet": True, "optional": True},
+        {"name": "entity_per", "type": "string[]", "facet": True, "optional": True},
+        {"name": "entity_loc", "type": "string[]", "facet": True, "optional": True},
+        {"name": "entity_misc", "type": "string[]", "facet": True, "optional": True},
+        # Engagement (from news_features.features.view_count)
+        {"name": "view_count", "type": "int32", "facet": False, "optional": True, "sort": True},
         # Embedding field for semantic search (768 dimensions - BGE-M3)
         {
             "name": "content_embedding",

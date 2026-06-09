@@ -15,6 +15,7 @@ import pytest
 from data_platform.typesense.indexer import (
     MAX_TAG_LENGTH,
     clean_tags,
+    extract_entity_fields,
     parse_embedding,
     prepare_document,
 )
@@ -135,6 +136,117 @@ class TestParseEmbedding:
         assert result is None
 
 
+class TestExtractEntityFields:
+    """Tests for extract_entity_fields() function."""
+
+    def test_maps_known_types_to_buckets(self):
+        """ORG/PER/LOC map to their dedicated fields."""
+        entities = [
+            {"text": "Ministério da Saúde", "type": "ORG", "count": 3},
+            {"text": "Lula", "type": "PER", "count": 2},
+            {"text": "Brasília", "type": "LOC", "count": 1},
+        ]
+        result = extract_entity_fields(entities)
+        assert result["entity_org"] == ["Ministério da Saúde"]
+        assert result["entity_per"] == ["Lula"]
+        assert result["entity_loc"] == ["Brasília"]
+
+    def test_combined_entities_contains_all_texts(self):
+        """`entities` carries every text across types."""
+        entities = [
+            {"text": "Ministério da Saúde", "type": "ORG"},
+            {"text": "Lula", "type": "PER"},
+            {"text": "Brasília", "type": "LOC"},
+        ]
+        result = extract_entity_fields(entities)
+        assert result["entities"] == ["Ministério da Saúde", "Lula", "Brasília"]
+
+    def test_misc_event_program_go_to_entity_misc(self):
+        """MISC, EVENT and PROGRAM all fall into entity_misc."""
+        entities = [
+            {"text": "Bolsa Família", "type": "PROGRAM"},
+            {"text": "Copa do Mundo", "type": "EVENT"},
+            {"text": "Algo", "type": "MISC"},
+        ]
+        result = extract_entity_fields(entities)
+        assert result["entity_misc"] == ["Bolsa Família", "Copa do Mundo", "Algo"]
+        assert "entity_org" not in result
+
+    def test_dedup_preserves_order(self):
+        """Duplicate texts are removed, first-seen order preserved."""
+        entities = [
+            {"text": "INSS", "type": "ORG"},
+            {"text": "INSS", "type": "ORG"},
+            {"text": "Caixa", "type": "ORG"},
+        ]
+        result = extract_entity_fields(entities)
+        assert result["entity_org"] == ["INSS", "Caixa"]
+        assert result["entities"] == ["INSS", "Caixa"]
+
+    def test_unknown_type_defaults_to_misc(self):
+        """Entities without a recognized type bucket into entity_misc."""
+        entities = [{"text": "Algo", "type": "WEIRD"}]
+        result = extract_entity_fields(entities)
+        assert result["entity_misc"] == ["Algo"]
+
+    def test_missing_type_defaults_to_misc(self):
+        """Entities with no type key bucket into entity_misc."""
+        entities = [{"text": "Algo"}]
+        result = extract_entity_fields(entities)
+        assert result["entity_misc"] == ["Algo"]
+
+    def test_skips_empty_and_non_string_text(self):
+        """Empty, whitespace, or non-string text values are skipped."""
+        entities = [
+            {"text": "  ", "type": "ORG"},
+            {"text": "", "type": "ORG"},
+            {"text": 123, "type": "ORG"},
+            {"text": "Válido", "type": "ORG"},
+        ]
+        result = extract_entity_fields(entities)
+        assert result["entity_org"] == ["Válido"]
+
+    def test_strips_whitespace(self):
+        """Entity text is stripped."""
+        entities = [{"text": "  Anvisa  ", "type": "ORG"}]
+        result = extract_entity_fields(entities)
+        assert result["entity_org"] == ["Anvisa"]
+
+    def test_type_is_case_insensitive(self):
+        """Lowercase type strings still map correctly."""
+        entities = [{"text": "Lula", "type": "per"}]
+        result = extract_entity_fields(entities)
+        assert result["entity_per"] == ["Lula"]
+
+    def test_empty_list_returns_empty_dict(self):
+        """Empty entity list yields no fields."""
+        assert extract_entity_fields([]) == {}
+
+    def test_none_returns_empty_dict(self):
+        """None yields no fields."""
+        assert extract_entity_fields(None) == {}
+
+    def test_non_list_returns_empty_dict(self):
+        """Non-list input yields no fields."""
+        assert extract_entity_fields({"text": "x"}) == {}
+
+    def test_json_string_is_parsed(self):
+        """A JSON-encoded string (e.g. from JSONB driver) is parsed."""
+        entities = json.dumps([{"text": "Anvisa", "type": "ORG"}])
+        result = extract_entity_fields(entities)
+        assert result["entity_org"] == ["Anvisa"]
+
+    def test_invalid_json_string_returns_empty_dict(self):
+        """Malformed JSON string yields no fields."""
+        assert extract_entity_fields("not json") == {}
+
+    def test_skips_non_dict_items(self):
+        """Non-dict items in the list are ignored."""
+        entities = ["just a string", {"text": "Anvisa", "type": "ORG"}]
+        result = extract_entity_fields(entities)
+        assert result["entity_org"] == ["Anvisa"]
+
+
 class TestPrepareDocument:
     """Tests for prepare_document() function."""
 
@@ -227,6 +339,75 @@ class TestPrepareDocument:
 
         doc = prepare_document(row)
         assert doc["content_embedding"] == [0.1, 0.2, 0.3]
+
+    def test_prepare_document_entities(self):
+        """Entities are mapped into per-type and combined fields."""
+        row = pd.Series(
+            {
+                "unique_id": "abc123",
+                "published_at_ts": 1704067200,
+                "entities": [
+                    {"text": "Ministério da Saúde", "type": "ORG", "count": 3},
+                    {"text": "Lula", "type": "PER", "count": 2},
+                    {"text": "Brasília", "type": "LOC", "count": 1},
+                    {"text": "Bolsa Família", "type": "PROGRAM", "count": 1},
+                ],
+            }
+        )
+
+        doc = prepare_document(row)
+        assert doc["entity_org"] == ["Ministério da Saúde"]
+        assert doc["entity_per"] == ["Lula"]
+        assert doc["entity_loc"] == ["Brasília"]
+        assert doc["entity_misc"] == ["Bolsa Família"]
+        assert doc["entities"] == [
+            "Ministério da Saúde",
+            "Lula",
+            "Brasília",
+            "Bolsa Família",
+        ]
+
+    def test_prepare_document_view_count(self):
+        """view_count is coerced to int."""
+        row = pd.Series(
+            {
+                "unique_id": "abc123",
+                "published_at_ts": 1704067200,
+                "view_count": 1234,
+            }
+        )
+
+        doc = prepare_document(row)
+        assert doc["view_count"] == 1234
+        assert isinstance(doc["view_count"], int)
+
+    def test_prepare_document_no_entities_no_fields(self):
+        """No entity fields are added when entities are absent."""
+        row = pd.Series(
+            {
+                "unique_id": "abc123",
+                "published_at_ts": 1704067200,
+            }
+        )
+
+        doc = prepare_document(row)
+        for field in ("entities", "entity_org", "entity_per", "entity_loc", "entity_misc"):
+            assert field not in doc
+        assert "view_count" not in doc
+
+    def test_prepare_document_empty_entities_no_fields(self):
+        """An empty entities list adds no entity fields."""
+        row = pd.Series(
+            {
+                "unique_id": "abc123",
+                "published_at_ts": 1704067200,
+                "entities": [],
+            }
+        )
+
+        doc = prepare_document(row)
+        for field in ("entities", "entity_org", "entity_per", "entity_loc", "entity_misc"):
+            assert field not in doc
 
 
 class TestIndexDocuments:

@@ -141,6 +141,7 @@ query NewsForTypesense($uniqueId: ID!) {
     themL3Code themL3Label mostSpecificThemeCode mostSpecificThemeLabel
     contentEmbedding sentimentLabel sentimentScore
     trendingScore wordCount hasImage hasVideo imageBroken readabilityFlesch
+    features
   }
 }
 """
