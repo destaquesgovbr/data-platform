@@ -1,5 +1,6 @@
 """Unit tests for feature computation functions."""
 
+import unicodedata
 from datetime import datetime, timezone
 
 import pytest
@@ -217,6 +218,42 @@ class TestComputeContentAnnotations:
         assert content[second["start"] : second["end"]] == "educação"
         assert first["type"] == "POLICY"
         assert first["canonical_id"] is None
+
+    def test_nfd_content_offsets_index_original_string(self):
+        """REGRESSION: NFD (decomposed) content must yield offsets that slice the
+        ORIGINAL string correctly. NFC normalization is NOT length-preserving, so
+        the previous equal-length assumption corrupted offsets after the first
+        decomposed accent (INSS sliced to ' INS')."""
+        content = unicodedata.normalize("NFD", "No Ministério da Saúde, o INSS agiu.")
+        # Sanity: the fixture really is decomposed (not already NFC).
+        assert content != unicodedata.normalize("NFC", content)
+        entities = [{"text": "INSS", "type": "ORG", "canonical_id": "dgb_inss"}]
+        result = compute_content_annotations(content, entities)
+        assert len(result) == 1
+        assert content[result[0]["start"] : result[0]["end"]] == "INSS"
+        assert result[0]["text"] == "INSS"
+
+    def test_nfd_accented_entity_in_nfd_content(self):
+        """Accented surface matched in NFD content returns the correct original
+        (decomposed) slice — offsets index the original, not a renormalized copy."""
+        content = unicodedata.normalize("NFD", "O Ministério da Saúde divulgou dados.")
+        assert content != unicodedata.normalize("NFC", content)
+        entities = [{"text": "Saúde", "type": "ORG", "canonical_id": "dgb_ms"}]
+        result = compute_content_annotations(content, entities)
+        assert len(result) == 1
+        start, end = result[0]["start"], result[0]["end"]
+        # The slice equals 'Saúde' under NFC comparison (it is the NFD form here).
+        assert unicodedata.normalize("NFC", content[start:end]) == "Saúde"
+        assert result[0]["text"] == content[start:end]
+
+    def test_fold_expansion_maps_back_to_original_span(self):
+        """A surface whose fold EXPANDS the source (ß → ss) still maps its span
+        back to the original (shorter) codepoints — index map handles contraction."""
+        content = "Die Straße ist hier."
+        entities = [{"text": "Strasse", "type": "LOC", "canonical_id": None}]
+        result = compute_content_annotations(content, entities)
+        assert len(result) == 1
+        assert content[result[0]["start"] : result[0]["end"]] == "Straße"
 
     def test_word_boundary_prevents_substring_match(self):
         """'MEC' must not match inside 'MECANICA' or 'COMEÇO'."""

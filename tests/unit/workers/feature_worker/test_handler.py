@@ -22,8 +22,19 @@ def mock_pg():
     return pg
 
 
+# The PG fetch query returns 8 columns:
+#   unique_id, content, image_url, video_url, published_at,
+#   entities, annotations_source_hash, has_content_annotations
+_ROW_WIDTH = 8
+
+
 def _make_cursor(row=None):
     cursor = MagicMock()
+    # Pad shorter test rows with None for the trailing annotation-skip columns
+    # (annotations_source_hash, has_content_annotations) so callers can keep
+    # passing the core fields only.
+    if row is not None and len(row) < _ROW_WIDTH:
+        row = (*row, *([None] * (_ROW_WIDTH - len(row))))
     cursor.fetchone.return_value = row
     cursor.close = MagicMock()
     return cursor
@@ -257,3 +268,100 @@ class TestHandleFeatureComputation:
         assert "entities" not in features_arg
         assert "content_annotations" in features_arg
         assert "word_count" in features_arg
+
+    def test_annotations_recompute_skipped_when_hash_unchanged(self, mock_pg):
+        """When stored hash matches AND content_annotations exists, the annotation
+        derivation is skipped (not re-written), but other features still upsert."""
+        from data_platform.workers.feature_worker.features import (
+            compute_annotations_source_hash,
+        )
+
+        content = "O MEC agiu."
+        entities = [{"text": "MEC", "type": "ORG", "canonical_id": "dgb_mec"}]
+        stored_hash = compute_annotations_source_hash(content, entities)
+
+        conn = MagicMock()
+        cursor = _make_cursor(
+            row=(
+                "abc123",
+                content,
+                None,
+                None,
+                datetime(2024, 1, 1),
+                entities,
+                stored_hash,  # annotations_source_hash matches
+                True,  # has_content_annotations
+            )
+        )
+        conn.cursor.return_value = cursor
+        mock_pg.get_connection.return_value = conn
+
+        result = handle_feature_computation("abc123", mock_pg)
+
+        assert result["annotations_skipped"] is True
+        features_arg = mock_pg.upsert_features.call_args[0][1]
+        # Skipped → neither annotation key is in the upsert payload …
+        assert "content_annotations" not in features_arg
+        assert "annotations_source_hash" not in features_arg
+        # … but the cheap content-driven features are still recomputed.
+        assert "word_count" in features_arg
+
+    def test_annotations_recompute_runs_when_hash_changes(self, mock_pg):
+        """A stale stored hash (entities changed) forces recompute of annotations."""
+        conn = MagicMock()
+        cursor = _make_cursor(
+            row=(
+                "abc123",
+                "O MEC agiu.",
+                None,
+                None,
+                datetime(2024, 1, 1),
+                [{"text": "MEC", "type": "ORG", "canonical_id": "dgb_mec"}],
+                "stale-hash-does-not-match",
+                True,
+            )
+        )
+        conn.cursor.return_value = cursor
+        mock_pg.get_connection.return_value = conn
+
+        result = handle_feature_computation("abc123", mock_pg)
+
+        assert result["annotations_skipped"] is False
+        features_arg = mock_pg.upsert_features.call_args[0][1]
+        assert features_arg["content_annotations"] == [
+            {"start": 2, "end": 5, "type": "ORG", "text": "MEC", "canonical_id": "dgb_mec"}
+        ]
+        assert "annotations_source_hash" in features_arg
+
+    def test_annotations_recompute_runs_when_key_absent_even_if_hash_matches(self, mock_pg):
+        """Hash matches but content_annotations key is missing → must recompute
+        (guards against a hash written without the annotations list)."""
+        from data_platform.workers.feature_worker.features import (
+            compute_annotations_source_hash,
+        )
+
+        content = "O MEC agiu."
+        entities = [{"text": "MEC", "type": "ORG", "canonical_id": "dgb_mec"}]
+        stored_hash = compute_annotations_source_hash(content, entities)
+
+        conn = MagicMock()
+        cursor = _make_cursor(
+            row=(
+                "abc123",
+                content,
+                None,
+                None,
+                datetime(2024, 1, 1),
+                entities,
+                stored_hash,
+                False,  # content_annotations key NOT present
+            )
+        )
+        conn.cursor.return_value = cursor
+        mock_pg.get_connection.return_value = conn
+
+        result = handle_feature_computation("abc123", mock_pg)
+
+        assert result["annotations_skipped"] is False
+        features_arg = mock_pg.upsert_features.call_args[0][1]
+        assert "content_annotations" in features_arg

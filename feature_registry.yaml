@@ -73,7 +73,10 @@ features:
   annotations_source_hash:
     version: "1.0"
     type: string
-    description: "Hash idempotência das entradas de content_annotations (content + surfaces)"
+    description: >-
+      Hash de idempotência das entradas de content_annotations (content +
+      surfaces); o feature-worker pula o recálculo quando este hash não muda
+      e content_annotations já existe na linha.
     model: "local/python"
     compute: "feature-worker"
 

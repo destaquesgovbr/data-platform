@@ -38,8 +38,8 @@ def _fetch_article_via_graphql(unique_id: str, gql_client) -> dict | None:
     article = data.get("newsById")
     if not article:
         return None
-    features = article.get("features")
-    entities = _coerce_entities(features.get("entities")) if isinstance(features, dict) else []
+    features = article.get("features") if isinstance(article.get("features"), dict) else {}
+    entities = _coerce_entities(features.get("entities"))
     return {
         "unique_id": article.get("uniqueId"),
         "content": article.get("content"),
@@ -47,6 +47,8 @@ def _fetch_article_via_graphql(unique_id: str, gql_client) -> dict | None:
         "video_url": article.get("videoUrl"),
         "published_at": article.get("publishedAt"),
         "entities": entities,
+        "existing_annotations_hash": features.get("annotations_source_hash"),
+        "has_content_annotations": "content_annotations" in features,
     }
 
 
@@ -90,26 +92,45 @@ def handle_feature_computation(unique_id: str, pg: PostgresManager, gql_client=N
     #    article's CURRENT entity mentions. If entities are absent (race with the
     #    data-science enrichment worker that writes features.entities), emit an
     #    empty list — a later recompute will fill it in. Never crash.
+    #
+    #    Skip the (re)derivation when the inputs are unchanged: the stored
+    #    annotations_source_hash matches the freshly computed hash AND a
+    #    content_annotations key already exists in the row. The other local
+    #    features are still recomputed + upserted (cheap, content-driven).
     content = article.get("content")
     entities = _coerce_entities(article.get("entities"))
-    annotations = compute_content_annotations(content, entities)
-    features["content_annotations"] = annotations
-    features["annotations_source_hash"] = compute_annotations_source_hash(content, entities)
+    new_hash = compute_annotations_source_hash(content, entities)
+    hash_matches = article.get("existing_annotations_hash") == new_hash
+    has_existing = bool(article.get("has_content_annotations"))
+    annotations_skipped = hash_matches and has_existing
+    if annotations_skipped:
+        annotations: list[dict[str, Any]] | None = None
+    else:
+        annotations = compute_content_annotations(content, entities)
+        features["content_annotations"] = annotations
+        features["annotations_source_hash"] = new_hash
 
     # 4. Upsert features
     if gql_client:
         _upsert_features_via_graphql(unique_id, features, gql_client)
     else:
         pg.upsert_features(unique_id, features)
-    logger.info(
-        f"Computed {len(features)} features for {unique_id} "
-        f"({len(annotations)} content annotations)"
-    )
+    if annotations_skipped:
+        logger.info(
+            f"Computed {len(features)} features for {unique_id} "
+            "(content_annotations unchanged — skipped)"
+        )
+    else:
+        logger.info(
+            f"Computed {len(features)} features for {unique_id} "
+            f"({len(annotations or [])} content annotations)"
+        )
 
     return {
         "status": "computed",
         "unique_id": unique_id,
         "features": list(features.keys()),
+        "annotations_skipped": annotations_skipped,
     }
 
 
@@ -126,7 +147,9 @@ def _fetch_article(unique_id: str, pg: PostgresManager) -> dict | None:
         cursor.execute(
             """
             SELECT n.unique_id, n.content, n.image_url, n.video_url, n.published_at,
-                   nf.features->'entities' AS entities
+                   nf.features->'entities' AS entities,
+                   nf.features->>'annotations_source_hash' AS annotations_source_hash,
+                   (nf.features ? 'content_annotations') AS has_content_annotations
             FROM news n
             LEFT JOIN news_features nf ON n.unique_id = nf.unique_id
             WHERE n.unique_id = %s
@@ -143,6 +166,8 @@ def _fetch_article(unique_id: str, pg: PostgresManager) -> dict | None:
             "video_url": row[3],
             "published_at": row[4],
             "entities": _coerce_entities(row[5]),
+            "existing_annotations_hash": row[6],
+            "has_content_annotations": bool(row[7]),
         }
     finally:
         cursor.close()

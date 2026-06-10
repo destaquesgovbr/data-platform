@@ -16,10 +16,6 @@ _WORD_CHAR = r"[0-9A-Za-zÀ-ÿ]"
 _BOUNDARY_BEFORE = rf"(?<!{_WORD_CHAR})"
 _BOUNDARY_AFTER = rf"(?!{_WORD_CHAR})"
 
-# Placeholder kept for characters whose per-char fold is empty, so the folded
-# string stays index-aligned (1:1) with the original content.
-_FOLD_EMPTY = "\x00"
-
 
 def compute_word_count(content: str | None) -> int:
     if not content:
@@ -66,47 +62,44 @@ def compute_readability_flesch(content: str | None) -> float | None:
         return None
 
 
-def _strip_diacritics(text: str) -> str:
-    """Remove combining diacritical marks (NFD decomposition, drop Mn)."""
-    decomposed = unicodedata.normalize("NFD", text)
-    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-
-
-def _fold_char(ch: str) -> str:
+def _fold_codepoint(ch: str) -> str:
     """
-    Fold a single character to a single folded character, preserving 1:1
-    alignment with the original index.
-
-    Folding = casefold + strip diacritics. A per-character casefold/strip may
-    yield zero chars (pure combining mark) or several chars (e.g. 'ß' → 'ss');
-    we collapse to exactly one representative char so the folded string stays
-    index-aligned with the original content. ``_FOLD_EMPTY`` marks a position
-    whose fold is empty (e.g. a standalone combining mark) — it can never be
-    part of a surface match.
+    Fold a single original codepoint: NFKD decompose → drop combining marks →
+    casefold. May expand (``'ß'`` → ``'ss'``), contract to empty (a standalone
+    combining mark), or stay 1:1. Callers must NOT assume length is preserved.
     """
-    folded = _strip_diacritics(ch.casefold())
-    if not folded:
-        return _FOLD_EMPTY
-    return folded[0]
+    decomposed = unicodedata.normalize("NFKD", ch)
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return stripped.casefold()
 
 
-def _fold_aligned(content: str) -> str:
+def _fold_with_map(s: str) -> tuple[str, list[int]]:
     """
-    Fold ``content`` to a same-length string (1:1 char-index map back to the
-    original). NFC first (so pre-composed accents are consistent), then fold
-    each character independently.
+    Fold ``s`` for accent/case-insensitive matching, returning the folded string
+    plus a map from each folded char position back to the ORIGINAL codepoint
+    index that produced it.
+
+    Folding is per original codepoint (NFKD → drop combining → casefold), so it
+    is NOT length-preserving in either direction. The index map — not an
+    equal-length assumption — is what lets a folded match span be translated back
+    to offsets into the original (un-renormalized) string.
     """
-    normalized = unicodedata.normalize("NFC", content)
-    return "".join(_fold_char(ch) for ch in normalized)
+    folded: list[str] = []
+    idx_map: list[int] = []  # folded position -> original codepoint index
+    for i, ch in enumerate(s):
+        for fc in _fold_codepoint(ch):
+            folded.append(fc)
+            idx_map.append(i)
+    return "".join(folded), idx_map
 
 
 def _fold_surface(text: str) -> str:
     """
-    Fold an entity surface for matching: NFC → casefold → strip diacritics.
+    Fold an entity surface for matching (same per-codepoint fold as the content).
     Internal whitespace is collapsed to a single space (the regex turns it into
     ``\\s+`` so it tolerates runs of whitespace/newlines in the content).
     """
-    folded = _strip_diacritics(unicodedata.normalize("NFC", text).casefold())
+    folded, _ = _fold_with_map(text)
     return re.sub(r"\s+", " ", folded).strip()
 
 
@@ -124,10 +117,12 @@ def compute_content_annotations(
     Derive deterministic inline offsets for entity mentions in ``content``.
 
     Each entity surface (``text``) is matched against an accent/case-folded copy
-    of ``content`` that is index-aligned 1:1 with the original, so the returned
-    ``start``/``end`` are offsets into the *original* string. Matching uses
-    word-boundary lookarounds (``\\b`` is unreliable with accents) and collapses
-    internal whitespace in the surface to ``\\s+``.
+    of ``content``. Folding is per original codepoint (NFKD → drop combining →
+    casefold) and is NOT length-preserving, so an explicit folded→original index
+    map (``_fold_with_map``) translates each folded match span back to offsets
+    into the *original*, un-renormalized ``content`` — never assume equal length.
+    Matching uses word-boundary lookarounds (``\\b`` is unreliable with accents)
+    and collapses internal whitespace in the surface to ``\\s+``.
 
     Overlap resolution is **longest-match-wins, no nesting**: all candidate spans
     are gathered, sorted by ``(start asc, length desc)`` with ties broken by
@@ -143,12 +138,16 @@ def compute_content_annotations(
     Returns:
         Flat, sorted, non-overlapping list of
         ``{start, end, type, text, canonical_id}`` (canonical_id may be None).
-        Entities not found in the content contribute nothing.
+        ``start``/``end``/``text`` index the original ``content`` (the stored
+        ``text`` is exactly ``content[start:end]``). Entities not found in the
+        content contribute nothing.
     """
     if not content or not entities:
         return []
 
-    folded_content = _fold_aligned(content)
+    folded_content, idx_map = _fold_with_map(content)
+    if not folded_content:
+        return []
 
     # Gather all candidate spans. Each candidate carries sort keys for
     # deterministic, idempotent overlap resolution.
@@ -174,11 +173,14 @@ def compute_content_annotations(
         count = count if isinstance(count, int) else 0
 
         for match in pattern.finditer(folded_content):
-            start, end = match.start(), match.end()
-            # The folded copy is index-aligned, so original offsets == folded
-            # offsets. Defensive guard: a folded-empty char must not anchor a span.
-            if _FOLD_EMPTY in folded_content[start:end]:
+            fa, fb = match.start(), match.end()
+            # Empty folded match (defensive — surface fold is non-empty here, so
+            # fb > fa, but guard anyway).
+            if fb <= fa:
                 continue
+            # Map folded span [fa, fb) back to original codepoint offsets.
+            start = idx_map[fa]
+            end = idx_map[fb - 1] + 1
             candidates.append(
                 {
                     "start": start,
