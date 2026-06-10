@@ -186,6 +186,93 @@ class TestMigrate017:
         # Two execute_batch calls: one for entity_registry, one for entity_alias.
         assert mock_execute_batch.call_count == 2
 
+
+# ---------------------------------------------------------------------------
+# Cross-entity alias collisions (ambiguous surface forms -> resolve to NEITHER)
+# ---------------------------------------------------------------------------
+class TestAliasCollisions:
+    # Real-world collision from agencies.yaml: two distinct keys share the same name.
+    COLLIDING_AGENCIES = [
+        ("casacivil", "Casa Civil da Presidência da República", "Órgão", "presidencia"),
+        ("planalto", "Casa Civil da Presidência da República", "Órgão", "presidencia"),
+    ]
+
+    def _build(self, mod, agencies):
+        """Call _build_rows and normalize its return into (entities, aliases, collisions)."""
+        result = mod._build_rows(agencies)
+        # _build_rows must now also surface the dropped ambiguous keys.
+        assert len(result) == 3, "_build_rows must return (entity_rows, alias_rows, collisions)"
+        return result
+
+    def test_both_registry_rows_created_despite_collision(self):
+        mod = _import_migration_017()
+        entity_rows, _alias_rows, _collisions = self._build(mod, self.COLLIDING_AGENCIES)
+        entity_ids = {row[0] for row in entity_rows}
+        # (a) BOTH entities exist in the registry.
+        assert entity_ids == {"dgb_casacivil", "dgb_planalto"}
+
+    def test_colliding_alias_inserted_for_neither(self):
+        mod = _import_migration_017()
+        _entity_rows, alias_rows, _collisions = self._build(mod, self.COLLIDING_AGENCIES)
+
+        collide_norm = mod.normalize("Casa Civil da Presidência da República")
+        # (b) The ambiguous (alias_norm, 'ORG') key is inserted for NEITHER entity.
+        for alias_norm, atype, _entity_id in alias_rows:
+            assert not (
+                alias_norm == collide_norm and atype == "ORG"
+            ), "ambiguous alias must not be inserted for any entity"
+
+        # The unambiguous keys (the agency keys themselves) survive.
+        surviving = {(a, t) for a, t, _e in alias_rows}
+        assert ("casacivil", "ORG") in surviving
+        assert ("planalto", "ORG") in surviving
+
+    def test_collision_recorded_in_build_rows(self):
+        mod = _import_migration_017()
+        _entity_rows, _alias_rows, collisions = self._build(mod, self.COLLIDING_AGENCIES)
+        collide_norm = mod.normalize("Casa Civil da Presidência da República")
+        assert [collide_norm, "ORG"] in collisions or (collide_norm, "ORG") in collisions
+
+    def test_registry_aliases_jsonb_intact_for_both(self):
+        mod = _import_migration_017()
+        entity_rows, _alias_rows, _collisions = self._build(mod, self.COLLIDING_AGENCIES)
+        # (per-entity display field is NOT pruned) — both keep the full name in their aliases.
+        by_id = {row[0]: row[3] for row in entity_rows}  # entity_id -> aliases list
+        assert "Casa Civil da Presidência da República" in by_id["dgb_casacivil"]
+        assert "Casa Civil da Presidência da República" in by_id["dgb_planalto"]
+
+    def test_single_entity_multiple_surface_forms_not_a_collision(self):
+        mod = _import_migration_017()
+        # name and key both normalize distinctly; "MEC" appears once -> 1 entity, no collision.
+        agencies = [("mec", "Ministério da Educação (MEC)", "Ministério", None)]
+        _entity_rows, alias_rows, collisions = self._build(mod, agencies)
+        assert collisions == []
+        # the alias key for the canonical name resolves to the single entity.
+        name_norm = mod.normalize("Ministério da Educação")
+        owners = {e for a, t, e in alias_rows if a == name_norm and t == "ORG"}
+        assert owners == {"dgb_mec"}
+
+    @patch("psycopg2.extras.execute_batch")
+    def test_migrate_surfaces_collisions_in_result(self, mock_execute_batch):
+        mod = _import_migration_017()
+        mock_conn, _ = _make_conn_with_agencies(self.COLLIDING_AGENCIES)
+
+        result = mod.migrate(mock_conn, dry_run=False)
+        assert result["entities_inserted"] == 2
+        assert "alias_collisions" in result
+        assert "alias_collisions_dropped" in result
+        assert result["alias_collisions_dropped"] == 1
+        collide_norm = mod.normalize("Casa Civil da Presidência da República")
+        flat = [tuple(x) if isinstance(x, list) else x for x in result["alias_collisions"]]
+        assert (collide_norm, "ORG") in flat
+
+    def test_dry_run_surfaces_collisions(self):
+        mod = _import_migration_017()
+        mock_conn, _ = _make_conn_with_agencies(self.COLLIDING_AGENCIES)
+        result = mod.migrate(mock_conn, dry_run=True)
+        assert result.get("preview") is True
+        assert result["alias_collisions_dropped"] == 1
+
     def test_rollback_returns_dict(self):
         mod = _import_migration_017()
         mock_conn = MagicMock()

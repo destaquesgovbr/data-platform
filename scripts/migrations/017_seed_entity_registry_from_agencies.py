@@ -24,12 +24,23 @@ Both inserts use ON CONFLICT DO NOTHING, so the migration is re-runnable.
 The alias-extraction and normalize() helpers are module-level pure functions so
 they can be unit-tested in isolation.
 
+Cross-entity alias collisions: ``entity_alias`` has PK ``(alias_norm, type)`` and
+is the deterministic cross-entity resolver. If a surface form normalizes to the
+same key for MORE THAN ONE distinct entity (e.g. "Casa Civil da Presidência da
+República" shared by keys ``casacivil`` and ``planalto``), it is genuinely
+ambiguous and is inserted for NEITHER entity — all rows for that key are dropped
+and reported (``alias_collisions``) so the mention is later forced to the
+LLM / needs_review path instead of being silently misresolved. The per-entity
+``entity_registry.aliases`` JSONB stays intact for both entities (display field).
+
 Ref: data-platform#178 (Evolucao do identificador de entidades / NER) — Fase 1.
 """
 
 import re
 import time
 import unicodedata
+
+from loguru import logger
 
 PROVENANCE = "agencies_seed"
 SOURCE = "agencies_seed"
@@ -122,33 +133,58 @@ def _fetch_agencies(conn):
 
 
 def _build_rows(agencies):
-    """Build (entity_rows, alias_rows) tuples from agency rows.
+    """Build (entity_rows, alias_rows, collisions) from agency rows.
 
     entity_rows: (entity_id, canonical_name, type, aliases_list, agency_key, parent_key)
-    alias_rows:  (alias_norm, type, entity_id)
+    alias_rows:  (alias_norm, type, entity_id)  — ONLY unambiguous keys
+    collisions:  sorted list of (alias_norm, type) keys that map to >1 distinct
+                 entity_id and were therefore excluded from alias_rows entirely.
+
+    The entity_alias table is the cross-entity deterministic resolver: an
+    (alias_norm, type) is a unique key, so it can only point to one entity. A
+    surface form that normalizes to the same key across DIFFERENT entities is
+    genuinely ambiguous and must resolve to NEITHER — we drop ALL rows for that
+    key so the mention is forced to the LLM / needs_review path later, instead
+    of silently (and wrongly) being awarded to whichever entity sorts first.
+
+    The per-entity ``entity_registry.aliases`` JSONB list is left intact for
+    every entity — it is a display/provenance field, not the resolver.
     """
     entity_rows = []
-    alias_rows = []
-    seen_alias_keys: set[tuple[str, str]] = set()
+    # (alias_norm, type) -> ordered list of distinct entity_ids claiming it
+    owners: dict[tuple[str, str], list[str]] = {}
 
     for key, name, _type, parent_key in agencies:
         entity_id = f"{ENTITY_ID_PREFIX}{key}"
         aliases = extract_aliases(name, key)
         entity_rows.append((entity_id, name, ENTITY_TYPE, aliases, key, parent_key))
 
+        seen_for_entity: set[tuple[str, str]] = set()
         for alias in aliases:
             alias_norm = normalize(alias)
             if not alias_norm:
                 continue
             dedup_key = (alias_norm, ENTITY_TYPE)
-            # entity_alias PK is (alias_norm, type); dedup within this batch so we
-            # don't send conflicting rows for the same key in one execute_batch.
-            if dedup_key in seen_alias_keys:
+            # Within a single entity the same key may surface from several forms
+            # (e.g. name == key); count the entity only once per key.
+            if dedup_key in seen_for_entity:
                 continue
-            seen_alias_keys.add(dedup_key)
-            alias_rows.append((alias_norm, ENTITY_TYPE, entity_id))
+            seen_for_entity.add(dedup_key)
+            owner_list = owners.setdefault(dedup_key, [])
+            if entity_id not in owner_list:
+                owner_list.append(entity_id)
 
-    return entity_rows, alias_rows
+    alias_rows = []
+    collisions = []
+    for (alias_norm, atype), owner_ids in owners.items():
+        if len(owner_ids) > 1:
+            # Ambiguous across distinct entities -> resolve to NEITHER.
+            collisions.append((alias_norm, atype))
+            continue
+        alias_rows.append((alias_norm, atype, owner_ids[0]))
+
+    collisions.sort()
+    return entity_rows, alias_rows, collisions
 
 
 # =============================================================================
@@ -171,13 +207,27 @@ def migrate(conn, dry_run: bool = False) -> dict:
     import json
 
     agencies = _fetch_agencies(conn)
-    entity_rows, alias_rows = _build_rows(agencies)
+    entity_rows, alias_rows, collisions = _build_rows(agencies)
+
+    # Surface ambiguous surface forms that were excluded from the resolver so they
+    # land in migration_history.execution_details and the logs (never drop silently).
+    collisions_payload = [[alias_norm, atype] for (alias_norm, atype) in collisions]
+    if collisions:
+        logger.warning(
+            f"{len(collisions)} alias(es) ambiguo(s) across distinct entities — "
+            f"excluidos de entity_alias (resolvem para NENHUMA entidade, vao para LLM/needs_review): "
+            f"{collisions_payload}"
+        )
+    else:
+        logger.info("Nenhuma colisao de alias entre entidades distintas.")
 
     if dry_run:
         return {
             "agencies": len(agencies),
             "entities_to_insert": len(entity_rows),
             "aliases_to_insert": len(alias_rows),
+            "alias_collisions": collisions_payload,
+            "alias_collisions_dropped": len(collisions),
             "preview": True,
         }
 
@@ -233,6 +283,8 @@ def migrate(conn, dry_run: bool = False) -> dict:
         "agencies": len(agencies),
         "entities_inserted": len(entity_rows),
         "aliases_inserted": len(alias_rows),
+        "alias_collisions": collisions_payload,
+        "alias_collisions_dropped": len(collisions),
         "elapsed_seconds": round(elapsed, 2),
     }
 
