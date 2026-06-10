@@ -60,6 +60,26 @@ features:
     model: "local/textstat"
     compute: "feature-worker"
 
+  content_annotations:
+    version: "1.0"
+    type: array
+    description: >-
+      Lente semântica: offsets determinísticos das menções de entidades no
+      content [{start, end, type, text, canonical_id}], sem aninhamento
+      (longest-match-wins). Derivado de features.entities.
+    model: "local/python"
+    compute: "feature-worker"
+
+  annotations_source_hash:
+    version: "1.0"
+    type: string
+    description: >-
+      Hash de idempotência das entradas de content_annotations (content +
+      surfaces); o feature-worker pula o recálculo quando este hash não muda
+      e content_annotations já existe na linha.
+    model: "local/python"
+    compute: "feature-worker"
+
   # --- Fase 1: Features IA (extensão do enrichment) ---
   sentiment:
     version: "1.0"

@@ -18,11 +18,13 @@ logger = logging.getLogger(__name__)
 MAX_TAG_LENGTH = 100
 
 # Mapeamento de tipo de entidade (news_features.features.entities) → campo Typesense.
-# Tipos não listados (MISC, EVENT, PROGRAM, ...) caem em entity_misc.
+# Tipos não listados (LAW, WORK, PRODUCT, MISC, ...) caem em entity_misc.
 _ENTITY_TYPE_TO_FIELD: dict[str, str] = {
     "ORG": "entity_org",
     "PER": "entity_per",
     "LOC": "entity_loc",
+    "EVENT": "entity_event",
+    "POLICY": "entity_policy",
 }
 
 
@@ -49,8 +51,10 @@ def extract_entity_fields(entities_value: Any) -> dict[str, list[str]]:
         entities_value: Lista de dicts de entidades (ou None / valor inválido).
 
     Returns:
-        Dicionário com as chaves ``entities`` (todos os textos, dedup) e
-        ``entity_org``/``entity_per``/``entity_loc``/``entity_misc`` (por tipo).
+        Dicionário com as chaves ``entities`` (todos os textos, dedup),
+        ``entity_org``/``entity_per``/``entity_loc``/``entity_event``/
+        ``entity_policy``/``entity_misc`` (por tipo) e ``entity_canonical``
+        (lista ordenada e única de ``canonical_id`` não-nulos das menções).
         Chaves com lista vazia são omitidas para não popular campos sem dado.
     """
     # JSONB pode chegar como string (dependendo do driver/adaptador); tenta parsear.
@@ -67,9 +71,12 @@ def extract_entity_fields(entities_value: Any) -> dict[str, list[str]]:
         "entity_org": [],
         "entity_per": [],
         "entity_loc": [],
+        "entity_event": [],
+        "entity_policy": [],
         "entity_misc": [],
     }
     all_texts: list[str] = []
+    canonical_ids: set[str] = set()
 
     for entity in entities_value:
         if not isinstance(entity, dict):
@@ -88,6 +95,10 @@ def extract_entity_fields(entities_value: Any) -> dict[str, list[str]]:
         buckets[field].append(text)
         all_texts.append(text)
 
+        canonical_id = entity.get("canonical_id")
+        if isinstance(canonical_id, str) and canonical_id.strip():
+            canonical_ids.add(canonical_id.strip())
+
     result: dict[str, list[str]] = {}
     combined = _dedup_preserving_order(all_texts)
     if combined:
@@ -96,6 +107,8 @@ def extract_entity_fields(entities_value: Any) -> dict[str, list[str]]:
         deduped = _dedup_preserving_order(texts)
         if deduped:
             result[field] = deduped
+    if canonical_ids:
+        result["entity_canonical"] = sorted(canonical_ids)
 
     return result
 

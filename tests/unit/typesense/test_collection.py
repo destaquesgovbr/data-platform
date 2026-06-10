@@ -49,11 +49,61 @@ class TestCollectionSchema:
     def test_schema_has_entity_fields(self):
         """Schema includes combined + per-type entity fields as facetable string[]."""
         fields = {f["name"]: f for f in COLLECTION_SCHEMA["fields"]}
-        for name in ("entities", "entity_org", "entity_per", "entity_loc", "entity_misc"):
+        for name in (
+            "entities",
+            "entity_org",
+            "entity_per",
+            "entity_loc",
+            "entity_misc",
+            "entity_event",
+            "entity_policy",
+            "entity_canonical",
+        ):
             assert name in fields, f"missing entity field {name}"
             assert fields[name]["type"] == "string[]"
             assert fields[name]["facet"] is True
             assert fields[name]["optional"] is True
+
+    def test_schema_declares_entity_misc(self):
+        """entity_misc must be declared (indexer routes to it; was previously missing)."""
+        field_names = [f["name"] for f in COLLECTION_SCHEMA["fields"]]
+        assert "entity_misc" in field_names
+
+    def test_schema_has_entity_canonical(self):
+        """entity_canonical (deduped canonical_id list) is a facetable optional string[]."""
+        fields = {f["name"]: f for f in COLLECTION_SCHEMA["fields"]}
+        assert "entity_canonical" in fields
+        ec = fields["entity_canonical"]
+        assert ec["type"] == "string[]"
+        assert ec["facet"] is True
+        assert ec["optional"] is True
+
+    def test_update_schema_patches_new_entity_fields_onto_existing(self):
+        """update_schema() additively PATCHes the new entity fields onto a live collection."""
+        mock_client = MagicMock()
+        mock_collection = MagicMock()
+        # Live collection has the old entity set but lacks the 3 new fields.
+        mock_collection.retrieve.return_value = {
+            "fields": [
+                {"name": "unique_id", "type": "string", "facet": True},
+                {"name": "entities", "type": "string[]", "facet": True},
+                {"name": "entity_org", "type": "string[]", "facet": True},
+                {"name": "entity_per", "type": "string[]", "facet": True},
+                {"name": "entity_loc", "type": "string[]", "facet": True},
+                {"name": "entity_misc", "type": "string[]", "facet": True},
+            ]
+        }
+        mock_collection.update.return_value = {}
+        mock_client.collections.__getitem__.return_value = mock_collection
+
+        result = update_schema(mock_client)
+
+        assert "entity_event" in result["added"]
+        assert "entity_policy" in result["added"]
+        assert "entity_canonical" in result["added"]
+        # Pre-existing fields are not re-added.
+        assert "entity_misc" in result["already_exists"]
+        assert "entity_org" in result["already_exists"]
 
     def test_schema_has_view_count_sortable(self):
         """view_count is an optional, sortable int32."""

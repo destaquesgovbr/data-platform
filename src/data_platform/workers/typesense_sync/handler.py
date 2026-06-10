@@ -55,7 +55,10 @@ _GRAPHQL_TO_SNAKE: dict[str, str] = {
 }
 
 # Feature keys (dentro do JSON `features`) que prepare_document consome diretamente.
-# entities → lista de {text, type, count}; view_count → int.
+# entities → lista de {text, type, count, canonical_id?}; view_count → int.
+# O blob `features` é exposto inteiro pela query GraphQL (e por `nf.features->'entities'`
+# no caminho PostgreSQL), portanto `canonical_id` — quando já canonicalizado — chega
+# junto sem precisar de seleção extra. extract_entity_fields() lê esse campo.
 _FEATURES_PASSTHROUGH: tuple[str, ...] = ("entities", "view_count")
 
 

@@ -161,16 +161,66 @@ class TestExtractEntityFields:
         result = extract_entity_fields(entities)
         assert result["entities"] == ["Ministério da Saúde", "Lula", "Brasília"]
 
-    def test_misc_event_program_go_to_entity_misc(self):
-        """MISC, EVENT and PROGRAM all fall into entity_misc."""
+    def test_event_routes_to_entity_event(self):
+        """EVENT entities go to the dedicated entity_event field."""
+        entities = [{"text": "Copa do Mundo", "type": "EVENT"}]
+        result = extract_entity_fields(entities)
+        assert result["entity_event"] == ["Copa do Mundo"]
+        assert "entity_misc" not in result
+
+    def test_policy_routes_to_entity_policy(self):
+        """POLICY entities go to the dedicated entity_policy field."""
+        entities = [{"text": "Bolsa Família", "type": "POLICY"}]
+        result = extract_entity_fields(entities)
+        assert result["entity_policy"] == ["Bolsa Família"]
+        assert "entity_misc" not in result
+
+    def test_law_work_product_go_to_entity_misc(self):
+        """LAW/WORK/PRODUCT (and unsanctioned types) bucket into entity_misc."""
         entities = [
-            {"text": "Bolsa Família", "type": "PROGRAM"},
-            {"text": "Copa do Mundo", "type": "EVENT"},
+            {"text": "Lei Maria da Penha", "type": "LAW"},
+            {"text": "Obra X", "type": "WORK"},
+            {"text": "Produto Y", "type": "PRODUCT"},
             {"text": "Algo", "type": "MISC"},
         ]
         result = extract_entity_fields(entities)
-        assert result["entity_misc"] == ["Bolsa Família", "Copa do Mundo", "Algo"]
+        assert result["entity_misc"] == [
+            "Lei Maria da Penha",
+            "Obra X",
+            "Produto Y",
+            "Algo",
+        ]
         assert "entity_org" not in result
+
+    def test_entity_canonical_collects_sorted_unique_ids(self):
+        """entity_canonical = sorted unique non-null canonical_id values."""
+        entities = [
+            {"text": "Lula", "type": "PER", "canonical_id": "Q8765"},
+            {"text": "MEC", "type": "ORG", "canonical_id": "dgb_mec"},
+            {"text": "Ministério da Educação", "type": "ORG", "canonical_id": "dgb_mec"},
+            {"text": "Anvisa", "type": "ORG"},  # no canonical_id
+            {"text": "Saúde", "type": "ORG", "canonical_id": None},  # null
+        ]
+        result = extract_entity_fields(entities)
+        assert result["entity_canonical"] == ["Q8765", "dgb_mec"]
+
+    def test_entity_canonical_absent_when_no_canonical_ids(self):
+        """entity_canonical is omitted when no mention carries a canonical_id."""
+        entities = [
+            {"text": "Anvisa", "type": "ORG"},
+            {"text": "Lula", "type": "PER", "canonical_id": None},
+        ]
+        result = extract_entity_fields(entities)
+        assert "entity_canonical" not in result
+
+    def test_entity_canonical_ignores_non_string_ids(self):
+        """Non-string canonical_id values are ignored."""
+        entities = [
+            {"text": "Anvisa", "type": "ORG", "canonical_id": 123},
+            {"text": "Lula", "type": "PER", "canonical_id": "Q8765"},
+        ]
+        result = extract_entity_fields(entities)
+        assert result["entity_canonical"] == ["Q8765"]
 
     def test_dedup_preserves_order(self):
         """Duplicate texts are removed, first-seen order preserved."""
