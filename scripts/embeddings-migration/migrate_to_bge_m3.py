@@ -332,6 +332,11 @@ def bulk_upload_to_postgres(
 
             try:
                 for _, row in batch.iterrows():
+                    # Convert embedding to list if it's a numpy array
+                    embedding = row["embedding"]
+                    if hasattr(embedding, "tolist"):
+                        embedding = embedding.tolist()
+
                     cursor.execute(
                         """
                         UPDATE news
@@ -340,7 +345,7 @@ def bulk_upload_to_postgres(
                             embedding_generated_at = NOW()
                         WHERE id = %s
                         """,
-                        (row["embedding"], row["id"]),
+                        (embedding, row["id"]),
                     )
 
                 conn.commit()
