@@ -293,11 +293,22 @@ def prepare_document(row: pd.Series) -> dict[str, Any]:
         for field_name, values in extract_entity_fields(row["entities"]).items():
             doc[field_name] = values
 
-    # Campo de embedding (vetor de floats para busca semântica)
+    # Campos de embedding (dual durante migração BGE-M3)
+    # Legacy: 768-dim mpnet
+    if "content_embedding_legacy" in row and row["content_embedding_legacy"] is not None:
+        embedding_legacy = parse_embedding(row["content_embedding_legacy"])
+        if embedding_legacy:
+            doc["content_embedding_legacy"] = embedding_legacy
+
+    # Current: 1024-dim BGE-M3 (primary)
     if "content_embedding" in row and row["content_embedding"] is not None:
         embedding = parse_embedding(row["content_embedding"])
         if embedding:
             doc["content_embedding"] = embedding
+
+    # Model version tracking
+    if "embedding_model_version" in row and row["embedding_model_version"] is not None:
+        doc["embedding_model_version"] = row["embedding_model_version"]
 
     return doc
 
