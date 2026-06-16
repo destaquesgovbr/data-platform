@@ -17,7 +17,7 @@ NC='\033[0m'
 # Configuração
 DB_NAME="govbrnews_test"
 DB_USER="${USER}"
-DUMP_FILE="../data_dump/Cloud_SQL_Export_2026-06-15 (16_44_06).sql"
+DUMP_FILE="../../data_dump/Cloud_SQL_Export_2026-06-15 (16_44_06).sql"
 
 echo "📋 Configuração:"
 echo "  Database: $DB_NAME"
@@ -117,7 +117,7 @@ echo ""
 
 # Aplicar migration 004
 echo "🔄 Aplicando Migration 004 (BGE-M3)..."
-psql "$DB_NAME" < ../migrations/004_add_bge_m3_columns.sql
+psql "$DB_NAME" < ../../scripts/migrations/004_add_bge_m3_columns.sql
 
 echo ""
 echo -e "${GREEN}✅ Migration aplicada${NC}"
