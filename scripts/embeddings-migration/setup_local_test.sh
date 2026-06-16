@@ -16,8 +16,18 @@ NC='\033[0m'
 
 # Configuração
 DB_NAME="govbrnews_test"
-DB_USER="${USER}"
 DUMP_FILE="../../data_dump/Cloud_SQL_Export_2026-06-15 (16_44_06).sql"
+
+# Detectar usuário PostgreSQL disponível
+if psql -U "$USER" -l > /dev/null 2>&1; then
+    DB_USER="$USER"
+elif psql -U postgres -l > /dev/null 2>&1; then
+    DB_USER="postgres"
+else
+    echo -e "${RED}❌ Nenhum usuário PostgreSQL encontrado${NC}"
+    echo "Crie um usuário com: sudo -u postgres createuser -s $USER"
+    exit 1
+fi
 
 echo "📋 Configuração:"
 echo "  Database: $DB_NAME"
@@ -49,21 +59,21 @@ if psql -lqt | cut -d \| -f 1 | grep -qw "$DB_NAME"; then
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo "Dropando banco existente..."
-        dropdb "$DB_NAME" || true
-        createdb "$DB_NAME"
+        dropdb -U "$DB_USER" "$DB_NAME" || true
+        createdb -U "$DB_USER" "$DB_NAME"
         echo -e "${GREEN}✅ Banco recriado${NC}"
     else
         echo "Usando banco existente"
     fi
 else
-    createdb "$DB_NAME"
+    createdb -U "$DB_USER" "$DB_NAME"
     echo -e "${GREEN}✅ Banco $DB_NAME criado${NC}"
 fi
 echo ""
 
 # Ativar pgvector
 echo "🔧 Ativando extensão pgvector..."
-psql "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS vector;" > /dev/null
+psql -U "$DB_USER" "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS vector;" > /dev/null
 echo -e "${GREEN}✅ pgvector ativado${NC}"
 echo ""
 
@@ -73,7 +83,7 @@ echo "  Dump size: $(du -h "$DUMP_FILE" | cut -f1)"
 echo ""
 
 # Mostrar progresso
-pv "$DUMP_FILE" | psql "$DB_NAME" > /dev/null 2>&1 &
+pv "$DUMP_FILE" | psql -U "$DB_USER" "$DB_NAME" > /dev/null 2>&1 &
 PID=$!
 
 # Aguardar conclusão
@@ -89,7 +99,7 @@ echo ""
 
 # Verificar dados
 echo "🔍 Verificando dados restaurados..."
-psql "$DB_NAME" << 'EOF'
+psql -U "$DB_USER" "$DB_NAME" << 'EOF'
 \echo '  Tables:'
 SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;
 
@@ -117,7 +127,7 @@ echo ""
 
 # Aplicar migration 004
 echo "🔄 Aplicando Migration 004 (BGE-M3)..."
-psql "$DB_NAME" < ../../scripts/migrations/004_add_bge_m3_columns.sql
+psql -U "$DB_USER" "$DB_NAME" < ../../scripts/migrations/004_add_bge_m3_columns.sql
 
 echo ""
 echo -e "${GREEN}✅ Migration aplicada${NC}"
@@ -125,7 +135,7 @@ echo ""
 
 # Verificar schema atualizado
 echo "🔍 Verificando schema atualizado..."
-psql "$DB_NAME" << 'EOF'
+psql -U "$DB_USER" "$DB_NAME" << 'EOF'
 \echo '  Colunas da tabela news relacionadas a embeddings:'
 SELECT
     column_name,
