@@ -109,6 +109,15 @@ CREATE INDEX IF NOT EXISTS idx_news_published_at ON news(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_news_agency_id ON news(agency_id);
 CREATE INDEX IF NOT EXISTS idx_news_agency_key ON news(agency_key);
 
+-- news_features é criada pela migração 004 (que aqui fica stampada, não executada).
+-- O baseline precisa dela porque migrações posteriores (ex.: 018 indexa
+-- features->'entities'; Fase 6 deriva dela) assumem a tabela existente.
+CREATE TABLE IF NOT EXISTS news_features (
+    unique_id VARCHAR(120) PRIMARY KEY REFERENCES news(unique_id) ON DELETE CASCADE,
+    features JSONB NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS schema_version (
     version VARCHAR(20) PRIMARY KEY,
     description TEXT,
