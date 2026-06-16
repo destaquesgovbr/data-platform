@@ -59,6 +59,7 @@ jobs:
           mkdir -p /tmp/plugins/data_platform/typesense
           cp src/data_platform/jobs/__init__.py /tmp/plugins/data_platform/jobs/
           cp -r src/data_platform/jobs/bigquery /tmp/plugins/data_platform/jobs/
+          cp -r src/data_platform/jobs/graph /tmp/plugins/data_platform/jobs/
           cp -r src/data_platform/jobs/integrity /tmp/plugins/data_platform/jobs/
           cp -r src/data_platform/jobs/similarity /tmp/plugins/data_platform/jobs/
           cp -r src/data_platform/jobs/thumbnail /tmp/plugins/data_platform/jobs/
