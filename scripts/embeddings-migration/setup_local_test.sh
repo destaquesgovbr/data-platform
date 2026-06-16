@@ -82,19 +82,27 @@ echo "📦 Restaurando dump (isso pode demorar 10-15 minutos)..."
 echo "  Dump size: $(du -h "$DUMP_FILE" | cut -f1)"
 echo ""
 
-# Mostrar progresso
-pv "$DUMP_FILE" | psql -U "$DB_USER" "$DB_NAME" > /dev/null 2>&1 &
-PID=$!
+# Restaurar (com ou sem pv)
+if command -v pv &> /dev/null; then
+    # Com progress bar
+    pv "$DUMP_FILE" | psql -U "$DB_USER" "$DB_NAME" > /dev/null 2>&1
+    RESTORE_STATUS=$?
+else
+    # Sem progress bar (mas funciona!)
+    echo "  (pv não instalado, restaurando sem progress bar...)"
+    psql -U "$DB_USER" "$DB_NAME" < "$DUMP_FILE" > /dev/null 2>&1
+    RESTORE_STATUS=$?
+fi
 
-# Aguardar conclusão
-while kill -0 $PID 2>/dev/null; do
-    sleep 5
-    echo -n "."
-done
-wait $PID
-
-echo ""
-echo -e "${GREEN}✅ Dump restaurado${NC}"
+if [ $RESTORE_STATUS -eq 0 ]; then
+    echo ""
+    echo -e "${GREEN}✅ Dump restaurado com sucesso${NC}"
+else
+    echo ""
+    echo -e "${RED}❌ Erro ao restaurar dump (exit code: $RESTORE_STATUS)${NC}"
+    echo "Tente manualmente: psql -U $DB_USER $DB_NAME < \"$DUMP_FILE\""
+    exit 1
+fi
 echo ""
 
 # Verificar dados
