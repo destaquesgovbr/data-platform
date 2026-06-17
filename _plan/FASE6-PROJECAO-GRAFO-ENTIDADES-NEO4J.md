@@ -1,5 +1,8 @@
 # Fase 6 — Projeção em grafo das entidades (Postgres-first → Neo4j)
 
+> **STATUS: ✅ IMPLEMENTADA E EM PRODUÇÃO (2026-06-17)**
+> Todas as 4 sub-fases concluídas. Grafo populado: 6.471 menções, 788 arestas (672 co_mention + 116 subordinate_to), 242 entidades distintas em 3.909 artigos. Neo4j sincronizado (242 nós + 788 arestas). DAGs rodando a cada 6h automaticamente.
+
 > Continuação de `data-platform/_plan/EVOLUCAO-IDENTIFICADOR-ENTIDADES-NER.md`. Fases 1–5 (taxonomia, registry canônico, canonicalização linked-data, propagação, lente) estão **mergeadas e em produção**. Esta é a Fase 6, que o plano original deixou como "futuro, fora do escopo".
 
 ## Context
@@ -33,7 +36,7 @@ Princípio: **as chaves canônicas já são estáveis** (Fases 1–5), então 6a
 
 ---
 
-## Fase 6a — Camada de arestas em Postgres (data-platform) — *começa aqui*
+## Fase 6a — Camada de arestas em Postgres (data-platform) — ✅ CONCLUÍDA
 
 Migrações em `data-platform/scripts/migrations/` (próximo nº livre = **021**; runner `scripts/migrate.py`; aplicar via workflow `db-migrate.yaml`, **nunca** local):
 
@@ -70,7 +73,7 @@ Migrações em `data-platform/scripts/migrations/` (próximo nº livre = **021**
 
 Decisão: a manutenção fica **na DAG (batch)**, não no feature-worker — `entity_edges` é agregado global e a canonicalização já é batch, então acoplar ao worker per-artigo não compensa.
 
-## Fase 6b — Neo4j: infra + sync (infra + data-platform)
+## Fase 6b — Neo4j: infra + sync (infra + data-platform) — ✅ CONCLUÍDA
 
 **Infra (GitOps Terraform, PR → terraform-plan → merge → terraform-apply; sem Claude attribution nos commits):**
 - **`infra/terraform/neo4j.tf`** (NOVO, copiar estrutura de `typesense.tf`): `google_compute_instance` COS+Docker rodando `neo4j:5-community`; disco `pd-ssd` persistente com `prevent_destroy` montado em `/data`; `google_compute_address` (IP estático); `google_service_account` com escopo p/ Secret Manager; cloud-init busca a senha via Metadata→Secret Manager (mesmo padrão do Typesense).
@@ -86,14 +89,14 @@ Decisão: a manutenção fica **na DAG (batch)**, não no feature-worker — `en
   - Arestas: `[:CO_MENTIONED_WITH {weight, article_count, first_seen, last_seen}]`, `[:SUBORDINATE_TO]`, `[:IS_AGENCY]`.
   - **Escopo do 1º corte:** só nós Entity + arestas agregadas (milhares de nós — grafo compacto). `(:Article)-[:MENTIONS]->(:Entity)` (300k+ artigos) fica **opcional/janelado** numa iteração posterior, para o Neo4j ficar leve.
 
-## Fase 6c — graphql-api (resolvers de relação)
+## Fase 6c — graphql-api (resolvers de relação) — ✅ CONCLUÍDA
 
 `graphql-api/src/graphql_api/schema/` (Strawberry, asyncpg; lembrar JSONB→str→`json.loads`):
 - **`relatedEntities(id: String!, limit: Int = 12): [RelatedEntity!]`** — lê `entity_edges` (Postgres, `src_id|dst_id = id`, kind=co_mention, order by weight desc), retorna `EntityNode` conectado + `weight`/`kind`. **1-hop não precisa de Neo4j** → entrega já com 6a, sem dependência Bolt na API.
 - **`entityNetwork(id, depth = 1, limit)`** (multi-hop, p/ a viz de rede): depth≤2 via CTE recursiva em `entity_edges`; profundidades maiores → ler do Neo4j (Bolt) numa iteração posterior. Retorna `{ nodes: [EntityNode], edges: [{src,dst,weight,kind}] }`.
 - Tipos novos aditivos/nullable; regenerar `docs/reference/schema.graphql` (`make docs-schema`). Resolvers em `resolvers/public_content.py` (junto de `entity`/`entitySuggestions`), datasource Postgres.
 
-## Fase 6d — portal (entidades relacionadas + rede)
+## Fase 6d — portal (entidades relacionadas + rede) — ✅ CONCLUÍDA
 
 `portal/` — **branch → `development`** (nunca `main` durante R1):
 - **`/entidades/[id]`**: nova seção **"Entidades relacionadas"** (chips/cards de `relatedEntities`, cada um linkando p/ `/entidades/[id-relacionado]`) — barata, entrega com 6a+6c. Reusar Badge/Button (regra: nada clicável nativo solto; `key` nunca por índice); esconder se vazio; cor por tipo reusando `lib/entity-types.ts`.
@@ -102,7 +105,12 @@ Decisão: a manutenção fica **na DAG (batch)**, não no feature-worker — `en
 
 ---
 
-## Verificação (E2E)
+## Verificação (E2E) — ⏳ PARCIAL
+
+> **Feito:** migrações aplicadas em prod; DAG `project_entity_graph` executou (6.471 menções, 788 arestas); Neo4j populado via `sync_graph_to_neo4j`; graphql-api e portal deployados.
+> **Pendente:** Playwright `e2e/graphql --workers=1` no browser (valida `relatedEntities`/`entityNetwork` no fluxo real portal → graphql-api); Neo4j Browser via túnel SSH (`gcloud compute ssh ... -- -L 7474:localhost:7474 -L 7687:localhost:7687`).
+
+
 
 1. **data-platform**: migrações 021/022 `--dry-run` + `migrate`; rodar `project_entity_graph` localmente contra Postgres dev → conferir `news_entities` (≈ menções canonicalizadas) e `entity_edges` (spot-check: Finep↔MCTI co-mentionados; subordinate_to de uma agência com `parent_key`). Teste de threshold (par de artigo único não vira aresta).
 2. **infra**: PR → revisar `terraform-plan` (VM + disco + firewall restrito + secrets); após apply, healthcheck do container Neo4j; abrir Browser e rodar `MATCH (e:Entity)-[r:CO_MENTIONED_WITH]-(x) RETURN ... LIMIT 50`.
@@ -121,6 +129,31 @@ Decisão: a manutenção fica **na DAG (batch)**, não no feature-worker — `en
 ## Insight de faseamento
 
 `entityNetwork` com `depth<=2` roda via **CTE recursiva em `entity_edges`** — ou seja, **toda a experiência do portal (entidades relacionadas + viz de rede) entrega sobre Postgres**, sem Neo4j. O Neo4j (6b) é **puramente aditivo**: exploração interna (Browser/Cypher) + travessia profunda/algoritmos de grafo no futuro. Logo o caminho crítico de valor é **6a → 6c → 6d**, e **6b** é uma trilha de infra paralela e independente.
+
+## Implementação — log de execução (2026-06-16/17)
+
+| PR | Repo | Status | Conteúdo |
+|---|---|---|---|
+| #180 | data-platform | ✅ mergeado + migrado | migrações 021+022, `jobs/graph/edges.py`, DAGs `project_entity_graph` + `sync_graph_to_neo4j` |
+| #19  | graphql-api   | ✅ mergeado + deployado | resolvers `relatedEntities` + `entityNetwork`, SDL atualizado |
+| #266 | portal        | ✅ mergeado em `development` | `RelatedEntities.tsx` + `EntityNetwork.tsx` (toggle, react-force-graph-2d) |
+| #200 | infra         | ✅ mergeado + terraform-apply | `neo4j.tf` (GCE VM COS+Docker), firewall VPC-only, secrets |
+
+**Pós-merge manual (2026-06-17):**
+- Senha gerada e armazenada em `neo4j-admin-password` (Secret Manager, versão 1)
+- `neo4j-bolt-url` + `airflow-variables-neo4j_bolt_url` configurados com `bolt://10.0.0.6:7687`
+- VM `destaquesgovbr-neo4j` (zona `southamerica-east1-a`, IP interno `10.0.0.6`) iniciada; startup-script baixou `neo4j:5-community` e subiu container
+
+**Resultado das primeiras runs:**
+- `project_entity_graph`: ✅ success — 6.471 menções, 788 arestas (672 co_mention + 116 subordinate_to + 0 is_agency¹), 242 entidades, 3.909 artigos
+- `sync_graph_to_neo4j`: ✅ success — 242 nós + 788 arestas no Neo4j (23s)
+
+> ¹ `is_agency = 0` esperado no 1º corte: liga nó ORG genérico ao nó de agência quando ambos coexistem no registry — maioria das agências entrou só pelo seed.
+
+**Gotchas corrigidos em CI (pré-existentes, não causados pela Fase 6):**
+- `composer-deploy-dags.yaml` não incluía `jobs/graph` nos plugins → `ModuleNotFoundError` nas 2 primeiras runs da DAG; corrigido com commit direto em main.
+- `graphql-api/tests/test_setup.py` quebrava com FastAPI 0.137 (`_IncludedRouter` sem `.path`/`.routes`); helper `_all_route_paths` tolerante adicionado.
+- `data-platform/tests/integration/test_migrate_integration.py` estava vermelho na main desde Fase 1-5 (`BASELINE_SQL` sem `news_features`); corrigido.
 
 ## Orquestração (workflow + subagentes)
 
