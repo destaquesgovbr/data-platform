@@ -89,6 +89,7 @@ def ner_backfill():
     # Formato do overrides conforme RunJobRequest.Overrides (proto-plus, snake_case):
     # passado direto ao hook -> RunJobRequest(overrides=...). Sobrescreve os args do
     # unico container do Job; os demais campos (env, imagem) vem do Job no Terraform.
+    # NOTA: clear_args e args sao mutuamente exclusivos na API v2 — usar apenas args.
     CloudRunExecuteJobOperator(
         task_id="run_ner_backfill",
         project_id=project_id,
@@ -98,7 +99,6 @@ def ner_backfill():
             "container_overrides": [
                 {
                     "args": ["--limit", run_limit, "--order", order],
-                    "clear_args": True,
                 }
             ],
         },
