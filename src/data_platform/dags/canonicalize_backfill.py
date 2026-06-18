@@ -39,13 +39,14 @@ DEFAULT_REGION = "southamerica-east1"
 # Janela rolante ampla: cobre o acervo. O governador de cota e o teto real; --since
 # evita reprocessar fora da janela e --limit e um guard secundario por execucao.
 DEFAULT_SINCE = "2018-01-01"
-DEFAULT_RUN_LIMIT = "2000"
+DEFAULT_RUN_LIMIT = "5000"
+DEFAULT_WORKERS = "10"
 
 
 @dag(
     dag_id="canonicalize_backfill",
     description="Backfill da canonicalizacao de entidades (Step B) via Cloud Run Job, sob governador de cota",
-    schedule="0 2 * * *",  # diario as 02:00 (defasado do ner_backfill as 04:00)
+    schedule="0 */6 * * *",  # 4x/dia (00:00, 06:00, 12:00, 18:00); governador garante budget; runs extras = retry
     start_date=datetime(2025, 1, 1),
     catchup=False,
     max_active_runs=1,
@@ -54,7 +55,7 @@ DEFAULT_RUN_LIMIT = "2000"
         "owner": "data-platform",
         "retries": 1,
         "retry_delay": timedelta(minutes=5),
-        "execution_timeout": timedelta(minutes=70),
+        "execution_timeout": timedelta(minutes=130),
     },
     doc_md="""
     ### Backfill da canonicalizacao de entidades (Step B)
@@ -85,6 +86,7 @@ def canonicalize_backfill():
     job_name = Variable.get("canon_job_name", default_var=DEFAULT_JOB_NAME)
     since = Variable.get("canon_backfill_since", default_var=DEFAULT_SINCE)
     run_limit = Variable.get("canon_run_limit", default_var=DEFAULT_RUN_LIMIT)
+    workers = Variable.get("canon_workers", default_var=DEFAULT_WORKERS)
 
     # Formato do overrides conforme RunJobRequest.Overrides (proto-plus, snake_case):
     # passado direto ao hook -> RunJobRequest(overrides=...). Sobrescreve os args do
@@ -98,7 +100,7 @@ def canonicalize_backfill():
         overrides={
             "container_overrides": [
                 {
-                    "args": ["--since", since, "--limit", run_limit],
+                    "args": ["--since", since, "--limit", run_limit, "--workers", workers],
                 }
             ],
         },
