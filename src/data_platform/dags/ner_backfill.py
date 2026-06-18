@@ -37,14 +37,15 @@ DEFAULT_REGION = "southamerica-east1"
 
 # --limit e guard secundario por execucao (governador de cota e o teto real).
 # --order asc processa primeiro o acervo mais antigo (nunca NERado).
-DEFAULT_RUN_LIMIT = "2000"
+DEFAULT_RUN_LIMIT = "5000"
 DEFAULT_ORDER = "desc"
+DEFAULT_WORKERS = "10"
 
 
 @dag(
     dag_id="ner_backfill",
     description="Backfill do NER historico (~314k artigos) via Cloud Run Job, sob governador de cota",
-    schedule="0 4 * * *",  # diario as 04:00 (defasado do canonicalize_backfill as 02:00)
+    schedule="0 2-23/6 * * *",  # 4x/dia offset 2h do canon (02:00, 08:00, 14:00, 20:00)
     start_date=datetime(2025, 1, 1),
     catchup=False,
     max_active_runs=1,
@@ -53,7 +54,7 @@ DEFAULT_ORDER = "desc"
         "owner": "data-platform",
         "retries": 1,
         "retry_delay": timedelta(minutes=5),
-        "execution_timeout": timedelta(minutes=70),
+        "execution_timeout": timedelta(minutes=130),
     },
     doc_md="""
     ### Backfill do NER historico (~314k artigos sem NER)
@@ -85,6 +86,7 @@ def ner_backfill():
     job_name = Variable.get("ner_job_name", default_var=DEFAULT_JOB_NAME)
     run_limit = Variable.get("ner_run_limit", default_var=DEFAULT_RUN_LIMIT)
     order = Variable.get("ner_backfill_order", default_var=DEFAULT_ORDER)
+    workers = Variable.get("ner_workers", default_var=DEFAULT_WORKERS)
 
     # Formato do overrides conforme RunJobRequest.Overrides (proto-plus, snake_case):
     # passado direto ao hook -> RunJobRequest(overrides=...). Sobrescreve os args do
@@ -98,7 +100,7 @@ def ner_backfill():
         overrides={
             "container_overrides": [
                 {
-                    "args": ["--limit", run_limit, "--order", order],
+                    "args": ["--limit", run_limit, "--order", order, "--workers", workers],
                 }
             ],
         },
