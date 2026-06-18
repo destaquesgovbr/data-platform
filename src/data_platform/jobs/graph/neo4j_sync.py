@@ -113,6 +113,19 @@ _MERGE_EDGES_CYPHER_TMPL = """
         r.last_seen = row.last_seen
 """
 
+# Cleanup de nos obsoletos: o MERGE acima nunca remove nos que sairam do Postgres
+# (ex.: o source de um merge/dedup, ou a promocao Wikidata-wins do add_alias que
+# funde dgb_->QID continuamente no canon job). Sem este passo, o Neo4j acumula
+# nos stale com arestas mortas. Remove todo :Entity cujo entity_id nao esta no
+# conjunto corrente do Postgres. `count(*)` apos DETACH DELETE conta as linhas
+# processadas (idioma valido no Cypher).
+DELETE_STALE_NODES_CYPHER = """
+    MATCH (e:Entity)
+    WHERE NOT e.entity_id IN $valid_ids
+    DETACH DELETE e
+    RETURN count(*) AS deleted
+"""
+
 
 def _chunked(items: list, size: int):
     """Divide uma lista em lotes de tamanho `size`."""
@@ -192,6 +205,21 @@ def sync_graph_to_neo4j(db_url: str, bolt_config: dict) -> dict:
                     session.run(cypher, rows=batch)
                     count += len(batch)
                 result["edges"][rel_type] = count
+
+            # Cleanup de nos stale (nao existem mais no Postgres). GUARD: so limpa
+            # se houve nos sincronizados — um fetch_nodes vazio (erro/transitorio)
+            # NUNCA deve zerar o grafo.
+            if nodes:
+                valid_ids = [n["entity_id"] for n in nodes]
+                rec = session.run(
+                    DELETE_STALE_NODES_CYPHER, valid_ids=valid_ids
+                ).single()
+                result["deleted_stale"] = rec["deleted"] if rec else 0
+            else:
+                logger.warning(
+                    "fetch_nodes vazio — pulando cleanup de nos stale (protecao)"
+                )
+                result["deleted_stale"] = 0
     finally:
         driver.close()
 
