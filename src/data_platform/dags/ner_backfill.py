@@ -38,7 +38,7 @@ DEFAULT_REGION = "southamerica-east1"
 # --limit e guard secundario por execucao (governador de cota e o teto real).
 # --order asc processa primeiro o acervo mais antigo (nunca NERado).
 DEFAULT_RUN_LIMIT = "2000"
-DEFAULT_ORDER = "asc"
+DEFAULT_ORDER = "desc"
 
 
 @dag(
