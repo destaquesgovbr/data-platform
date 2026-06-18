@@ -121,13 +121,29 @@ COLLECTION_SCHEMA: dict[str, Any] = {
         {"name": "entity_canonical", "type": "string[]", "facet": True, "optional": True},
         # Engagement (from news_features.features.view_count)
         {"name": "view_count", "type": "int32", "facet": False, "optional": True, "sort": True},
-        # Embedding field for semantic search (768 dimensions - BGE-M3)
+        # Embedding fields for semantic search (dual during migration)
+        # Legacy: 768-dim mpnet (will be removed after migration)
         {
-            "name": "content_embedding",
+            "name": "content_embedding_legacy",
             "type": "float[]",
             "num_dim": 768,
             "optional": True,
             "index": True,
+        },
+        # Current: 1024-dim BGE-M3 (primary embedding)
+        {
+            "name": "content_embedding",
+            "type": "float[]",
+            "num_dim": 1024,
+            "optional": True,
+            "index": True,
+        },
+        # Model version tracking
+        {
+            "name": "embedding_model_version",
+            "type": "string",
+            "facet": True,
+            "optional": True,
         },
     ],
     "default_sorting_field": "published_at",

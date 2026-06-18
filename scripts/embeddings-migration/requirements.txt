@@ -1,0 +1,22 @@
+# Dependências para migração de embeddings
+# Instalar com: pip install -r requirements.txt
+
+# Core
+pandas>=2.0.0
+pyarrow>=14.0.0  # Para Parquet
+numpy>=1.24.0
+
+# ML
+sentence-transformers>=3.3.0
+torch>=2.0.0  # GPU support
+transformers>=4.30.0
+
+# Database
+psycopg2-binary>=2.9.9
+
+# CLI
+tqdm>=4.66.0  # Progress bars
+
+# Optional (development)
+# jupyter>=1.0.0
+# ipdb>=0.13.0

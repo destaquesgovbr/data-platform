@@ -76,8 +76,10 @@ class News(BaseModel):
     agency_key: Optional[str] = None
     agency_name: Optional[str] = None
 
-    # Embeddings (Phase 4.7)
-    content_embedding: Optional[List[float]] = None  # 768-dimensional vector
+    # Embeddings (Phase 4.7 + BGE-M3 Migration)
+    content_embedding_legacy: Optional[List[float]] = None  # 768-dim (mpnet) - will be removed post-migration
+    content_embedding: Optional[List[float]] = None  # 1024-dim (BGE-M3) - current
+    embedding_model_version: Optional[str] = None  # 'mpnet' | 'bge-m3'
     embedding_generated_at: Optional[datetime] = None
 
     class Config:
@@ -108,8 +110,10 @@ class NewsInsert(BaseModel):
     extracted_at: Optional[datetime] = None
     agency_key: Optional[str] = None
     agency_name: Optional[str] = None
-    content_embedding: Optional[List[float]] = None  # 768-dimensional vector (Phase 4.7)
-    embedding_generated_at: Optional[datetime] = None  # Phase 4.7
+    content_embedding_legacy: Optional[List[float]] = None  # 768-dim (mpnet) - legacy
+    content_embedding: Optional[List[float]] = None  # 1024-dim (BGE-M3) - current
+    embedding_model_version: Optional[str] = None  # 'mpnet' | 'bge-m3'
+    embedding_generated_at: Optional[datetime] = None
 
 
 class NewsFeatures(BaseModel):
