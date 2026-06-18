@@ -14,6 +14,7 @@ import pytest
 from data_platform.jobs.graph.neo4j_sync import (
     _MERGE_EDGES_CYPHER_TMPL,
     BATCH_SIZE,
+    DELETE_STALE_NODES_CYPHER,
     EDGE_KIND_TO_REL,
     MERGE_NODES_CYPHER,
     _chunked,
@@ -69,6 +70,13 @@ class TestCypherInvariants:
     def test_template_de_aresta_injeta_o_rel_type(self):
         cypher = _MERGE_EDGES_CYPHER_TMPL.format(rel_type="SUBORDINATE_TO")
         assert "[r:SUBORDINATE_TO]" in cypher
+
+    def test_cleanup_remove_nos_fora_do_conjunto_valido(self):
+        """O cleanup deleta :Entity cujo entity_id NAO esta no conjunto corrente."""
+        norm = _normalize(DELETE_STALE_NODES_CYPHER)
+        assert "match (e:entity)" in norm
+        assert "where not e.entity_id in $valid_ids" in norm
+        assert "detach delete e" in norm
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +202,58 @@ class TestSyncOrchestration:
         assert constraint_calls, "deve criar CONSTRAINT entity_id IS UNIQUE"
 
         driver.close.assert_called_once()
+
+    def test_cleanup_deleta_nos_stale_com_valid_ids(self):
+        """Após o MERGE, roda o DELETE de nós stale com os entity_ids correntes."""
+        from data_platform.jobs.graph import neo4j_sync
+
+        session = MagicMock()
+        session.run.return_value.single.return_value = {"deleted": 4}
+        driver = MagicMock()
+        driver.session.return_value.__enter__.return_value = session
+
+        nodes = [
+            {"entity_id": "Q1", "name": "A", "type": "ORG", "wikidata_id": "Q1", "agency_key": None},
+            {"entity_id": "Q2", "name": "B", "type": "PER", "wikidata_id": None, "agency_key": None},
+        ]
+
+        patcher, _ = self._install_fake_neo4j(driver)
+        with patcher, patch.object(neo4j_sync, "fetch_nodes", return_value=nodes), patch.object(
+            neo4j_sync, "fetch_edges", return_value=[]
+        ):
+            result = neo4j_sync.sync_graph_to_neo4j(
+                "postgresql://x", {"url": "bolt://x:7687", "password": "p"}
+            )
+
+        # achou a chamada de DELETE com valid_ids = ids dos nós sincronizados
+        delete_calls = [
+            c for c in session.run.call_args_list if "DETACH DELETE" in str(c.args[0])
+        ]
+        assert len(delete_calls) == 1
+        assert delete_calls[0].kwargs["valid_ids"] == ["Q1", "Q2"]
+        assert result["deleted_stale"] == 4
+
+    def test_cleanup_pulado_quando_fetch_nodes_vazio(self):
+        """GUARD: fetch_nodes vazio NUNCA dispara o DELETE (não zera o grafo)."""
+        from data_platform.jobs.graph import neo4j_sync
+
+        session = MagicMock()
+        driver = MagicMock()
+        driver.session.return_value.__enter__.return_value = session
+
+        patcher, _ = self._install_fake_neo4j(driver)
+        with patcher, patch.object(neo4j_sync, "fetch_nodes", return_value=[]), patch.object(
+            neo4j_sync, "fetch_edges", return_value=[]
+        ):
+            result = neo4j_sync.sync_graph_to_neo4j(
+                "postgresql://x", {"url": "bolt://x", "password": "p"}
+            )
+
+        delete_calls = [
+            c for c in session.run.call_args_list if "DETACH DELETE" in str(c.args[0])
+        ]
+        assert delete_calls == []
+        assert result["deleted_stale"] == 0
 
     def test_driver_fechado_mesmo_com_erro(self):
         from data_platform.jobs.graph import neo4j_sync
