@@ -105,8 +105,11 @@ class BGE_M3_Migrator:
 
         Lógica:
         1. Se tem summary: title + summary
-        2. Senão, se tem content: title + primeiros 500 chars
+        2. Senão, se tem content: title + primeiros chars até limite
         3. Senão: só title
+
+        BGE-M3 suporta até 8192 tokens (~32k chars).
+        Usamos 24k chars como limite seguro (conservador).
 
         Args:
             row: Linha do DataFrame com colunas title, summary, content
@@ -114,17 +117,25 @@ class BGE_M3_Migrator:
         Returns:
             Texto preparado para embedding
         """
+        # BGE-M3: 8192 tokens ≈ 32,000 chars (usar 24,000 como margem de segurança)
+        MAX_CHARS = 24000
+
         title = str(row.get("title") or "").strip()
         summary = str(row.get("summary") or "").strip() if pd.notna(row.get("summary")) else ""
         content = str(row.get("content") or "").strip() if pd.notna(row.get("content")) else ""
 
         if summary:
-            return f"{title}. {summary}" if title else summary
+            combined = f"{title}. {summary}" if title else summary
         elif content:
-            content_preview = content[:500]
-            return f"{title}. {content_preview}" if title else content_preview
+            # Usar todo o content disponível, até o limite
+            available_chars = MAX_CHARS - len(title) - 2 if title else MAX_CHARS
+            content_preview = content[:available_chars]
+            combined = f"{title}. {content_preview}" if title else content_preview
         else:
-            return title if title else ""
+            combined = title if title else ""
+
+        # Garantir que não excede limite (safety)
+        return combined[:MAX_CHARS]
 
     def process_batch(self, articles: pd.DataFrame) -> np.ndarray:
         """
