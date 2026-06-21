@@ -29,6 +29,25 @@ To set up a new experiment, work with the user to:
    ```
 6. **Confirm and go.**
 
+## MLflow Tracking
+
+Every `evaluate.py` run automatically logs a run to MLflow under the experiment
+`trend-detection-autoresearch`. No extra steps needed — `dgb_mlflow.configure()`
+reads `DGB_MLFLOW_TRACKING_URI` from `.env` and handles IAP authentication.
+
+Each run logs:
+- **Params:** `k_eval_points`, `step_days`, `window_days`, `baseline_days`
+- **Metrics:** `ndcg_at_10`, `eval_points`, `avg_oracle_positives`, `total_seconds`
+- **Tags:** `git_commit` (short SHA of current commit)
+- **Artifact:** `scorer.py` (snapshot of the scorer that produced these results)
+
+View results at: https://destaquesgovbr-mlflow-klvx64dufq-rj.a.run.app
+
+If MLflow is unavailable or auth fails, `evaluate.py` will still produce the
+correct stdout output — the MLflow error is non-fatal (it will traceback but
+the print at the end still runs). To skip MLflow entirely, set:
+`DGB_MLFLOW_TRACKING_URI=sqlite:///mlflow_local.db` in `.env`.
+
 ## Experimentation
 
 Each experiment:
