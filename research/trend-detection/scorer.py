@@ -17,6 +17,8 @@ Sinais disponíveis em data['entity_stats'][entity_id]:
   - new_edge_count    int   novas arestas de co-menção formadas na janela
 """
 
+import math
+
 
 def compute_scores(data: dict) -> list[tuple[str, float]]:
     """Retorna [(entity_id, score), ...] ordenado por score DESC."""
@@ -29,7 +31,7 @@ def compute_scores(data: dict) -> list[tuple[str, float]]:
         volume_ratio = s["window_daily"] / s["baseline_daily"]
         agency_growth = s["window_agencies"] / max(s["baseline_agencies"], 1)
 
-        score = 0.6 * volume_ratio + 0.4 * agency_growth
+        score = math.log1p(volume_ratio) * agency_growth
         results.append((eid, score))
 
     return sorted(results, key=lambda x: x[1], reverse=True)
