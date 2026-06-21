@@ -17,9 +17,6 @@ Sinais disponíveis em data['entity_stats'][entity_id]:
   - new_edge_count    int   novas arestas de co-menção formadas na janela
 """
 
-import math
-
-
 def compute_scores(data: dict) -> list[tuple[str, float]]:
     """Retorna [(entity_id, score), ...] ordenado por score DESC."""
     results = []
@@ -27,11 +24,15 @@ def compute_scores(data: dict) -> list[tuple[str, float]]:
     for eid, s in data["entity_stats"].items():
         if s["window_count"] < 3:
             continue
+        if s["entity_type"] == "LOC":
+            continue  # oracle never selects LOC
 
         volume_ratio = s["window_daily"] / s["baseline_daily"]
         agency_growth = s["window_agencies"] / max(s["baseline_agencies"], 1)
+        # niche bonus: entities known to fewer agencies in baseline score higher
+        niche = 1.0 / (1.0 + s["baseline_agencies"])
 
-        score = math.log1p(volume_ratio) * agency_growth
+        score = 0.5 * volume_ratio + 0.3 * agency_growth + 0.2 * niche * volume_ratio
         results.append((eid, score))
 
     return sorted(results, key=lambda x: x[1], reverse=True)
