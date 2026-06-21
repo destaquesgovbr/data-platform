@@ -21,16 +21,25 @@ import numpy as np
 from dotenv import load_dotenv
 from sklearn.metrics import ndcg_score
 
-load_dotenv()  # carrega .env antes do dgb_mlflow.configure()
+load_dotenv()  # carrega .env antes de qualquer config MLflow
 
-try:
-    import dgb_mlflow
-    dgb_mlflow.configure()
-    import mlflow
-    _MLFLOW_AVAILABLE = True
-except Exception as _e:
-    print(f"[MLflow] unavailable, skipping: {_e}", flush=True)
-    _MLFLOW_AVAILABLE = False
+_MLFLOW_AVAILABLE = False
+_MLFLOW_URI = os.environ.get("DGB_MLFLOW_TRACKING_URI", "")
+
+if _MLFLOW_URI:
+    try:
+        import mlflow
+        _is_local = _MLFLOW_URI.startswith("http://localhost") or _MLFLOW_URI.startswith("http://127.")
+        if _is_local:
+            # Proxy local (gcloud run services proxy) — sem IAP headers, o proxy autentica por conta própria
+            mlflow.set_tracking_uri(_MLFLOW_URI)
+        else:
+            # Servidor remoto protegido por IAP — usar dgb_mlflow para injetar Bearer token
+            import dgb_mlflow
+            dgb_mlflow.configure()
+        _MLFLOW_AVAILABLE = True
+    except Exception as _e:
+        print(f"[MLflow] unavailable, skipping: {_e}", flush=True)
 
 from scorer import compute_scores
 from signals import load_snapshot
@@ -78,13 +87,18 @@ def main():
     start = time.time()
     today = date.today()
 
+    _mlflow_active = False
     if _MLFLOW_AVAILABLE:
-        mlflow.set_experiment(EXPERIMENT_NAME)
+        try:
+            mlflow.set_experiment(EXPERIMENT_NAME)
+            _mlflow_active = True
+        except Exception as _e:
+            print(f"[MLflow] set_experiment failed, skipping: {_e}", flush=True)
 
-    run_ctx = mlflow.start_run() if _MLFLOW_AVAILABLE else nullcontext()
+    run_ctx = mlflow.start_run() if _mlflow_active else nullcontext()
 
     with run_ctx:
-        if _MLFLOW_AVAILABLE:
+        if _mlflow_active:
             mlflow.log_params({
                 "k_eval_points": K_EVAL_POINTS,
                 "step_days": STEP_DAYS,
@@ -114,14 +128,17 @@ def main():
         avg_positives = mean(oracle_positive_counts) if oracle_positive_counts else 0.0
         elapsed = time.time() - start
 
-        if _MLFLOW_AVAILABLE:
+        if _mlflow_active:
             mlflow.log_metrics({
                 "ndcg_at_10": avg_ndcg,
                 "eval_points": float(len(ndcg_values)),
                 "avg_oracle_positives": avg_positives,
                 "total_seconds": elapsed,
             })
-            mlflow.log_artifact("scorer.py")
+            try:
+                mlflow.log_artifact("scorer.py")
+            except Exception:
+                pass
 
     print("---")
     print(f"ndcg@10:          {avg_ndcg:.6f}")
