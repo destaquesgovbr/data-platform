@@ -35,11 +35,15 @@ def compute_scores(data: dict) -> list[tuple[str, float]]:
         # niche bonus: entities known to fewer agencies in baseline score higher
         niche = 1.0 / (1.0 + s["baseline_agencies"])
 
+        # graph-level novelty: new co-mention edges formed in the window
+        new_edges = min(s["new_edge_count"], 20) / 20.0
+
         score = (
-            0.4 * volume_ratio
-            + 0.25 * agency_growth
-            + 0.2 * niche * volume_ratio
-            + 0.15 * s["semantic_novelty"]
+            0.38 * volume_ratio
+            + 0.22 * agency_growth
+            + 0.18 * niche * volume_ratio
+            + 0.12 * s["semantic_novelty"]
+            + 0.10 * new_edges
         )
         results.append((eid, score))
 
