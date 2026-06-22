@@ -31,19 +31,21 @@ def compute_scores(data: dict) -> list[tuple[str, float]]:
             continue
 
         volume_ratio = s["window_daily"] / s["baseline_daily"]
+
+        if volume_ratio <= 1.5:
+            continue  # oracle hard condition: must have significant volume spike
+        if s["baseline_agencies"] > 20:
+            continue  # oracle hard condition: must be niche (not already widely covered)
+
         agency_growth = s["window_agencies"] / max(s["baseline_agencies"], 1)
         # niche bonus: entities known to fewer agencies in baseline score higher
         niche = 1.0 / (1.0 + s["baseline_agencies"])
 
-        # graph-level novelty: new co-mention edges formed in the window
-        new_edges = min(s["new_edge_count"], 20) / 20.0
-
         score = (
-            0.38 * volume_ratio
-            + 0.22 * agency_growth
-            + 0.18 * niche * volume_ratio
-            + 0.12 * s["semantic_novelty"]
-            + 0.10 * new_edges
+            0.40 * volume_ratio
+            + 0.25 * agency_growth
+            + 0.20 * niche * volume_ratio
+            + 0.15 * s["semantic_novelty"]
         )
         results.append((eid, score))
 
