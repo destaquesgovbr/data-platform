@@ -26,13 +26,21 @@ def compute_scores(data: dict) -> list[tuple[str, float]]:
             continue
         if s["entity_type"] == "LOC":
             continue  # oracle never selects LOC
+        # oracle requires agency spread to grow: skip if no new agencies covered
+        if s["window_agencies"] <= s["baseline_agencies"]:
+            continue
 
         volume_ratio = s["window_daily"] / s["baseline_daily"]
         agency_growth = s["window_agencies"] / max(s["baseline_agencies"], 1)
         # niche bonus: entities known to fewer agencies in baseline score higher
         niche = 1.0 / (1.0 + s["baseline_agencies"])
 
-        score = 0.5 * volume_ratio + 0.3 * agency_growth + 0.2 * niche * volume_ratio
+        score = (
+            0.4 * volume_ratio
+            + 0.25 * agency_growth
+            + 0.2 * niche * volume_ratio
+            + 0.15 * s["semantic_novelty"]
+        )
         results.append((eid, score))
 
     return sorted(results, key=lambda x: x[1], reverse=True)
