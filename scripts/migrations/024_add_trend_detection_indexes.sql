@@ -4,7 +4,8 @@
 -- Problema: load_snapshot() com 20 janelas temporais levava 484s no baseline e degradou
 -- para 640s+/janela durante backfill heavy. As queries de embedding são o maior gargalo.
 --
--- Criados com CONCURRENTLY para não bloquear a tabela em produção.
+-- Sem CONCURRENTLY: tabelas são novas (criadas em 021/022), sem risco de lock.
+-- CONCURRENTLY causava falha no test framework (aplica fora de ordem em fase 2).
 
 -- ── 1. Cobertura das queries de embedding ──────────────────────────────────────────────────
 -- Queries 3 e 4 do load_snapshot() filtram em AMBOS:
@@ -13,7 +14,7 @@
 -- Com índices separados em (entity_id) e (published_at), o planner faz bitmap AND.
 -- Com este índice composto, cada entity_id tem um range scan temporal direto —
 -- elimina a bitmap intersection e reduz I/O especialmente na janela de 28 dias (baseline).
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_news_entities_entity_pub
+CREATE INDEX IF NOT EXISTS idx_news_entities_entity_pub
     ON news_entities (entity_id, published_at);
 
 
@@ -24,5 +25,5 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_news_entities_entity_pub
 -- O índice existente idx_entity_edges_src (src_id, kind, weight DESC) não inclui first_seen.
 -- O planner usa-o para filtrar por (src_id, kind) e depois aplica o filtro temporal em memória.
 -- Este índice permite range scan direto em first_seen para o tipo mais comum ('co_mention').
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_entity_edges_first_seen
+CREATE INDEX IF NOT EXISTS idx_entity_edges_first_seen
     ON entity_edges (first_seen, kind);
