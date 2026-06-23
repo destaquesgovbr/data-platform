@@ -35,7 +35,7 @@ def compute_entity_trending():
         pg_conn = BaseHook.get_connection("postgres_default")
         db_url = pg_conn.get_uri().replace("postgres://", "postgresql://", 1)
 
-        data = load_snapshot(db_url, date_end=date.today())
+        data = load_snapshot(db_url, date_end=date.today(), compute_embeddings=False)
         scores = compute_scores(data)
         count = upsert_trending_scores(db_url, scores, data["entity_stats"])
         return {"status": "ok", "count": count}

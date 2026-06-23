@@ -24,6 +24,7 @@ def load_snapshot(
     baseline_days: int = 28,
     date_end: date | None = None,
     min_window_articles: int = 3,
+    compute_embeddings: bool = False,
 ) -> dict:
     """
     Retorna dict com entity_stats e oracle_labels para uma janela temporal.
@@ -149,59 +150,60 @@ def load_snapshot(
                 if eid in entity_stats:
                     entity_stats[eid]["new_edge_count"] = int(cnt)
 
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT ne.entity_id, n.content_embedding::float4[] AS embedding
-                FROM news_entities ne
-                JOIN news n USING (unique_id)
-                WHERE ne.published_at >= %(baseline_start)s
-                  AND ne.published_at <  %(window_start)s
-                  AND n.content_embedding IS NOT NULL
-                  AND ne.entity_id = ANY(%(entity_ids)s)
-                """,
-                {
-                    "baseline_start": baseline_start,
-                    "window_start": window_start,
-                    "entity_ids": entity_ids,
-                },
-            )
-            baseline_embs: dict[str, list] = {}
-            for eid, emb in cur.fetchall():
-                baseline_embs.setdefault(eid, []).append(emb)
+        if compute_embeddings:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT ne.entity_id, n.content_embedding::float4[] AS embedding
+                    FROM news_entities ne
+                    JOIN news n USING (unique_id)
+                    WHERE ne.published_at >= %(baseline_start)s
+                      AND ne.published_at <  %(window_start)s
+                      AND n.content_embedding IS NOT NULL
+                      AND ne.entity_id = ANY(%(entity_ids)s)
+                    """,
+                    {
+                        "baseline_start": baseline_start,
+                        "window_start": window_start,
+                        "entity_ids": entity_ids,
+                    },
+                )
+                baseline_embs: dict[str, list] = {}
+                for eid, emb in cur.fetchall():
+                    baseline_embs.setdefault(eid, []).append(emb)
 
-        centroids: dict[str, np.ndarray] = {}
-        for eid, embs in baseline_embs.items():
-            arr = np.array(embs, dtype=np.float32)
-            centroids[eid] = arr.mean(axis=0)
+            centroids: dict[str, np.ndarray] = {}
+            for eid, embs in baseline_embs.items():
+                arr = np.array(embs, dtype=np.float32)
+                centroids[eid] = arr.mean(axis=0)
 
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT ne.entity_id, n.content_embedding::float4[] AS embedding
-                FROM news_entities ne
-                JOIN news n USING (unique_id)
-                WHERE ne.published_at >= %(window_start)s
-                  AND ne.published_at <  %(date_end)s
-                  AND n.content_embedding IS NOT NULL
-                  AND ne.entity_id = ANY(%(entity_ids)s)
-                """,
-                {
-                    "window_start": window_start,
-                    "date_end": date_end,
-                    "entity_ids": entity_ids,
-                },
-            )
-            window_embs: dict[str, list] = {}
-            for eid, emb in cur.fetchall():
-                window_embs.setdefault(eid, []).append(emb)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT ne.entity_id, n.content_embedding::float4[] AS embedding
+                    FROM news_entities ne
+                    JOIN news n USING (unique_id)
+                    WHERE ne.published_at >= %(window_start)s
+                      AND ne.published_at <  %(date_end)s
+                      AND n.content_embedding IS NOT NULL
+                      AND ne.entity_id = ANY(%(entity_ids)s)
+                    """,
+                    {
+                        "window_start": window_start,
+                        "date_end": date_end,
+                        "entity_ids": entity_ids,
+                    },
+                )
+                window_embs: dict[str, list] = {}
+                for eid, emb in cur.fetchall():
+                    window_embs.setdefault(eid, []).append(emb)
 
-        for eid, embs in window_embs.items():
-            if eid not in centroids or eid not in entity_stats:
-                continue
-            arr = np.array(embs, dtype=np.float32)
-            sims = _cosine_sim_batch(arr, centroids[eid])
-            entity_stats[eid]["semantic_novelty"] = float(1.0 - sims.mean())
+            for eid, embs in window_embs.items():
+                if eid not in centroids or eid not in entity_stats:
+                    continue
+                arr = np.array(embs, dtype=np.float32)
+                sims = _cosine_sim_batch(arr, centroids[eid])
+                entity_stats[eid]["semantic_novelty"] = float(1.0 - sims.mean())
 
         oracle_labels: dict[str, bool] = {}
         for eid, s in entity_stats.items():
