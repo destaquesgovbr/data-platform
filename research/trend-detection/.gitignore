@@ -1,0 +1,6 @@
+.env
+results.tsv
+run.log
+.venv/
+__pycache__/
+*.pyc
