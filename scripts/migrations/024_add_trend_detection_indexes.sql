@@ -4,8 +4,8 @@
 -- Problema: load_snapshot() com 20 janelas temporais levava 484s no baseline e degradou
 -- para 640s+/janela durante backfill heavy. As queries de embedding são o maior gargalo.
 --
--- Sem CONCURRENTLY: tabelas são novas (criadas em 021/022), sem risco de lock.
--- CONCURRENTLY causava falha no test framework (aplica fora de ordem em fase 2).
+-- Índices regulares (não-concorrentes): tabelas são novas (criadas em 021/022),
+-- sem risco de lock de longa duração. IF NOT EXISTS garante idempotência.
 
 -- ── 1. Cobertura das queries de embedding ──────────────────────────────────────────────────
 -- Queries 3 e 4 do load_snapshot() filtram em AMBOS:
