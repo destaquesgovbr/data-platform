@@ -50,8 +50,10 @@ def test_dag_id_correto():
     assert 'dag_id="canonicalize_backfill"' in _source()
 
 
-def test_schedule_diario_0200():
-    assert 'schedule="0 2 * * *"' in _source()
+def test_schedule_4x_dia():
+    # PR #185: Schedule mudou de diário (0 2 * * *) para 4x/dia (0 */6 * * *)
+    # Runs extras funcionam como retry resiliente; governador de cota garante budget
+    assert 'schedule="0 */6 * * *"' in _source()
 
 
 def test_catchup_false_e_max_active_runs_1():
@@ -104,9 +106,20 @@ def test_args_since_e_limit():
     assert 'Variable.get("canon_run_limit"' in src
 
 
-def test_clear_args_true():
-    """clear_args=True garante substituicao (nao append) dos args default do Job."""
-    assert '"clear_args": True' in _source()
+def test_args_passed_via_overrides():
+    """Args passados via overrides.container_overrides (clear_args foi removido).
+
+    PR #185 (commit b5f5a56): clear_args e args são mutuamente exclusivos na API
+    Cloud Run v2. Apenas args já substitui os args do container.
+    """
+    src = _source()
+    # Verifica que args são passados via container_overrides
+    assert '"args":' in src
+    assert '--since' in src
+    assert '--limit' in src
+    assert '--workers' in src
+    # clear_args foi removido do código (apenas aparece em comentário agora)
+    assert '"clear_args"' not in src  # Não aparece como chave no dicionário
 
 
 def test_instancia_dag_no_modulo():
