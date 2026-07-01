@@ -89,6 +89,9 @@ datasets/
 *.json
 *.jsonl
 
+# Exceção: seeds são parte do código-fonte (versionados)
+!scripts/seeds/*.csv
+
 # Secrets
 secrets/
 *.pem
