@@ -38,10 +38,7 @@ jobs:
         run: poetry install --no-interaction
 
       - name: Run unit tests with coverage
-        run: poetry run pytest tests/unit/ --cov=data_platform --cov-report=term-missing --cov-report=html
-
-      - name: Check coverage threshold
-        run: poetry run pytest tests/unit/ --cov=data_platform --cov-fail-under=70
+        run: poetry run pytest tests/unit/ --cov=data_platform --cov-report=term-missing --cov-report=html --cov-fail-under=70
 
       - name: Upload coverage report
         if: always()
