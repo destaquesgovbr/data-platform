@@ -6,11 +6,7 @@ on:
       - 'scripts/migrate.py'
       - 'scripts/migrations/**'
       - 'tests/integration/test_migrate_integration.py'
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/migrate.py'
-      - 'scripts/migrations/**'
+  workflow_dispatch:
 
 jobs:
   test-migrations:
