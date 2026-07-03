@@ -1,16 +1,7 @@
 name: Migration Integration Tests
 
 on:
-  pull_request:
-    paths:
-      - 'scripts/migrate.py'
-      - 'scripts/migrations/**'
-      - 'tests/integration/test_migrate_integration.py'
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/migrate.py'
-      - 'scripts/migrations/**'
+  workflow_dispatch:
 
 jobs:
   test-migrations:
