@@ -1,4 +1,4 @@
--- Migration 013: Add Summary Moderation Fields
+-- Migration 027: Add Summary Moderation Fields
 -- Data: 2026-06-23
 -- Issue: #187 (Sub-issue de #176)
 -- Objetivo: Adicionar campos para tracking de moderação de resumos gerados por LLM
@@ -7,7 +7,7 @@
 ALTER TABLE news
   ADD COLUMN IF NOT EXISTS summary_blocked BOOLEAN DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS summary_blocked_reason TEXT,
-  ADD COLUMN IF NOT EXISTS summary_blocked_at TIMESTAMP;
+  ADD COLUMN IF NOT EXISTS summary_blocked_at TIMESTAMP WITH TIME ZONE;
 
 -- Comentários descritivos
 COMMENT ON COLUMN news.summary_blocked IS 'Flag indicando se o resumo foi bloqueado por guardrails de segurança';
@@ -35,7 +35,7 @@ SELECT
   n.agency_key,
   n.agency_name,
   n.category,
-  EXTRACT(EPOCH FROM (n.summary_blocked_at - n.created_at)) / 60 AS minutes_to_block
+  GREATEST(0, EXTRACT(EPOCH FROM (n.summary_blocked_at - n.created_at)) / 60) AS minutes_to_block
 FROM news n
 WHERE n.summary_blocked = TRUE
 ORDER BY n.summary_blocked_at DESC;
@@ -48,7 +48,7 @@ SELECT
   DATE(summary_blocked_at) AS date,
   COUNT(*) AS total_blocked,
   COUNT(DISTINCT agency_key) AS affected_agencies,
-  ARRAY_AGG(DISTINCT SUBSTRING(summary_blocked_reason, 1, 50) ORDER BY summary_blocked_reason) AS unique_reasons
+  ARRAY_AGG(DISTINCT SUBSTRING(summary_blocked_reason, 1, 50) ORDER BY summary_blocked_reason) FILTER (WHERE summary_blocked_reason IS NOT NULL) AS unique_reasons
 FROM news
 WHERE summary_blocked = TRUE
   AND summary_blocked_at >= CURRENT_DATE - INTERVAL '30 days'

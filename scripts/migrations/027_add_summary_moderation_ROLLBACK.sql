@@ -1,7 +1,7 @@
--- Migration 013 ROLLBACK: Remove Summary Moderation Fields
+-- Migration 027 ROLLBACK: Remove Summary Moderation Fields
 -- Data: 2026-06-23
 -- Issue: #187 (Sub-issue de #176)
--- ATENÇÃO: Execute apenas se precisar reverter a migration 013
+-- ATENÇÃO: Execute apenas se precisar reverter a migration 027
 
 -- Dropar views primeiro (dependem das colunas)
 DROP VIEW IF EXISTS news_moderation_stats;
