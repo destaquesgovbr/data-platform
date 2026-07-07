@@ -57,7 +57,3 @@ ORDER BY date DESC;
 
 COMMENT ON VIEW news_moderation_stats IS 'Estatísticas diárias de moderação (últimos 30 dias)';
 
--- Verificar estrutura
-\d news;
-\d+ news_moderation_log;
-\d+ news_moderation_stats;
