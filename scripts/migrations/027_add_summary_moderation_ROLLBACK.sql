@@ -17,5 +17,3 @@ ALTER TABLE news
   DROP COLUMN IF EXISTS summary_blocked_reason,
   DROP COLUMN IF EXISTS summary_blocked_at;
 
--- Verificar que foi removido
-\d news;
