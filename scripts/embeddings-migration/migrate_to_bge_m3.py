@@ -39,6 +39,7 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 import psycopg2
+from psycopg2.extras import execute_batch
 import torch
 from sentence_transformers import SentenceTransformer
 from tqdm.auto import tqdm
@@ -156,7 +157,9 @@ class BGE_M3_Migrator:
                 batch_size=self.batch_size,
                 convert_to_numpy=True,
                 show_progress_bar=False,
-                normalize_embeddings=False,  # BGE-M3 não precisa normalização
+                normalize_embeddings=False,  # OK: BGE-M3 não precisa normalização
+                                              # PostgreSQL pgvector usa vector_cosine_ops (normaliza server-side)
+                                              # Typesense também normaliza internamente
             )
 
         return embeddings
@@ -334,6 +337,7 @@ def bulk_upload_to_postgres(
 
     # Upload in batches
     uploaded = 0
+    skipped = 0
     errors = 0
     start_time = time.time()
 
@@ -342,25 +346,39 @@ def bulk_upload_to_postgres(
             batch = embeddings_df.iloc[i : i + batch_size]
 
             try:
+                # Prepare batch values (Fix #184: use execute_batch for 10-50x speedup)
+                values = []
                 for _, row in batch.iterrows():
                     # Convert embedding to list if it's a numpy array
                     embedding = row["embedding"]
                     if hasattr(embedding, "tolist"):
                         embedding = embedding.tolist()
+                    values.append((embedding, row["id"]))
 
-                    cursor.execute(
-                        """
-                        UPDATE news
-                        SET content_embedding = %s::vector,
-                            embedding_model_version = 'bge-m3',
-                            embedding_generated_at = NOW()
-                        WHERE id = %s
-                        """,
-                        (embedding, row["id"]),
+                # Bulk update with execute_batch
+                execute_batch(
+                    cursor,
+                    """
+                    UPDATE news
+                    SET content_embedding = %s::vector,
+                        embedding_model_version = 'bge-m3',
+                        embedding_generated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    values,
+                    page_size=1000,
+                )
+
+                # Note: cursor.rowcount after execute_batch returns total affected rows
+                uploaded += cursor.rowcount
+                skipped += len(batch) - cursor.rowcount
+
+                if cursor.rowcount < len(batch):
+                    logger.warning(
+                        f"Batch at index {i}: {len(batch) - cursor.rowcount} articles not found (possibly deleted)"
                     )
 
                 conn.commit()
-                uploaded += len(batch)
                 pbar.update(len(batch))
 
             except Exception as e:
@@ -378,6 +396,7 @@ def bulk_upload_to_postgres(
 
     logger.info(f"Upload complete!")
     logger.info(f"  Uploaded: {uploaded:,} embeddings")
+    logger.info(f"  Skipped: {skipped:,} (articles not found, possibly deleted)")
     logger.info(f"  Errors: {errors}")
     logger.info(f"  Time: {elapsed:.1f}s")
     logger.info(f"  Rate: {uploaded/elapsed:.0f} updates/s")

@@ -16,10 +16,11 @@ ALTER TABLE news
 ADD COLUMN IF NOT EXISTS embedding_model_version text DEFAULT 'mpnet';
 
 -- Step 4: Update existing records to mark legacy embeddings
+-- Fix: Idempotent - don't overwrite 'bge-m3' if migration runs twice
 UPDATE news
 SET embedding_model_version = 'mpnet'
 WHERE content_embedding_legacy IS NOT NULL
-  AND embedding_model_version IS NULL;
+  AND (embedding_model_version IS NULL OR embedding_model_version = '');
 
 -- Step 5: Create HNSW index for new BGE-M3 embeddings
 -- Parameters: m=16 (connections per layer), ef_construction=64 (search width during construction)
