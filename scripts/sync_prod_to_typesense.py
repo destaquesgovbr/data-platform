@@ -158,6 +158,7 @@ def count_embeddings_in_pg(conn, start_date: str, end_date: str) -> int:
             WHERE published_at >= %s
               AND published_at < %s::date + INTERVAL '1 day'
               AND content_embedding IS NOT NULL
+              AND (summary_blocked = FALSE OR summary_blocked IS NULL)
             """,
             (start_date, end_date)
         )
@@ -205,6 +206,7 @@ def fetch_news_with_embeddings(
         WHERE n.published_at >= %s
           AND n.published_at < %s::date + INTERVAL '1 day'
           AND n.content_embedding IS NOT NULL
+          AND (n.summary_blocked = FALSE OR n.summary_blocked IS NULL)
         ORDER BY n.published_at DESC
         LIMIT %s OFFSET %s
     """
