@@ -191,18 +191,63 @@ pytest tests/integration/
 
 ---
 
-## Padrões de Código
+## Development Setup
 
-- **Type hints**: Obrigatórios em todas as funções
-- **Formatação**: Black (linha máxima 100)
-- **Linting**: Ruff
-- **Type checking**: MyPy (strict)
-- **Pre-commit**: Roda automaticamente Black, Ruff e MyPy
+### Pre-commit Hooks
+
+Este projeto usa **pre-commit hooks** para garantir qualidade e segurança do código. Após clonar o repositório, instale os hooks:
 
 ```bash
-# Rodar manualmente
-make lint    # ou: poetry run ruff check src/ tests/
-make format  # ou: poetry run black src/ tests/
+# Instalar dependências (inclui pre-commit)
+poetry install
+
+# Instalar git hooks (obrigatório)
+poetry run pre-commit install
+
+# (Opcional) Rodar em todos os arquivos
+poetry run pre-commit run --all-files
+```
+
+#### Hooks Configurados
+
+Os seguintes hooks rodam automaticamente em cada commit:
+
+| Categoria | Hooks | Descrição |
+|-----------|-------|-----------|
+| **Security** 🔒 | `detect-secrets` | Previne vazamento de credenciais (DATABASE_URL, API keys) |
+| **SQL Linting** 🛢️ | `sqlfluff` | Valida 48 arquivos SQL (migrations PostgreSQL + BigQuery) |
+| **Python Quality** 🐍 | `ruff-check`, `ruff-format` | Linter + formatter (substitui Black/isort/flake8) |
+| **File Hygiene** 📝 | `trailing-whitespace`, `end-of-file-fixer`, `mixed-line-ending` | Normaliza whitespace e line endings |
+| **Syntax Validation** ✅ | `check-yaml`, `check-json`, `check-toml` | Valida sintaxe de arquivos de configuração |
+| **Git Safety** 🚨 | `check-merge-conflict`, `check-added-large-files` | Detecta merge markers e arquivos grandes (>1MB) |
+| **Custom Validators** ⚙️ | `validate-feature-registry` | Valida schema de `feature_registry.yaml` |
+
+#### Performance
+
+- **Commit típico:** ~10-15 segundos
+- **Primeiro commit:** ~30-60 segundos (instala ambientes dos hooks)
+
+#### Bypass de Emergência
+
+```bash
+# Apenas em emergências (não recomendado)
+git commit --no-verify
+```
+
+**Nota:** CI sempre roda os hooks, então problemas serão detectados mesmo com `--no-verify`.
+
+### Padrões de Código
+
+- **Type hints**: Obrigatórios em funções públicas
+- **Formatação**: Ruff formatter (linha máxima 100, substitui Black)
+- **Linting**: Ruff (substitui Flake8, isort, pyupgrade)
+- **Type checking**: Mypy habilitado para módulos core
+
+```bash
+# Rodar manualmente (fora do pre-commit)
+poetry run ruff check .        # Linting
+poetry run ruff format .       # Formatação
+poetry run pre-commit run -a   # Todos os hooks
 ```
 
 ---

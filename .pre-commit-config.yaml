@@ -103,21 +103,23 @@ repos:
         args: [--line-length, "100"]
 
   # ============================================================================
-  # NOTE: mypy disabled temporarily - 149 type errors in src/
-  # TODO: Enable gradually after adding type hints to core modules
+  # PHASE 4.5: TYPE CHECKING (3-5s)
+  # Habilitado apenas para módulos core sem erros de tipo
+  # TODO: Expandir gradualmente para outros módulos após correções
   # ============================================================================
-  # - repo: https://github.com/pre-commit/mirrors-mypy
-  #   rev: v1.19.1
-  #   hooks:
-  #     - id: mypy
-  #       name: Type check with mypy
-  #       args: [--strict, --ignore-missing-imports, --follow-imports=silent]
-  #       exclude: ^(scripts/|tests/|research/)
-  #       additional_dependencies:
-  #         - types-requests
-  #         - types-PyYAML
-  #         - types-tabulate
-  #         - pydantic
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        name: Type check with mypy (core modules only)
+        args: [--strict, --ignore-missing-imports, --follow-imports=silent]
+        # Apenas módulos core que passam mypy strict sem erros
+        files: ^src/data_platform/(config|models/(__init__|news))\.py$
+        additional_dependencies:
+          - types-requests
+          - types-PyYAML
+          - pydantic
+          - pydantic-settings
 
   # ============================================================================
   # FASE 5: CUSTOM VALIDATORS (< 2s)
