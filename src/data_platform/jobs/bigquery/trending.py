@@ -79,12 +79,14 @@ def batch_upsert_trending_via_graphql(gql_client, scores_df: pd.DataFrame) -> in
 
     items = []
     for _, row in scores_df.iterrows():
-        items.append({
-            "uniqueId": row["unique_id"],
-            "features": {
-                "trending_score": float(row["trending_score"]),
-            },
-        })
+        items.append(
+            {
+                "uniqueId": row["unique_id"],
+                "features": {
+                    "trending_score": float(row["trending_score"]),
+                },
+            }
+        )
 
     if not items:
         return 0

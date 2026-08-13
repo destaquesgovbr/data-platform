@@ -22,7 +22,6 @@ from pydantic import ValidationError
 from data_platform.managers import PostgresManager
 from data_platform.models import Agency, News, NewsInsert, Theme
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -137,8 +136,10 @@ class TestPostgresManagerConnectionString:
         )
 
         env_without_db = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
-        with patch("data_platform.managers.postgres_manager.subprocess.run") as mock_subprocess, \
-             patch.dict(os.environ, env_without_db, clear=True):
+        with (
+            patch("data_platform.managers.postgres_manager.subprocess.run") as mock_subprocess,
+            patch.dict(os.environ, env_without_db, clear=True),
+        ):
 
             def run_side_effect(*args: Any, **kwargs: Any) -> Mock:
                 if args[0][0] == "pgrep":
@@ -602,7 +603,10 @@ class TestGet:
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [
             {
-                "id": 1, "unique_id": "abc123", "agency_id": 1, "title": "Test",
+                "id": 1,
+                "unique_id": "abc123",
+                "agency_id": 1,
+                "title": "Test",
                 "published_at": datetime(2024, 1, 1),
             }
         ]
@@ -657,7 +661,10 @@ class TestGetByUniqueId:
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [
             {
-                "id": 1, "unique_id": "abc123", "agency_id": 1, "title": "Test",
+                "id": 1,
+                "unique_id": "abc123",
+                "agency_id": 1,
+                "title": "Test",
                 "published_at": datetime(2024, 1, 1),
             }
         ]

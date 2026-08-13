@@ -48,15 +48,14 @@ logger = logging.getLogger(__name__)
     """,
 )
 def sync_umami_to_bigquery():
-
     @task()
     def sync_pageviews(**context):
         """Extract pageviews from Umami and load to BigQuery."""
         from data_platform.jobs.bigquery.umami_sync import (
+            PAGEVIEWS_SCHEMA,
             fetch_umami_pageviews,
             get_umami_db_url,
             load_to_bigquery,
-            PAGEVIEWS_SCHEMA,
         )
 
         db_url = get_umami_db_url()
@@ -74,19 +73,17 @@ def sync_umami_to_bigquery():
         if not data:
             return {"status": "no_data", "date": start_date, "rows": 0}
 
-        rows = load_to_bigquery(
-            data, project_id, "dgb_gold.umami_pageviews", PAGEVIEWS_SCHEMA
-        )
+        rows = load_to_bigquery(data, project_id, "dgb_gold.umami_pageviews", PAGEVIEWS_SCHEMA)
         return {"status": "ok", "date": start_date, "rows": rows}
 
     @task()
     def sync_events(**context):
         """Extract custom events from Umami and load to BigQuery."""
         from data_platform.jobs.bigquery.umami_sync import (
+            EVENTS_SCHEMA,
             fetch_umami_events,
             get_umami_db_url,
             load_to_bigquery,
-            EVENTS_SCHEMA,
         )
 
         db_url = get_umami_db_url()
@@ -104,9 +101,7 @@ def sync_umami_to_bigquery():
         if not data:
             return {"status": "no_data", "date": start_date, "rows": 0}
 
-        rows = load_to_bigquery(
-            data, project_id, "dgb_gold.umami_events", EVENTS_SCHEMA
-        )
+        rows = load_to_bigquery(data, project_id, "dgb_gold.umami_events", EVENTS_SCHEMA)
         return {"status": "ok", "date": start_date, "rows": rows}
 
     # Tasks run in parallel (pageviews and events are independent)

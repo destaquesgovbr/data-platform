@@ -3,6 +3,7 @@
 from unittest.mock import Mock, patch
 
 import pandas as pd
+
 from data_platform.jobs.thumbnail.batch import fetch_articles_needing_thumbnails
 
 

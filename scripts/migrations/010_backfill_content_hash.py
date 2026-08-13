@@ -14,7 +14,6 @@ import sys
 import time
 import unicodedata
 
-
 BATCH_SIZE = 5000
 
 

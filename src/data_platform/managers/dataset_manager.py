@@ -1,8 +1,8 @@
 import logging
 import os
 import shutil
+from collections import OrderedDict
 from pathlib import Path
-from typing import Optional, OrderedDict
 
 import pandas as pd
 from datasets import Dataset, load_dataset
@@ -10,9 +10,7 @@ from datasets.exceptions import DatasetNotFoundError
 from huggingface_hub import get_token
 
 DATASET_PATH = "nitaibezerra/govbrnews"  # The main dataset
-REDUCED_DATASET_PATH = (
-    "nitaibezerra/govbrnews-reduced"  # Reduced dataset for faster downloads
-)
+REDUCED_DATASET_PATH = "nitaibezerra/govbrnews-reduced"  # Reduced dataset for faster downloads
 
 
 class DatasetManager:
@@ -50,9 +48,7 @@ class DatasetManager:
             dataset = Dataset.from_dict(new_data)
         else:
             # Merge or update new rows into the existing dataset
-            dataset = self._merge_new_into_dataset(
-                dataset, new_data, allow_update=allow_update
-            )
+            dataset = self._merge_new_into_dataset(dataset, new_data, allow_update=allow_update)
 
         # Sort the dataset before pushing
         dataset = self._sort_dataset(dataset)
@@ -68,9 +64,7 @@ class DatasetManager:
         """
         dataset = self._load_existing_dataset()
         if dataset is None:
-            logging.info(
-                "No existing dataset found. Cannot update a non-existent dataset."
-            )
+            logging.info("No existing dataset found. Cannot update a non-existent dataset.")
             return
 
         # Apply row-by-row updates
@@ -82,9 +76,7 @@ class DatasetManager:
         # Push updated dataset to the Hub
         self._push_datasets(dataset)
 
-    def get(
-        self, min_date: str, max_date: str, agency: Optional[str] = None
-    ) -> pd.DataFrame:
+    def get(self, min_date: str, max_date: str, agency: str | None = None) -> pd.DataFrame:
         """
         Return rows where 'published_at' is between min_date and max_date (inclusive).
         Optionally filter by a specific 'agency' if provided.
@@ -119,18 +111,26 @@ class DatasetManager:
 
         return df
 
-    def _load_existing_dataset(self) -> Optional[Dataset]:
+    def _load_existing_dataset(self) -> Dataset | None:
         """
         Load an existing dataset from the Hugging Face Hub, or return None if not found.
         """
         try:
             # Clear cache to avoid schema corruption issues when fields are added
-            cache_dir = Path.home() / ".cache" / "huggingface" / "datasets" / self.dataset_path.replace("/", "___")
+            cache_dir = (
+                Path.home()
+                / ".cache"
+                / "huggingface"
+                / "datasets"
+                / self.dataset_path.replace("/", "___")
+            )
             if cache_dir.exists():
                 logging.info(f"Clearing cached dataset at {cache_dir}")
                 shutil.rmtree(cache_dir, ignore_errors=True)
 
-            existing_dataset = load_dataset(self.dataset_path, split="train", download_mode="force_redownload")
+            existing_dataset = load_dataset(
+                self.dataset_path, split="train", download_mode="force_redownload"
+            )
             logging.info(
                 f"Existing dataset loaded from {self.dataset_path}. "
                 f"\nRow count: {len(existing_dataset)}"
@@ -152,11 +152,11 @@ class DatasetManager:
         df_new = pd.DataFrame(new_data)
 
         # Clean datetime columns in new data - convert to UTC naive for Parquet compatibility
-        datetime_cols = ['published_at', 'updated_datetime', 'extracted_at']
+        datetime_cols = ["published_at", "updated_datetime", "extracted_at"]
         for col in datetime_cols:
             if col in df_new.columns:
                 # Convert to datetime, normalize to UTC, then remove timezone
-                df_new[col] = pd.to_datetime(df_new[col], errors='coerce', utc=True)
+                df_new[col] = pd.to_datetime(df_new[col], errors="coerce", utc=True)
                 df_new[col] = df_new[col].dt.tz_localize(None)
 
         # Ensure both DataFrames have same columns
@@ -185,16 +185,12 @@ class DatasetManager:
                 logging.info(f"Inserting {len(missing_ids)} brand new rows.")
                 df_existing = pd.concat([df_existing, df_new.loc[missing_ids]], axis=0)
             else:
-                logging.info(
-                    "All 'unique_id's in 'new_data' already existed and were updated."
-                )
+                logging.info("All 'unique_id's in 'new_data' already existed and were updated.")
         else:
             # If not updating, skip duplicates
             duplicates = df_new.index.intersection(df_existing.index)
             if not duplicates.empty:
-                logging.info(
-                    f"Skipping {len(duplicates)} duplicates (already in dataset)."
-                )
+                logging.info(f"Skipping {len(duplicates)} duplicates (already in dataset).")
 
             # Filter to only new rows (unique_id not present in the existing dataset)
             df_filtered = df_new.loc[df_new.index.difference(df_existing.index)]
@@ -218,11 +214,11 @@ class DatasetManager:
         df = hf_dataset.to_pandas()
 
         # Clean datetime columns in updated_df - convert to UTC naive for Parquet compatibility
-        datetime_cols = ['published_at', 'updated_datetime', 'extracted_at']
+        datetime_cols = ["published_at", "updated_datetime", "extracted_at"]
         for col in datetime_cols:
             if col in updated_df.columns:
                 # Convert to datetime, normalize to UTC, then remove timezone
-                updated_df[col] = pd.to_datetime(updated_df[col], errors='coerce', utc=True)
+                updated_df[col] = pd.to_datetime(updated_df[col], errors="coerce", utc=True)
                 updated_df[col] = updated_df[col].dt.tz_localize(None)
 
         # 1. Identify & add new columns if needed
@@ -237,9 +233,7 @@ class DatasetManager:
         # Intersection of indexes to ensure we only update existing rows
         intersection = df.index.intersection(updated_df.index)
         if intersection.empty:
-            logging.info(
-                "No matching 'unique_id' found in existing dataset; no rows updated."
-            )
+            logging.info("No matching 'unique_id' found in existing dataset; no rows updated.")
         else:
             # Overwrite the row data
             df.loc[intersection, updated_df.columns] = updated_df.loc[intersection]
@@ -258,9 +252,7 @@ class DatasetManager:
 
         # If 'published_at' is a datetime or something else, you'll want to parse or coerce properly.
         # For simplicity, we'll assume 'published_at' is comparable in descending order:
-        df.sort_values(
-            by=["agency", "published_at"], ascending=[True, False], inplace=True
-        )
+        df.sort_values(by=["agency", "published_at"], ascending=[True, False], inplace=True)
         return Dataset.from_pandas(df, preserve_index=False)
 
     def _push_datasets(self, dataset: Dataset):
@@ -293,6 +285,4 @@ class DatasetManager:
 
         # Push the reduced dataset to the Hugging Face Hub
         reduced_dataset.push_to_hub(REDUCED_DATASET_PATH, private=False)
-        logging.info(
-            f"Reduced dataset pushed to Hugging Face Hub at {REDUCED_DATASET_PATH}."
-        )
+        logging.info(f"Reduced dataset pushed to Hugging Face Hub at {REDUCED_DATASET_PATH}.")

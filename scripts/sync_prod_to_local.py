@@ -37,12 +37,11 @@ import signal
 import subprocess
 import sys
 import time
-from typing import Any
 from urllib.parse import quote_plus
 
 import psycopg2
-from psycopg2.extras import execute_values
 from dotenv import load_dotenv
+from psycopg2.extras import execute_values
 from tqdm import tqdm
 
 # Load environment variables
@@ -66,8 +65,13 @@ def get_secret(secret_id: str) -> str:
     try:
         result = subprocess.run(
             [
-                "gcloud", "secrets", "versions", "access", "latest",
-                "--secret", secret_id,
+                "gcloud",
+                "secrets",
+                "versions",
+                "access",
+                "latest",
+                "--secret",
+                secret_id,
             ],
             capture_output=True,
             text=True,
@@ -321,11 +325,29 @@ def sync_news(
 
     # Build SELECT query based on available columns
     base_columns = [
-        "unique_id", "agency_id", "theme_l1_id", "theme_l2_id", "theme_l3_id",
-        "most_specific_theme_id", "title", "url", "image_url", "video_url",
-        "category", "tags", "content", "editorial_lead", "subtitle", "summary",
-        "published_at", "updated_datetime", "extracted_at", "created_at", "updated_at",
-        "agency_key", "agency_name"
+        "unique_id",
+        "agency_id",
+        "theme_l1_id",
+        "theme_l2_id",
+        "theme_l3_id",
+        "most_specific_theme_id",
+        "title",
+        "url",
+        "image_url",
+        "video_url",
+        "category",
+        "tags",
+        "content",
+        "editorial_lead",
+        "subtitle",
+        "summary",
+        "published_at",
+        "updated_datetime",
+        "extracted_at",
+        "created_at",
+        "updated_at",
+        "agency_key",
+        "agency_name",
     ]
 
     if has_embeddings:
@@ -336,7 +358,7 @@ def sync_news(
         insert_columns = base_columns
 
     select_query = f"""
-        SELECT {', '.join(select_columns)}
+        SELECT {", ".join(select_columns)}
         FROM news
         WHERE published_at >= %s AND published_at < %s::date + interval '1 day'
         ORDER BY published_at DESC
@@ -361,7 +383,7 @@ def sync_news(
             with local_conn.cursor() as cur:
                 if has_embeddings:
                     insert_sql = f"""
-                        INSERT INTO news ({', '.join(insert_columns)}) VALUES %s
+                        INSERT INTO news ({", ".join(insert_columns)}) VALUES %s
                         ON CONFLICT (unique_id) DO UPDATE SET
                             summary = EXCLUDED.summary,
                             content_embedding = EXCLUDED.content_embedding,
@@ -370,7 +392,7 @@ def sync_news(
                     """
                 else:
                     insert_sql = f"""
-                        INSERT INTO news ({', '.join(insert_columns)}) VALUES %s
+                        INSERT INTO news ({", ".join(insert_columns)}) VALUES %s
                         ON CONFLICT (unique_id) DO UPDATE SET
                             summary = EXCLUDED.summary,
                             updated_at = NOW()
@@ -441,7 +463,7 @@ def main() -> None:
         type=str,
         default=os.getenv(
             "LOCAL_DATABASE_URL",
-            "postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev"
+            "postgresql://destaquesgovbr_dev:dev_password@localhost:5433/destaquesgovbr_dev",
         ),
         help="Local database URL (default: local docker-compose PostgreSQL)",
     )
@@ -540,7 +562,7 @@ def main() -> None:
                 print("\n   Recent news:")
                 for row in rows:
                     title = row[1][:50] if row[1] else "N/A"
-                    date = row[2].strftime('%Y-%m-%d') if row[2] else "N/A"
+                    date = row[2].strftime("%Y-%m-%d") if row[2] else "N/A"
                     print(f"   - {date} | {title}... | summary: {row[3]} | embedding: {row[4]}")
 
             # Show summary stats
@@ -552,7 +574,9 @@ def main() -> None:
                 FROM news
             """)
             totals = cur.fetchone()
-            print(f"\n   Total: {totals[0]} | With summary: {totals[1]} | With embeddings: {totals[2]}")
+            print(
+                f"\n   Total: {totals[0]} | With summary: {totals[1]} | With embeddings: {totals[2]}"
+            )
 
     except Exception as e:
         print(f"\n❌ Sync failed: {e}")

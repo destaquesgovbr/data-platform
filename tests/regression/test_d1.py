@@ -25,8 +25,6 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 # ---------------------------------------------------------------------------
 # Teste 1: Bronze Writer alterna entre GraphQL e Postgres conforme env var
 # ---------------------------------------------------------------------------
@@ -49,17 +47,14 @@ class TestBronzeWriterGraphQLOptIn:
         from data_platform.workers.bronze_writer import app as bronze_app
 
         with patch.dict(os.environ, {"GRAPHQL_API_URL": "http://graphql.test/graphql"}):
-            with patch(
-                "data_platform.clients.graphql_client.GraphQLClient"
-            ) as MockClient:
+            with patch("data_platform.clients.graphql_client.GraphQLClient") as MockClient:
                 instance = MagicMock()
                 MockClient.return_value = instance
 
                 client = bronze_app._get_gql_client()
 
                 assert client is instance, (
-                    "Esperado GraphQLClient instanciado quando GRAPHQL_API_URL "
-                    "está setado."
+                    "Esperado GraphQLClient instanciado quando GRAPHQL_API_URL está setado."
                 )
                 MockClient.assert_called_once_with(url="http://graphql.test/graphql")
 
@@ -97,11 +92,7 @@ class TestFeatureWorkerMutationPayloadCamelCase:
 
         gql_client.mutate.assert_called_once()
         call_args = gql_client.mutate.call_args
-        variables = (
-            call_args[0][1]
-            if len(call_args[0]) > 1
-            else call_args[1].get("variables")
-        )
+        variables = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("variables")
 
         # Chaves do envelope da mutation são camelCase (Strawberry default).
         assert set(variables.keys()) == {"uniqueId", "features"}, (
@@ -215,8 +206,7 @@ class TestComputeClustersDagGraphQLBranch:
         # condição equivalente que delega para o branch GraphQL quando
         # a env var está presente.
         assert "if graphql_url" in source or "if graphql_url:" in source, (
-            "compute_clusters deve ramificar com base no valor de "
-            "GRAPHQL_API_URL"
+            "compute_clusters deve ramificar com base no valor de GRAPHQL_API_URL"
         )
         # E o branch GraphQL deve importar o GraphQLClient.
         assert "from data_platform.clients.graphql_client import GraphQLClient" in source

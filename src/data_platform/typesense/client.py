@@ -70,8 +70,10 @@ def get_client(
 
     host = host or conn_host or os.getenv("TYPESENSE_HOST", "localhost")
     port = port or conn_port or os.getenv("TYPESENSE_PORT", "8108")
-    api_key = api_key or conn_key or os.getenv(
-        "TYPESENSE_API_KEY", "govbrnews_api_key_change_in_production"
+    api_key = (
+        api_key
+        or conn_key
+        or os.getenv("TYPESENSE_API_KEY", "govbrnews_api_key_change_in_production")
     )
     if conn_protocol != "http":
         protocol = conn_protocol
@@ -126,9 +128,7 @@ def wait_for_typesense(
 
         except Exception as e:
             retry_count += 1
-            logger.info(
-                f"Typesense não está pronto, tentativa {retry_count}/{max_retries}: {e}"
-            )
+            logger.info(f"Typesense não está pronto, tentativa {retry_count}/{max_retries}: {e}")
             time.sleep(retry_interval)
 
     logger.error("Typesense não ficou pronto após todas as tentativas")

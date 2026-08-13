@@ -17,6 +17,7 @@ Sinais disponíveis em data['entity_stats'][entity_id]:
   - new_edge_count    int   novas arestas de co-menção formadas na janela
 """
 
+
 def compute_scores(data: dict) -> list[tuple[str, float]]:
     """Retorna [(entity_id, score), ...] ordenado por score DESC."""
     results = []

@@ -42,7 +42,6 @@ logger = logging.getLogger(__name__)
     """,
 )
 def compute_trending_dag():
-
     @task()
     def compute_and_sync_trending(**context):
         """Fetch trending from BQ and upsert to PG."""

@@ -12,9 +12,7 @@ Usage:
     print(settings.typesense_host)
 """
 
-import os
 from functools import lru_cache
-from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -99,7 +97,7 @@ class Settings(BaseSettings):
         return bool(self.hf_token)
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """
     Get cached application settings.

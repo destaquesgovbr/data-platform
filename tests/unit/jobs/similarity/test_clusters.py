@@ -1,17 +1,15 @@
 """Unit tests for similar article clustering."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
 
 from data_platform.jobs.similarity.clusters import (
     SIMILARITY_QUERY,
-    group_similar_articles,
     batch_upsert_clusters,
-    DEFAULT_SIMILARITY_THRESHOLD,
-    DEFAULT_TOP_K,
+    group_similar_articles,
 )
 
 
@@ -39,11 +37,13 @@ class TestGroupSimilarArticles:
     """Tests for grouping similarity pairs."""
 
     def test_groups_correctly(self):
-        df = pd.DataFrame({
-            "unique_id": ["a", "a", "b"],
-            "similar_id": ["b", "c", "a"],
-            "similarity": [0.95, 0.85, 0.95],
-        })
+        df = pd.DataFrame(
+            {
+                "unique_id": ["a", "a", "b"],
+                "similar_id": ["b", "c", "a"],
+                "similarity": [0.95, 0.85, 0.95],
+            }
+        )
         result = group_similar_articles(df)
         assert result["a"] == ["b", "c"]  # ordered by similarity desc
         assert result["b"] == ["a"]
@@ -53,11 +53,13 @@ class TestGroupSimilarArticles:
         assert group_similar_articles(df) == {}
 
     def test_single_pair(self):
-        df = pd.DataFrame({
-            "unique_id": ["a"],
-            "similar_id": ["b"],
-            "similarity": [0.9],
-        })
+        df = pd.DataFrame(
+            {
+                "unique_id": ["a"],
+                "similar_id": ["b"],
+                "similarity": [0.9],
+            }
+        )
         result = group_similar_articles(df)
         assert result == {"a": ["b"]}
 

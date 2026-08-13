@@ -11,8 +11,6 @@ These tests ensure that:
 import os
 from unittest.mock import patch
 
-import pytest
-
 
 class TestSettingsDefaults:
     """Tests for default configuration values."""

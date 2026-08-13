@@ -77,9 +77,7 @@ def main():
             if not df.empty:
                 null_hash_count = df["content_hash"].isna().sum()
                 if null_hash_count > 0:
-                    raise ValueError(
-                        f"{null_hash_count}/{len(df)} rows have NULL content_hash"
-                    )
+                    raise ValueError(f"{null_hash_count}/{len(df)} rows have NULL content_hash")
                 gcs_uri = write_to_parquet_gcs(df, bucket, str(current))
                 rows = load_parquet_to_bigquery(gcs_uri, project_id)
                 total_rows += rows

@@ -62,9 +62,7 @@ class TestBqMigrateOffline:
                     f"Migration {m['version']}: CREATE TABLE should use IF NOT EXISTS"
                 )
             if has_drop:
-                assert "IF EXISTS" in sql, (
-                    f"Migration {m['version']}: DROP should use IF EXISTS"
-                )
+                assert "IF EXISTS" in sql, f"Migration {m['version']}: DROP should use IF EXISTS"
 
 
 @pytest.mark.integration

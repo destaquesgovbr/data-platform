@@ -15,9 +15,7 @@ from fastapi import FastAPI, Request, Response
 from data_platform.managers.postgres_manager import PostgresManager
 from data_platform.workers.bronze_writer.handler import handle_bronze_write
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Bronze Writer", version="1.0.0")

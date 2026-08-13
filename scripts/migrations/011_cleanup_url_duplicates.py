@@ -22,7 +22,6 @@ import os
 import sys
 import time
 
-
 BATCH_SIZE = 1000
 
 FIND_DUPLICATES_SQL = """
@@ -90,9 +89,7 @@ def _try_delete_from_typesense(unique_ids):
     except Exception as e:
         logging.warning(f"Typesense cleanup error: {e}")
     if deleted < len(unique_ids):
-        logging.warning(
-            f"Typesense cleanup partial: {deleted}/{len(unique_ids)} documents deleted"
-        )
+        logging.warning(f"Typesense cleanup partial: {deleted}/{len(unique_ids)} documents deleted")
     return deleted
 
 

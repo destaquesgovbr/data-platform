@@ -282,9 +282,7 @@ def typesense_test_data(
             title="Two Days Ago News",
             url="https://example.com/two_days",
             content="Content for two days ago news article",
-            published_at=datetime.combine(
-                two_days_ago, datetime.min.time(), tzinfo=UTC
-            ),
+            published_at=datetime.combine(two_days_ago, datetime.min.time(), tzinfo=UTC),
             extracted_at=datetime.now(UTC),
             theme_l1_id=theme_l1.id,
             most_specific_theme_id=theme_l1.id,  # Only L1

@@ -204,9 +204,9 @@ def _apply_all_migrations():
     # Apply remaining migrations
     result = _run_migrate("migrate", "--yes")
     if result.returncode != 0:
-        assert (
-            "No pending migrations" in result.stdout or result.returncode == 0
-        ), f"Migration failed:\n{result.stdout}\n{result.stderr}"
+        assert "No pending migrations" in result.stdout or result.returncode == 0, (
+            f"Migration failed:\n{result.stdout}\n{result.stderr}"
+        )
 
 
 @pytest.mark.integration

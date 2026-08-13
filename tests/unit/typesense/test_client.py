@@ -2,15 +2,12 @@
 Unit tests for Typesense client (connection and configuration).
 """
 
-import json
 from unittest.mock import Mock, patch
 
-import pytest
-
 from data_platform.typesense.client import (
+    _parse_write_conn,
     get_client,
     wait_for_typesense,
-    _parse_write_conn,
 )
 
 
@@ -100,9 +97,7 @@ class TestGetClient:
 
     @patch("data_platform.typesense.client.typesense.Client")
     @patch("data_platform.typesense.client._parse_write_conn")
-    def test_get_client_prefers_write_conn_over_env(
-        self, mock_parse, mock_client_class
-    ):
+    def test_get_client_prefers_write_conn_over_env(self, mock_parse, mock_client_class):
         """TYPESENSE_WRITE_CONN takes precedence over individual env vars."""
         mock_parse.return_value = ("write.host", "443", "write_key", "https")
         mock_client_class.return_value = Mock()
@@ -140,9 +135,7 @@ class TestWaitForTypesense:
     @patch("data_platform.typesense.client.requests.get")
     @patch("data_platform.typesense.client.get_client")
     @patch("data_platform.typesense.client.time.sleep")
-    def test_wait_retries_on_connection_error(
-        self, mock_sleep, mock_get_client, mock_requests_get
-    ):
+    def test_wait_retries_on_connection_error(self, mock_sleep, mock_get_client, mock_requests_get):
         """Wait retries on connection errors."""
         # First 2 calls fail, third succeeds
         mock_requests_get.side_effect = [

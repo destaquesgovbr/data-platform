@@ -41,8 +41,7 @@ class TestFeatureRegistry:
         """Every feature type must be one of the valid types."""
         for name, spec in registry["features"].items():
             assert spec["type"] in VALID_TYPES, (
-                f"Feature '{name}' has invalid type '{spec['type']}'. "
-                f"Valid types: {VALID_TYPES}"
+                f"Feature '{name}' has invalid type '{spec['type']}'. Valid types: {VALID_TYPES}"
             )
 
     def test_versions_are_strings(self, registry):

@@ -29,13 +29,17 @@ _MLFLOW_URI = os.environ.get("DGB_MLFLOW_TRACKING_URI", "")
 if _MLFLOW_URI:
     try:
         import mlflow
-        _is_local = _MLFLOW_URI.startswith("http://localhost") or _MLFLOW_URI.startswith("http://127.")
+
+        _is_local = _MLFLOW_URI.startswith("http://localhost") or _MLFLOW_URI.startswith(
+            "http://127."
+        )
         if _is_local:
             # Proxy local (gcloud run services proxy) — sem IAP headers, o proxy autentica por conta própria
             mlflow.set_tracking_uri(_MLFLOW_URI)
         else:
             # Servidor remoto protegido por IAP — usar dgb_mlflow para injetar Bearer token
             import dgb_mlflow
+
             dgb_mlflow.configure()
         _MLFLOW_AVAILABLE = True
     except Exception as _e:
@@ -45,25 +49,19 @@ from scorer import compute_scores
 from signals import load_snapshot
 
 EXPERIMENT_NAME = "trend-detection-autoresearch"
-K_EVAL_POINTS = 20   # janelas de avaliação, step = 3 dias
-STEP_DAYS = 3        # dias entre pontos de avaliação
+K_EVAL_POINTS = 20  # janelas de avaliação, step = 3 dias
+STEP_DAYS = 3  # dias entre pontos de avaliação
 
 
-def compute_ndcg10(
-    scores: list[tuple[str, float]], oracle_labels: dict[str, bool]
-) -> float:
+def compute_ndcg10(scores: list[tuple[str, float]], oracle_labels: dict[str, bool]) -> float:
     """Calcula NDCG@10 da lista rankeada contra os oracle_labels."""
     if not scores or not any(oracle_labels.values()):
         return 0.0
 
-    all_entities = list(
-        set(list(oracle_labels.keys()) + [eid for eid, _ in scores])
-    )
+    all_entities = list(set(list(oracle_labels.keys()) + [eid for eid, _ in scores]))
     score_dict = dict(scores)
 
-    y_true = np.array(
-        [[1.0 if oracle_labels.get(eid, False) else 0.0 for eid in all_entities]]
-    )
+    y_true = np.array([[1.0 if oracle_labels.get(eid, False) else 0.0 for eid in all_entities]])
     y_score = np.array([[score_dict.get(eid, 0.0) for eid in all_entities]])
 
     if y_true.sum() == 0:
@@ -74,11 +72,15 @@ def compute_ndcg10(
 
 def _git_commit_hash() -> str:
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:
         return "unknown"
 
@@ -99,12 +101,14 @@ def main():
 
     with run_ctx:
         if _mlflow_active:
-            mlflow.log_params({
-                "k_eval_points": K_EVAL_POINTS,
-                "step_days": STEP_DAYS,
-                "window_days": 7,
-                "baseline_days": 28,
-            })
+            mlflow.log_params(
+                {
+                    "k_eval_points": K_EVAL_POINTS,
+                    "step_days": STEP_DAYS,
+                    "window_days": 7,
+                    "baseline_days": 28,
+                }
+            )
             mlflow.set_tag("git_commit", _git_commit_hash())
 
         ndcg_values = []
@@ -129,12 +133,14 @@ def main():
         elapsed = time.time() - start
 
         if _mlflow_active:
-            mlflow.log_metrics({
-                "ndcg_at_10": avg_ndcg,
-                "eval_points": float(len(ndcg_values)),
-                "avg_oracle_positives": avg_positives,
-                "total_seconds": elapsed,
-            })
+            mlflow.log_metrics(
+                {
+                    "ndcg_at_10": avg_ndcg,
+                    "eval_points": float(len(ndcg_values)),
+                    "avg_oracle_positives": avg_positives,
+                    "total_seconds": elapsed,
+                }
+            )
             try:
                 mlflow.log_artifact("scorer.py")
             except Exception:

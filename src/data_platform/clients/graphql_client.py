@@ -4,7 +4,6 @@ GraphQL client for internal API calls from workers and DAGs.
 Uses httpx for HTTP + google-auth for Cloud Run OIDC authentication.
 """
 
-import json
 import logging
 import os
 from dataclasses import dataclass

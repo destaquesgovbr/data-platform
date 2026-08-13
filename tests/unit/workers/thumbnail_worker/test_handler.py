@@ -3,6 +3,7 @@
 from unittest.mock import Mock
 
 import pytest
+
 from data_platform.workers.thumbnail_worker.extractor import (
     ThumbnailExtractionError,
     ThumbnailExtractionResult,

@@ -7,10 +7,12 @@ and upserts it to the Typesense collection.
 Supports fetching via GraphQL (preferred) or direct PostgreSQL (fallback).
 """
 
+from datetime import UTC
+
 import pandas as pd
 from loguru import logger
 
-from data_platform.clients.graphql_client import GraphQLClient, NEWS_FOR_TYPESENSE_QUERY
+from data_platform.clients.graphql_client import NEWS_FOR_TYPESENSE_QUERY, GraphQLClient
 from data_platform.managers.postgres_manager import PostgresManager
 from data_platform.typesense.client import get_client
 from data_platform.typesense.collection import COLLECTION_NAME, create_collection
@@ -66,7 +68,7 @@ def _parse_iso_to_epoch(iso_str: str | None) -> int:
     """Convert an ISO-8601 datetime string to a Unix epoch integer."""
     if not iso_str:
         return 0
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     try:
         dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
@@ -99,9 +101,9 @@ def _map_graphql_row(gql_row: dict) -> dict:
         ts = _parse_iso_to_epoch(mapped.pop("published_at"))
         mapped["published_at_ts"] = ts
         if ts > 0:
-            from datetime import datetime, timezone
+            from datetime import datetime
 
-            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            dt = datetime.fromtimestamp(ts, tz=UTC)
             mapped["published_year"] = dt.year
             mapped["published_month"] = dt.month
 
@@ -111,9 +113,7 @@ def _map_graphql_row(gql_row: dict) -> dict:
     return mapped
 
 
-def fetch_news_for_typesense_via_graphql(
-    gql_client: GraphQLClient, unique_id: str
-) -> dict | None:
+def fetch_news_for_typesense_via_graphql(gql_client: GraphQLClient, unique_id: str) -> dict | None:
     """
     Fetch a single news article via GraphQL for Typesense indexing.
 

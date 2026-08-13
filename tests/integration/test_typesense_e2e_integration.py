@@ -31,9 +31,7 @@ class TestTypesenseE2ESync:
     ) -> None:
         """Complete roundtrip: PG → prepare → Typesense → search."""
         # Get news from PostgreSQL
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         assert len(df) == 1, "Should have 1 article for today"
 
@@ -42,17 +40,13 @@ class TestTypesenseE2ESync:
         document = prepare_document(row)
 
         # Index in Typesense
-        result = typesense_client.collections[typesense_test_collection].documents.upsert(
-            document
-        )
+        result = typesense_client.collections[typesense_test_collection].documents.upsert(document)
 
         # Verify upsert succeeded
         assert "id" in result
 
         # Search for the document
-        search_results = typesense_client.collections[
-            typesense_test_collection
-        ].documents.search(
+        search_results = typesense_client.collections[typesense_test_collection].documents.search(
             {
                 "q": "Today",
                 "query_by": "title",
@@ -77,18 +71,14 @@ class TestTypesenseE2ESync:
     ) -> None:
         """PostgreSQL document is accepted by Typesense schema."""
         # Get news from PostgreSQL
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         # Prepare document
         row = df.iloc[0]
         document = prepare_document(row)
 
         # Attempt to index (should not raise schema validation error)
-        result = typesense_client.collections[typesense_test_collection].documents.upsert(
-            document
-        )
+        result = typesense_client.collections[typesense_test_collection].documents.upsert(document)
 
         # Verify success
         assert "id" in result
@@ -123,9 +113,7 @@ class TestTypesenseE2ESync:
         assert success_count == 3, f"Expected 3 successes, got {success_count}"
 
         # Verify count in Typesense
-        search_results = typesense_client.collections[
-            typesense_test_collection
-        ].documents.search(
+        search_results = typesense_client.collections[typesense_test_collection].documents.search(
             {
                 "q": "*",  # Match all
                 "query_by": "title",
@@ -144,9 +132,7 @@ class TestTypesenseE2ESync:
     ) -> None:
         """All important fields are preserved in roundtrip."""
         # Get news from PostgreSQL
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         row = df.iloc[0]
         document = prepare_document(row)
@@ -155,9 +141,11 @@ class TestTypesenseE2ESync:
         typesense_client.collections[typesense_test_collection].documents.upsert(document)
 
         # Retrieve document by ID
-        retrieved = typesense_client.collections[typesense_test_collection].documents[
-            document["id"]
-        ].retrieve()
+        retrieved = (
+            typesense_client.collections[typesense_test_collection]
+            .documents[document["id"]]
+            .retrieve()
+        )
 
         # Verify core fields
         assert retrieved["title"] == "Today's News"
@@ -184,9 +172,7 @@ class TestTypesenseE2ESync:
     ) -> None:
         """768-dim embedding vectors are preserved."""
         # Get news from PostgreSQL
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         row = df.iloc[0]
         document = prepare_document(row)
@@ -199,14 +185,14 @@ class TestTypesenseE2ESync:
             assert len(embedding) == 768, f"Expected 768 dims, got {len(embedding)}"
 
             # Index
-            typesense_client.collections[typesense_test_collection].documents.upsert(
-                document
-            )
+            typesense_client.collections[typesense_test_collection].documents.upsert(document)
 
             # Retrieve
-            retrieved = typesense_client.collections[typesense_test_collection].documents[
-                document["id"]
-            ].retrieve()
+            retrieved = (
+                typesense_client.collections[typesense_test_collection]
+                .documents[document["id"]]
+                .retrieve()
+            )
 
             # Verify embedding preserved
             if "content_embedding" in retrieved:
@@ -236,9 +222,7 @@ class TestTypesenseE2ESync:
         )
 
         # Search for positive sentiment only
-        search_results = typesense_client.collections[
-            typesense_test_collection
-        ].documents.search(
+        search_results = typesense_client.collections[typesense_test_collection].documents.search(
             {
                 "q": "*",
                 "query_by": "title",
@@ -259,9 +243,7 @@ class TestTypesenseE2ESync:
     ) -> None:
         """Can update existing document (upsert)."""
         # Get news from PostgreSQL
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         row = df.iloc[0]
         document = prepare_document(row)
@@ -276,17 +258,19 @@ class TestTypesenseE2ESync:
         typesense_client.collections[typesense_test_collection].documents.upsert(document)
 
         # Retrieve
-        retrieved = typesense_client.collections[typesense_test_collection].documents[
-            document["id"]
-        ].retrieve()
+        retrieved = (
+            typesense_client.collections[typesense_test_collection]
+            .documents[document["id"]]
+            .retrieve()
+        )
 
         # Verify update
         assert retrieved["title"] == "Updated Title"
 
         # Verify count is still 1 (not duplicated)
-        search_results = typesense_client.collections[
-            typesense_test_collection
-        ].documents.search({"q": "*", "query_by": "title"})
+        search_results = typesense_client.collections[typesense_test_collection].documents.search(
+            {"q": "*", "query_by": "title"}
+        )
         assert search_results["found"] == 1
 
 
@@ -299,9 +283,7 @@ class TestTypesenseDocumentPreparation:
     ) -> None:
         """prepare_document includes all required fields."""
         # Get news from PostgreSQL
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         row = df.iloc[0]
         document = prepare_document(row)
@@ -363,9 +345,7 @@ class TestTypesenseDocumentPreparation:
     ) -> None:
         """prepare_document handles array fields (tags)."""
         # Get news with tags
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         row = df.iloc[0]
         document = prepare_document(row)

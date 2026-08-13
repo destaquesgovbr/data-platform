@@ -24,7 +24,6 @@ except ImportError:
     },
 )
 def compute_clusters_dag():
-
     @task()
     def find_and_store_clusters(**context):
         """Find similar articles and upsert to news_features.
@@ -32,9 +31,6 @@ def compute_clusters_dag():
         Uses GraphQL API when GRAPHQL_API_URL is set, otherwise falls back
         to direct PostgreSQL queries via pgvector.
         """
-        from data_platform.jobs.similarity.clusters import (
-            group_similar_articles,
-        )
 
         graphql_url = os.environ.get("GRAPHQL_API_URL")
 

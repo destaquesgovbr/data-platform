@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS dgb_gold.umami_pageviews (
   country STRING,
   region STRING,
   city STRING,
-  language STRING
+  `language` STRING
 )
 PARTITION BY DATE(created_at)
 CLUSTER BY url_path

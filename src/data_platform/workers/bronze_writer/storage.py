@@ -11,9 +11,7 @@ logger = logging.getLogger(__name__)
 
 def build_gcs_path(unique_id: str, published_at: datetime) -> str:
     """Build partitioned GCS path: bronze/news/YYYY/MM/DD/{unique_id}.json"""
-    return (
-        f"bronze/news/{published_at.strftime('%Y/%m/%d')}/{unique_id}.json"
-    )
+    return f"bronze/news/{published_at.strftime('%Y/%m/%d')}/{unique_id}.json"
 
 
 def write_to_gcs(bucket_name: str, path: str, data: dict) -> None:

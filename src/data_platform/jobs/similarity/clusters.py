@@ -1,7 +1,7 @@
 """Compute similar article clusters using pgvector cosine similarity."""
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -38,11 +38,13 @@ def fetch_similar_articles_via_graphql(
             {"uniqueId": uid, "threshold": threshold, "limit": limit},
         )
         for item in data.get("similarArticles", []):
-            rows.append({
-                "unique_id": uid,
-                "similar_id": item["uniqueId"],
-                "similarity": item["similarity"],
-            })
+            rows.append(
+                {
+                    "unique_id": uid,
+                    "similar_id": item["uniqueId"],
+                    "similarity": item["similarity"],
+                }
+            )
 
     df = pd.DataFrame(rows, columns=["unique_id", "similar_id", "similarity"])
     logger.info(
@@ -84,6 +86,7 @@ def batch_upsert_clusters_via_graphql(
 
     logger.info(f"[GraphQL] Upserted similar_articles: {processed} processed, {failed} failed")
     return processed
+
 
 # Find top-K similar articles for each article published in the last 24h
 # Uses pgvector <=> operator (cosine distance)
@@ -134,7 +137,7 @@ def fetch_similar_articles(
     Returns:
         DataFrame with columns [unique_id, similar_id, similarity]
     """
-    from sqlalchemy import create_engine, text
+    from sqlalchemy import create_engine
     from sqlalchemy.pool import NullPool
 
     engine = create_engine(db_url, poolclass=NullPool)

@@ -30,7 +30,15 @@ class TestPageviewsQuery:
         assert "we.created_at < %s" in PAGEVIEWS_QUERY
 
     def test_selects_session_fields(self):
-        for field in ["s.browser", "s.os", "s.device", "s.country", "s.region", "s.city", "s.language"]:
+        for field in [
+            "s.browser",
+            "s.os",
+            "s.device",
+            "s.country",
+            "s.region",
+            "s.city",
+            "s.language",
+        ]:
             assert field in PAGEVIEWS_QUERY
 
     def test_selects_utm_fields(self):
@@ -95,20 +103,43 @@ class TestSchemas:
         """Schema field names should match the columns returned by the SQL query."""
         schema_names = {s[0] for s in PAGEVIEWS_SCHEMA}
         expected = {
-            "event_id", "session_id", "visit_id", "created_at",
-            "url_path", "url_query", "page_title", "referrer_domain",
-            "referrer_path", "hostname", "utm_source", "utm_medium",
-            "utm_campaign", "browser", "os", "device", "country",
-            "region", "city", "language",
+            "event_id",
+            "session_id",
+            "visit_id",
+            "created_at",
+            "url_path",
+            "url_query",
+            "page_title",
+            "referrer_domain",
+            "referrer_path",
+            "hostname",
+            "utm_source",
+            "utm_medium",
+            "utm_campaign",
+            "browser",
+            "os",
+            "device",
+            "country",
+            "region",
+            "city",
+            "language",
         }
         assert schema_names == expected
 
     def test_events_schema_field_names_match_query_columns(self):
         schema_names = {s[0] for s in EVENTS_SCHEMA}
         expected = {
-            "event_id", "session_id", "created_at", "event_name",
-            "url_path", "hostname", "event_data", "browser", "os",
-            "device", "country",
+            "event_id",
+            "session_id",
+            "created_at",
+            "event_name",
+            "url_path",
+            "hostname",
+            "event_data",
+            "browser",
+            "os",
+            "device",
+            "country",
         }
         assert schema_names == expected
 
@@ -146,8 +177,12 @@ class TestFetchUmamiPageviews:
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
         mock_cursor.fetchall.return_value = [
-            {"event_id": "id-1", "session_id": "sess-1", "url_path": "/artigos/abc123",
-             "created_at": datetime(2026, 3, 1, 10, 0, 0)},
+            {
+                "event_id": "id-1",
+                "session_id": "sess-1",
+                "url_path": "/artigos/abc123",
+                "created_at": datetime(2026, 3, 1, 10, 0, 0),
+            },
         ]
 
         result = fetch_umami_pageviews("postgresql://test", "2026-03-01", "2026-03-02")
@@ -196,12 +231,19 @@ class TestFetchUmamiEvents:
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
         mock_cursor.fetchall.return_value = [
-            {"event_id": "id-1", "session_id": "sess-1",
-             "created_at": datetime(2026, 3, 1, 10, 0, 0),
-             "event_name": "article_click", "url_path": "/artigos/abc123",
-             "hostname": "example.com", "browser": "chrome", "os": "Mac OS",
-             "device": "laptop", "country": "BR",
-             "event_data": {"article_id": "abc123", "origin": "home"}},
+            {
+                "event_id": "id-1",
+                "session_id": "sess-1",
+                "created_at": datetime(2026, 3, 1, 10, 0, 0),
+                "event_name": "article_click",
+                "url_path": "/artigos/abc123",
+                "hostname": "example.com",
+                "browser": "chrome",
+                "os": "Mac OS",
+                "device": "laptop",
+                "country": "BR",
+                "event_data": {"article_id": "abc123", "origin": "home"},
+            },
         ]
 
         result = fetch_umami_events("postgresql://test", "2026-03-01", "2026-03-02")
@@ -218,11 +260,19 @@ class TestFetchUmamiEvents:
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
         mock_cursor.fetchall.return_value = [
-            {"event_id": "id-1", "session_id": "sess-1",
-             "created_at": datetime(2026, 3, 1, 10, 0, 0),
-             "event_name": "button_click", "url_path": "/",
-             "hostname": "example.com", "browser": "chrome", "os": "Mac OS",
-             "device": "laptop", "country": "BR", "event_data": None},
+            {
+                "event_id": "id-1",
+                "session_id": "sess-1",
+                "created_at": datetime(2026, 3, 1, 10, 0, 0),
+                "event_name": "button_click",
+                "url_path": "/",
+                "hostname": "example.com",
+                "browser": "chrome",
+                "os": "Mac OS",
+                "device": "laptop",
+                "country": "BR",
+                "event_data": None,
+            },
         ]
 
         result = fetch_umami_events("postgresql://test", "2026-03-01", "2026-03-02")
@@ -271,7 +321,9 @@ class TestLoadToBigquery:
                 {"event_id": "id-1", "session_id": "s-1"},
                 {"event_id": "id-2", "session_id": "s-2"},
             ]
-            result = load_to_bigquery(rows, "my-project", "dgb_gold.umami_pageviews", PAGEVIEWS_SCHEMA)
+            result = load_to_bigquery(
+                rows, "my-project", "dgb_gold.umami_pageviews", PAGEVIEWS_SCHEMA
+            )
 
             assert result == 5
             call_args = mock_client.load_table_from_json.call_args

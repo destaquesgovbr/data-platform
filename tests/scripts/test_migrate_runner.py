@@ -1,11 +1,9 @@
 """Unit tests for scripts/migrate.py — generic migration runner."""
 
-import json
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -623,26 +621,27 @@ class TestStamp:
         """Run the stamp command via main() with mocked dependencies."""
         import migrate
 
-        with patch.object(
-            sys,
-            "argv",
-            ["migrate.py", "stamp", target, "--db-url", "postgresql://test", "--yes"],
-        ), patch("psycopg2.connect", return_value=mock_conn), patch.object(
-            migrate, "bootstrap"
-        ), patch.object(
-            migrate,
-            "discover_migrations",
-            return_value=self._make_migrations(
-                [m.version for m in pending]
-                + [v for v in ["001", "002", "003", "004", "005"] if v <= target]
+        with (
+            patch.object(
+                sys,
+                "argv",
+                ["migrate.py", "stamp", target, "--db-url", "postgresql://test", "--yes"],
             ),
-        ) as mock_discover, patch.object(
-            migrate, "get_pending", return_value=pending
-        ) as mock_get_pending, patch.object(
-            migrate, "_record_history"
-        ) as mock_record, patch.object(
-            migrate, "_get_applied_by", return_value="test-user"
-        ), patch.object(migrate, "_get_run_id", return_value=None):
+            patch("psycopg2.connect", return_value=mock_conn),
+            patch.object(migrate, "bootstrap"),
+            patch.object(
+                migrate,
+                "discover_migrations",
+                return_value=self._make_migrations(
+                    [m.version for m in pending]
+                    + [v for v in ["001", "002", "003", "004", "005"] if v <= target]
+                ),
+            ) as mock_discover,
+            patch.object(migrate, "get_pending", return_value=pending) as mock_get_pending,
+            patch.object(migrate, "_record_history") as mock_record,
+            patch.object(migrate, "_get_applied_by", return_value="test-user"),
+            patch.object(migrate, "_get_run_id", return_value=None),
+        ):
             with pytest.raises(SystemExit) as exc_info:
                 migrate.main()
             assert exc_info.value.code in (None, 0)

@@ -14,7 +14,6 @@ Oracle: uma entidade é "trending" se:
 
 import os
 from datetime import date, timedelta
-from typing import Optional
 
 import numpy as np
 import psycopg2
@@ -44,7 +43,7 @@ def _cosine_sim_batch(vecs: np.ndarray, centroid: np.ndarray) -> np.ndarray:
 def load_snapshot(
     window_days: int = 7,
     baseline_days: int = 28,
-    date_end: Optional[date] = None,
+    date_end: date | None = None,
     min_window_articles: int = 3,
 ) -> dict:
     """

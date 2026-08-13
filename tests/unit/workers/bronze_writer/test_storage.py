@@ -1,26 +1,24 @@
 """Unit tests for Bronze Writer."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from data_platform.workers.bronze_writer.storage import build_gcs_path
 
 
 class TestBuildGcsPath:
     def test_path_generation(self):
-        dt = datetime(2024, 6, 15, 14, 30, 0, tzinfo=timezone.utc)
+        dt = datetime(2024, 6, 15, 14, 30, 0, tzinfo=UTC)
         path = build_gcs_path("abc123", dt)
         assert path == "bronze/news/2024/06/15/abc123.json"
 
     def test_path_single_digit_month(self):
-        dt = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2024, 1, 5, 0, 0, 0, tzinfo=UTC)
         path = build_gcs_path("xyz789", dt)
         assert path == "bronze/news/2024/01/05/xyz789.json"
 
     def test_idempotent(self):
-        dt = datetime(2024, 6, 15, 14, 30, 0, tzinfo=timezone.utc)
+        dt = datetime(2024, 6, 15, 14, 30, 0, tzinfo=UTC)
         path1 = build_gcs_path("abc123", dt)
         path2 = build_gcs_path("abc123", dt)
         assert path1 == path2
@@ -39,7 +37,7 @@ class TestHandleBronzeWrite:
         conn.cursor.return_value = cursor
         cursor.fetchone.return_value = {
             "unique_id": "abc123",
-            "published_at": datetime(2024, 6, 15, tzinfo=timezone.utc),
+            "published_at": datetime(2024, 6, 15, tzinfo=UTC),
             "title": "Test",
             "content": "Content",
         }

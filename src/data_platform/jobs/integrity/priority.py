@@ -145,9 +145,7 @@ def fetch_priority_batch(db_url: str, batch_size: int = 400) -> list[dict]:
         articles.append(article)
 
     if filtered_count:
-        logger.warning(
-            f"{filtered_count}/{len(rows)} artigos com image_url filtrada por allowlist"
-        )
+        logger.warning(f"{filtered_count}/{len(rows)} artigos com image_url filtrada por allowlist")
 
     logger.info(
         f"Batch de verificação: {len(articles)} artigos "

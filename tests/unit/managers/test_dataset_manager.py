@@ -5,8 +5,8 @@ These tests mock HuggingFace Hub calls to test logic without network access.
 """
 
 from collections import OrderedDict
-from unittest.mock import MagicMock, Mock, patch
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -60,9 +60,7 @@ class TestDatasetManagerInsert:
             }
         )
 
-        with patch(
-            "data_platform.managers.dataset_manager.Dataset.from_dict"
-        ) as mock_from_dict:
+        with patch("data_platform.managers.dataset_manager.Dataset.from_dict") as mock_from_dict:
             mock_dataset = MagicMock()
             mock_from_dict.return_value = mock_dataset
 
@@ -266,11 +264,14 @@ class TestDatasetManagerErrorHandling:
         mock_dataset_manager_base._load_existing_dataset = MagicMock(return_value=None)
         mock_dataset = MagicMock(spec=Dataset)
 
-        with patch.object(mock_dataset_manager_base, "_push_datasets") as mock_push, \
-             patch.object(mock_dataset_manager_base, "_sort_dataset", return_value=mock_dataset), \
-             patch("data_platform.managers.dataset_manager.Dataset.from_dict",
-                   return_value=mock_dataset):
-
+        with (
+            patch.object(mock_dataset_manager_base, "_push_datasets") as mock_push,
+            patch.object(mock_dataset_manager_base, "_sort_dataset", return_value=mock_dataset),
+            patch(
+                "data_platform.managers.dataset_manager.Dataset.from_dict",
+                return_value=mock_dataset,
+            ),
+        ):
             mock_push.side_effect = Exception("Hub API error")
 
             new_data = OrderedDict(

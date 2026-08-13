@@ -6,7 +6,7 @@ These functions have no side effects and require no mocking.
 
 import json
 import struct
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
@@ -484,9 +484,7 @@ class TestIndexDocuments:
                 "published_at_ts": [1704067200, 1704153600],
             }
         )
-        mock_client, _ = self._make_client(
-            import_results=[{"success": True}, {"success": True}]
-        )
+        mock_client, _ = self._make_client(import_results=[{"success": True}, {"success": True}])
 
         stats = index_documents(mock_client, df)
 
@@ -511,9 +509,7 @@ class TestIndexDocuments:
         from data_platform.typesense.indexer import index_documents
 
         df = pd.DataFrame({"unique_id": ["abc"], "published_at_ts": [1704067200]})
-        mock_client, _ = self._make_client(
-            num_documents=1000, import_results=[{"success": True}]
-        )
+        mock_client, _ = self._make_client(num_documents=1000, import_results=[{"success": True}])
 
         stats = index_documents(mock_client, df, mode="full", force=True)
 

@@ -43,6 +43,7 @@ class TestEngagementQuery:
     def test_query_regex_accepts_slug_format(self):
         """Regex must be able to match slug-based unique_ids."""
         import re
+
         # Extract the Python regex from the BigQuery query (double braces → single)
         bq_pattern = ENGAGEMENT_QUERY.replace("{{", "{").replace("}}", "}")
         match = re.search(r"REGEXP_EXTRACT\(url_path,\s*r'(/artigos/\([^)]+\))'\)", bq_pattern)
@@ -50,14 +51,15 @@ class TestEngagementQuery:
         # The capture group pattern (inside parentheses)
         full_pattern = match.group(1)
         # Test it matches both formats
-        assert re.search(full_pattern, "/artigos/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"), \
+        assert re.search(full_pattern, "/artigos/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"), (
             "Regex should match legacy MD5 format"
-        assert re.search(full_pattern, "/artigos/governo-anuncia-programa_a3f2e1"), \
+        )
+        assert re.search(full_pattern, "/artigos/governo-anuncia-programa_a3f2e1"), (
             "Regex should match new slug format"
+        )
 
 
 class TestBatchUpsertEngagement:
-
     @patch("data_platform.jobs.bigquery.engagement.create_engine")
     def test_upserts_all_rows(self, mock_create_engine):
         mock_engine = MagicMock()
@@ -67,11 +69,13 @@ class TestBatchUpsertEngagement:
         mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
         mock_conn.execute.return_value.scalars.return_value.all.return_value = ["art-1", "art-2"]
 
-        df = pd.DataFrame({
-            "unique_id": ["art-1", "art-2"],
-            "view_count": [100, 50],
-            "unique_sessions": [80, 40],
-        })
+        df = pd.DataFrame(
+            {
+                "unique_id": ["art-1", "art-2"],
+                "view_count": [100, 50],
+                "unique_sessions": [80, 40],
+            }
+        )
         count = batch_upsert_engagement("postgresql://test", df)
         assert count == 2
         mock_engine.dispose.assert_called_once()
@@ -85,16 +89,17 @@ class TestBatchUpsertEngagement:
         mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
         mock_conn.execute.return_value.scalars.return_value.all.return_value = ["art-1"]
 
-        df = pd.DataFrame({
-            "unique_id": ["art-1"],
-            "view_count": [42],
-            "unique_sessions": [30],
-        })
+        df = pd.DataFrame(
+            {
+                "unique_id": ["art-1"],
+                "view_count": [42],
+                "unique_sessions": [30],
+            }
+        )
         batch_upsert_engagement("postgresql://test", df)
 
         upsert_call = next(
-            c for c in mock_conn.execute.call_args_list
-            if "INSERT INTO" in str(c.args[0])
+            c for c in mock_conn.execute.call_args_list if "INSERT INTO" in str(c.args[0])
         )
         params = upsert_call.args[1]
         assert params["uid"] == "art-1"
@@ -126,11 +131,13 @@ class TestBatchUpsertEngagement:
         filter_result.scalars.return_value.all.return_value = ["art-1"]
         mock_conn.execute.side_effect = [filter_result, Exception("DB error")]
 
-        df = pd.DataFrame({
-            "unique_id": ["art-1"],
-            "view_count": [10],
-            "unique_sessions": [5],
-        })
+        df = pd.DataFrame(
+            {
+                "unique_id": ["art-1"],
+                "view_count": [10],
+                "unique_sessions": [5],
+            }
+        )
         with pytest.raises(Exception, match="DB error"):
             batch_upsert_engagement("postgresql://test", df)
         mock_engine.dispose.assert_called_once()
@@ -144,11 +151,13 @@ class TestBatchUpsertEngagement:
         mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
         mock_conn.execute.return_value.scalars.return_value.all.return_value = ["art-1"]
 
-        df = pd.DataFrame({
-            "unique_id": ["art-1", "orphan-1"],
-            "view_count": [100, 50],
-            "unique_sessions": [80, 40],
-        })
+        df = pd.DataFrame(
+            {
+                "unique_id": ["art-1", "orphan-1"],
+                "view_count": [100, 50],
+                "unique_sessions": [80, 40],
+            }
+        )
         count = batch_upsert_engagement("postgresql://test", df)
         assert count == 1
         mock_engine.dispose.assert_called_once()
@@ -162,11 +171,13 @@ class TestBatchUpsertEngagement:
         mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
         mock_conn.execute.return_value.scalars.return_value.all.return_value = ["art-1"]
 
-        df = pd.DataFrame({
-            "unique_id": ["art-1", "orphan-1", "orphan-2"],
-            "view_count": [100, 50, 30],
-            "unique_sessions": [80, 40, 25],
-        })
+        df = pd.DataFrame(
+            {
+                "unique_id": ["art-1", "orphan-1", "orphan-2"],
+                "view_count": [100, 50, 30],
+                "unique_sessions": [80, 40, 25],
+            }
+        )
         with caplog.at_level(logging.WARNING, logger="data_platform.jobs.bigquery.engagement"):
             batch_upsert_engagement("postgresql://test", df)
         assert "Filtered 2 orphaned" in caplog.text

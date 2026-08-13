@@ -1,7 +1,7 @@
 """Unit tests for trending score computation."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -35,10 +35,12 @@ class TestBatchUpsertTrending:
     def test_upserts_all_rows(self, mock_sqlalchemy_engine):
         mock_engine, mock_conn = mock_sqlalchemy_engine
 
-        df = pd.DataFrame({
-            "unique_id": ["art-1", "art-2", "art-3"],
-            "trending_score": [2.5, 1.8, 0.5],
-        })
+        df = pd.DataFrame(
+            {
+                "unique_id": ["art-1", "art-2", "art-3"],
+                "trending_score": [2.5, 1.8, 0.5],
+            }
+        )
 
         with patch("sqlalchemy.create_engine", return_value=mock_engine):
             count = batch_upsert_trending("postgresql://test", df)
@@ -61,10 +63,12 @@ class TestBatchUpsertTrending:
     def test_upserts_correct_feature_dict(self, mock_sqlalchemy_engine):
         mock_engine, mock_conn = mock_sqlalchemy_engine
 
-        df = pd.DataFrame({
-            "unique_id": ["art-1"],
-            "trending_score": [3.14],
-        })
+        df = pd.DataFrame(
+            {
+                "unique_id": ["art-1"],
+                "trending_score": [3.14],
+            }
+        )
 
         with patch("sqlalchemy.create_engine", return_value=mock_engine):
             batch_upsert_trending("postgresql://test", df)

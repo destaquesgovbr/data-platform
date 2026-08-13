@@ -1,7 +1,6 @@
 """Sync PostgreSQL news + features to BigQuery Gold layer."""
 
 import logging
-from datetime import datetime
 
 import pandas as pd
 
@@ -99,15 +98,28 @@ def write_to_parquet_gcs(
 
     # Cast nullable int columns to Int64 (Pandas nullable integer) so Parquet
     # writes them as INT64 instead of DOUBLE when NaN values are present.
-    int_cols = ["word_count", "char_count", "paragraph_count", "publication_hour", "publication_dow"]
+    int_cols = [
+        "word_count",
+        "char_count",
+        "paragraph_count",
+        "publication_hour",
+        "publication_dow",
+    ]
     for col in int_cols:
         if col in df.columns:
             df[col] = df[col].astype("Int64")
 
     # Write to local temp, then upload
     import tempfile
+
     with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
-        df.to_parquet(tmp.name, index=False, engine="pyarrow", coerce_timestamps="us", allow_truncated_timestamps=True)
+        df.to_parquet(
+            tmp.name,
+            index=False,
+            engine="pyarrow",
+            coerce_timestamps="us",
+            allow_truncated_timestamps=True,
+        )
         client = storage.Client()
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(gcs_path)
@@ -231,30 +243,32 @@ def fetch_news_for_bigquery_via_graphql(
     # Convert camelCase GraphQL response to snake_case DataFrame columns
     rows = []
     for r in all_rows:
-        rows.append({
-            "unique_id": r.get("uniqueId"),
-            "title": r.get("title"),
-            "url": r.get("url"),
-            "agency_key": r.get("agencyKey"),
-            "agency_name": r.get("agencyName"),
-            "published_at": r.get("publishedAt"),
-            "theme_l1_code": r.get("themL1Code"),
-            "theme_l1_label": r.get("themL1Label"),
-            "theme_l2_code": r.get("themL2Code"),
-            "theme_l2_label": r.get("themL2Label"),
-            "most_specific_theme_code": r.get("mostSpecificThemeCode"),
-            "most_specific_theme_label": r.get("mostSpecificThemeLabel"),
-            "word_count": r.get("wordCount"),
-            "char_count": r.get("charCount"),
-            "paragraph_count": r.get("paragraphCount"),
-            "has_image": r.get("hasImage"),
-            "has_video": r.get("hasVideo"),
-            "sentiment_label": r.get("sentimentLabel"),
-            "sentiment_score": r.get("sentimentScore"),
-            "readability_flesch": r.get("readabilityFlesch"),
-            "publication_hour": r.get("publicationHour"),
-            "publication_dow": r.get("publicationDow"),
-        })
+        rows.append(
+            {
+                "unique_id": r.get("uniqueId"),
+                "title": r.get("title"),
+                "url": r.get("url"),
+                "agency_key": r.get("agencyKey"),
+                "agency_name": r.get("agencyName"),
+                "published_at": r.get("publishedAt"),
+                "theme_l1_code": r.get("themL1Code"),
+                "theme_l1_label": r.get("themL1Label"),
+                "theme_l2_code": r.get("themL2Code"),
+                "theme_l2_label": r.get("themL2Label"),
+                "most_specific_theme_code": r.get("mostSpecificThemeCode"),
+                "most_specific_theme_label": r.get("mostSpecificThemeLabel"),
+                "word_count": r.get("wordCount"),
+                "char_count": r.get("charCount"),
+                "paragraph_count": r.get("paragraphCount"),
+                "has_image": r.get("hasImage"),
+                "has_video": r.get("hasVideo"),
+                "sentiment_label": r.get("sentimentLabel"),
+                "sentiment_score": r.get("sentimentScore"),
+                "readability_flesch": r.get("readabilityFlesch"),
+                "publication_hour": r.get("publicationHour"),
+                "publication_dow": r.get("publicationDow"),
+            }
+        )
 
     df = pd.DataFrame(rows)
     logger.info(f"Fetched {len(df)} rows via GraphQL ({start_date} to {end_date})")
@@ -266,10 +280,9 @@ def sync_dimensions(db_url: str, project_id: str) -> None:
 
     Full replace — dimensions are small and change rarely.
     """
+    from google.cloud import bigquery
     from sqlalchemy import create_engine
     from sqlalchemy.pool import NullPool
-
-    from google.cloud import bigquery
 
     client = bigquery.Client(project=project_id)
     engine = create_engine(db_url, poolclass=NullPool)

@@ -115,9 +115,9 @@ def test_args_passed_via_overrides():
     src = _source()
     # Verifica que args são passados via container_overrides
     assert '"args":' in src
-    assert '--since' in src
-    assert '--limit' in src
-    assert '--workers' in src
+    assert "--since" in src
+    assert "--limit" in src
+    assert "--workers" in src
     # clear_args foi removido do código (apenas aparece em comentário agora)
     assert '"clear_args"' not in src  # Não aparece como chave no dicionário
 

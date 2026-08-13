@@ -1,7 +1,7 @@
 """Unit tests for feature computation functions."""
 
 import unicodedata
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -75,11 +75,11 @@ class TestComputeHasVideo:
 
 class TestComputePublicationHour:
     def test_utc_hour(self):
-        dt = datetime(2024, 6, 15, 14, 30, 0, tzinfo=timezone.utc)
+        dt = datetime(2024, 6, 15, 14, 30, 0, tzinfo=UTC)
         assert compute_publication_hour(dt) == 14
 
     def test_midnight(self):
-        dt = datetime(2024, 6, 15, 0, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2024, 6, 15, 0, 0, 0, tzinfo=UTC)
         assert compute_publication_hour(dt) == 0
 
     def test_none_raises(self):
@@ -124,7 +124,7 @@ class TestComputeAll:
             "content": "Este é o conteúdo do artigo. " * 5,
             "image_url": "https://example.com/img.jpg",
             "video_url": None,
-            "published_at": datetime(2024, 6, 17, 14, 30, 0, tzinfo=timezone.utc),
+            "published_at": datetime(2024, 6, 17, 14, 30, 0, tzinfo=UTC),
         }
         features = compute_all(article)
 
@@ -147,7 +147,12 @@ class TestComputeAll:
 
     def test_explicit_none_published_at(self):
         """Explicit published_at=None behaves same as missing key."""
-        article = {"content": "Some text.", "image_url": None, "video_url": None, "published_at": None}
+        article = {
+            "content": "Some text.",
+            "image_url": None,
+            "video_url": None,
+            "published_at": None,
+        }
         features = compute_all(article)
 
         assert "publication_hour" not in features

@@ -8,7 +8,7 @@ ADD COLUMN IF NOT EXISTS content_embedding vector(768);
 
 -- Add timestamp to track when embedding was generated
 ALTER TABLE news
-ADD COLUMN IF NOT EXISTS embedding_generated_at TIMESTAMP WITH TIME ZONE;
+ADD COLUMN IF NOT EXISTS embedding_generated_at timestamp with time zone;
 
 -- Add comments for documentation
 COMMENT ON COLUMN news.content_embedding IS

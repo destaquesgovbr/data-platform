@@ -13,7 +13,6 @@ import time
 import unicodedata
 from datetime import date
 
-
 # =============================================================================
 # ID Generation Functions (inline copy from scraper)
 # =============================================================================
@@ -40,7 +39,7 @@ def generate_suffix(agency: str, published_at_value, title: str) -> str:
         if isinstance(published_at_value, date)
         else str(published_at_value)
     )
-    hash_input = f"{agency}_{date_str}_{title}".encode("utf-8")
+    hash_input = f"{agency}_{date_str}_{title}".encode()
     return hashlib.md5(hash_input).hexdigest()[:6]
 
 
@@ -56,10 +55,8 @@ def generate_readable_unique_id(agency: str, published_at_value, title: str) -> 
 def _generate_id_with_extended_suffix(agency, published_at, title, extra_chars):
     """Generate ID with a longer suffix to resolve collisions."""
     slug = slugify(title)
-    date_str = (
-        published_at.isoformat() if isinstance(published_at, date) else str(published_at)
-    )
-    hash_input = f"{agency}_{date_str}_{title}".encode("utf-8")
+    date_str = published_at.isoformat() if isinstance(published_at, date) else str(published_at)
+    hash_input = f"{agency}_{date_str}_{title}".encode()
     suffix = hashlib.md5(hash_input).hexdigest()[: 6 + extra_chars]
     if slug:
         return f"{slug}_{suffix}"
@@ -98,15 +95,11 @@ def _build_id_mapping(rows):
 
         if new_id in seen_new_ids:
             for extra in range(1, 27):
-                new_id = _generate_id_with_extended_suffix(
-                    agency_key, published_at, title, extra
-                )
+                new_id = _generate_id_with_extended_suffix(agency_key, published_at, title, extra)
                 if new_id not in seen_new_ids:
                     break
             if new_id in seen_new_ids:
-                raise ValueError(
-                    f"Failed to resolve collision after 26 attempts for '{unique_id}'"
-                )
+                raise ValueError(f"Failed to resolve collision after 26 attempts for '{unique_id}'")
             collision_count += 1
 
         mapping[unique_id] = new_id
@@ -183,9 +176,7 @@ def migrate(conn, dry_run: bool = False) -> dict:
     t0 = time.time()
 
     # Backfill legacy_unique_id
-    cursor.execute(
-        "UPDATE news SET legacy_unique_id = unique_id WHERE legacy_unique_id IS NULL"
-    )
+    cursor.execute("UPDATE news SET legacy_unique_id = unique_id WHERE legacy_unique_id IS NULL")
     backfilled = cursor.rowcount
 
     # Handle news_features FK
@@ -285,8 +276,7 @@ def rollback(conn, dry_run: bool = False) -> dict:
 
     # Update news
     cursor.execute(
-        "UPDATE news SET unique_id = legacy_unique_id "
-        "WHERE unique_id != legacy_unique_id"
+        "UPDATE news SET unique_id = legacy_unique_id WHERE unique_id != legacy_unique_id"
     )
     rolled_back = cursor.rowcount
 

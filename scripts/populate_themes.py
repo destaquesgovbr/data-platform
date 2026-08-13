@@ -15,7 +15,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 import psycopg2
 import yaml
@@ -25,7 +25,6 @@ from loguru import logger
 def get_db_connection_string() -> str:
     """Get database connection string from environment or Secret Manager."""
     import subprocess
-    import os
     from urllib.parse import quote_plus
 
     # Get password from Secret Manager
@@ -80,7 +79,7 @@ def get_db_connection_string() -> str:
     return secret_conn_str
 
 
-def load_themes_yaml(filepath: Path) -> List[Dict[str, Any]]:
+def load_themes_yaml(filepath: Path) -> list[dict[str, Any]]:
     """Load and parse themes_tree.yaml file."""
     logger.info(f"Loading themes from {filepath}")
 
@@ -88,7 +87,7 @@ def load_themes_yaml(filepath: Path) -> List[Dict[str, Any]]:
         logger.error(f"File not found: {filepath}")
         sys.exit(1)
 
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
     if "themes" not in data:
@@ -99,8 +98,8 @@ def load_themes_yaml(filepath: Path) -> List[Dict[str, Any]]:
 
 
 def flatten_themes(
-    themes: List[Dict[str, Any]], level: int = 1, parent_code: Optional[str] = None
-) -> List[Dict[str, Any]]:
+    themes: list[dict[str, Any]], level: int = 1, parent_code: str | None = None
+) -> list[dict[str, Any]]:
     """
     Recursively flatten hierarchical themes into a flat list.
 
@@ -125,16 +124,14 @@ def flatten_themes(
 
         # Recursively process children
         if "children" in theme and theme["children"]:
-            children_flat = flatten_themes(
-                theme["children"], level=level + 1, parent_code=code
-            )
+            children_flat = flatten_themes(theme["children"], level=level + 1, parent_code=code)
             flattened.extend(children_flat)
 
     return flattened
 
 
 def populate_themes(
-    themes: List[Dict[str, Any]], connection_string: str, dry_run: bool = False
+    themes: list[dict[str, Any]], connection_string: str, dry_run: bool = False
 ) -> None:
     """Populate themes table with hierarchical data."""
     if dry_run:
@@ -216,9 +213,7 @@ def populate_themes(
         logger.info(f"Total themes in database: {count}")
 
         # Show distribution by level
-        cursor.execute(
-            "SELECT level, COUNT(*) FROM themes GROUP BY level ORDER BY level"
-        )
+        cursor.execute("SELECT level, COUNT(*) FROM themes GROUP BY level ORDER BY level")
         logger.info("Distribution by level:")
         for level, count in cursor.fetchall():
             logger.info(f"  Level {level}: {count} themes")
@@ -235,9 +230,7 @@ def populate_themes(
 
 def main() -> None:
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Populate themes table from themes_tree.yaml"
-    )
+    parser = argparse.ArgumentParser(description="Populate themes table from themes_tree.yaml")
     parser.add_argument(
         "--source",
         type=Path,

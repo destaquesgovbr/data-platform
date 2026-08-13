@@ -1,10 +1,9 @@
 """Testes unitários para processamento de resultados de integridade."""
 
 import json
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from data_platform.jobs.integrity.results import (
-    LOAD_STATE_SQL,
     UPSERT_SQL,
     _load_existing_state,
     sync_image_status_to_typesense,
@@ -197,17 +196,15 @@ class TestSyncImageStatusToTypesense:
 
     def test_marks_fixed_images(self):
         client = MagicMock()
-        result = sync_image_status_to_typesense(
-            client, "news", broken_ids=[], fixed_ids=["abc"]
-        )
+        result = sync_image_status_to_typesense(client, "news", broken_ids=[], fixed_ids=["abc"])
         assert result == 1
 
     def test_handles_typesense_error(self):
         client = MagicMock()
-        client.collections.__getitem__.return_value.documents.__getitem__.return_value.update.side_effect = Exception("Not found")
+        client.collections.__getitem__.return_value.documents.__getitem__.return_value.update.side_effect = Exception(
+            "Not found"
+        )
 
         # Não deve levantar exceção
-        result = sync_image_status_to_typesense(
-            client, "news", broken_ids=["abc"], fixed_ids=[]
-        )
+        result = sync_image_status_to_typesense(client, "news", broken_ids=["abc"], fixed_ids=[])
         assert result == 0

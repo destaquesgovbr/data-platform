@@ -7,19 +7,17 @@ Tests the FastAPI app (Pub/Sub push handling) and the handler
 
 import base64
 import json
-from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from data_platform.workers.typesense_sync.app import app, _pg
+from data_platform.workers.typesense_sync.app import app
 from data_platform.workers.typesense_sync.handler import (
     fetch_news_for_typesense,
     upsert_to_typesense,
 )
-
 
 # =============================================================================
 # Fixtures
@@ -105,7 +103,9 @@ class TestProcessEndpoint:
 
     def test_invalid_json_returns_400(self, client):
         """Non-JSON body returns 400."""
-        resp = client.post("/process", content=b"not json", headers={"content-type": "application/json"})
+        resp = client.post(
+            "/process", content=b"not json", headers={"content-type": "application/json"}
+        )
         assert resp.status_code == 400
 
     def test_missing_data_returns_400(self, client):
@@ -214,11 +214,15 @@ class TestUpsertToTypesense:
     @patch("data_platform.workers.typesense_sync.handler.get_client")
     @patch("data_platform.workers.typesense_sync.handler.create_collection")
     @patch("data_platform.workers.typesense_sync.handler.fetch_news_for_typesense")
-    def test_returns_false_on_typesense_error(self, mock_fetch, mock_create, mock_get_client, sample_row_dict):
+    def test_returns_false_on_typesense_error(
+        self, mock_fetch, mock_create, mock_get_client, sample_row_dict
+    ):
         """Returns False when Typesense upsert fails."""
         mock_fetch.return_value = sample_row_dict
         mock_ts_client = MagicMock()
-        mock_ts_client.collections["news"].documents.upsert.side_effect = Exception("Connection refused")
+        mock_ts_client.collections["news"].documents.upsert.side_effect = Exception(
+            "Connection refused"
+        )
         mock_get_client.return_value = mock_ts_client
 
         pg = MagicMock()
@@ -229,7 +233,9 @@ class TestUpsertToTypesense:
     @patch("data_platform.workers.typesense_sync.handler.get_client")
     @patch("data_platform.workers.typesense_sync.handler.create_collection")
     @patch("data_platform.workers.typesense_sync.handler.fetch_news_for_typesense")
-    def test_calculates_published_week(self, mock_fetch, mock_create, mock_get_client, sample_row_dict):
+    def test_calculates_published_week(
+        self, mock_fetch, mock_create, mock_get_client, sample_row_dict
+    ):
         """Upserted doc includes calculated published_week."""
         mock_fetch.return_value = sample_row_dict
         mock_ts_client = MagicMock()
@@ -246,7 +252,9 @@ class TestUpsertToTypesense:
     @patch("data_platform.workers.typesense_sync.handler.get_client")
     @patch("data_platform.workers.typesense_sync.handler.create_collection")
     @patch("data_platform.workers.typesense_sync.handler.fetch_news_for_typesense")
-    def test_creates_pg_when_none(self, mock_fetch, mock_create, mock_get_client, mock_pg_class, sample_row_dict):
+    def test_creates_pg_when_none(
+        self, mock_fetch, mock_create, mock_get_client, mock_pg_class, sample_row_dict
+    ):
         """Creates and closes PostgresManager when not provided."""
         mock_fetch.return_value = sample_row_dict
         mock_get_client.return_value = MagicMock()

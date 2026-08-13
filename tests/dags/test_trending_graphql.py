@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock
 
 import pandas as pd
-import pytest
 
 from data_platform.jobs.bigquery.trending import (
     batch_upsert_trending_via_graphql,
@@ -16,14 +15,14 @@ class TestUpsertTrendingViaGraphql:
     def test_upsert_trending_via_graphql(self):
         """Should call mutate with trending_score features."""
         mock_client = MagicMock()
-        mock_client.mutate.return_value = {
-            "batchUpsertFeatures": {"processed": 2, "failed": 0}
-        }
+        mock_client.mutate.return_value = {"batchUpsertFeatures": {"processed": 2, "failed": 0}}
 
-        scores_df = pd.DataFrame([
-            {"unique_id": "aaa", "trending_score": 2.5},
-            {"unique_id": "bbb", "trending_score": 1.1},
-        ])
+        scores_df = pd.DataFrame(
+            [
+                {"unique_id": "aaa", "trending_score": 2.5},
+                {"unique_id": "bbb", "trending_score": 1.1},
+            ]
+        )
 
         count = batch_upsert_trending_via_graphql(mock_client, scores_df)
 

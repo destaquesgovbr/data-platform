@@ -15,9 +15,7 @@ from fastapi import FastAPI, Request, Response
 from data_platform.managers.postgres_manager import PostgresManager
 from data_platform.workers.feature_worker.handler import handle_feature_computation
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Feature Worker", version="1.0.0")

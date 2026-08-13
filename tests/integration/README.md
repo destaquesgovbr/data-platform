@@ -246,14 +246,14 @@ def test_my_feature(
     # Create test data
     news = news_factory(title="Test News")
     cleanup_news.append(news.unique_id)  # Mark for cleanup
-    
+
     # Insert
     postgres_manager.insert([news])
-    
+
     # Test
     result = postgres_manager.get_by_unique_id(news.unique_id)
     assert result is not None
-    
+
     # Cleanup happens automatically via fixture
 ```
 

@@ -11,7 +11,8 @@ Functions:
 """
 
 import logging
-from typing import Iterator, TypeVar, Callable, Iterable, Any
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, TypeVar
 
 import pandas as pd
 
@@ -59,8 +60,7 @@ def batch_iterator(
             break
 
         logger.debug(
-            f"Batch {batch_num}: fetched {len(df)} records "
-            f"(offset: {offset}, total: {total_count})"
+            f"Batch {batch_num}: fetched {len(df)} records (offset: {offset}, total: {total_count})"
         )
 
         yield df

@@ -3,9 +3,6 @@
 import re
 from pathlib import Path
 
-import pytest
-
-
 MIGRATIONS_DIR = Path(__file__).parents[2] / "scripts" / "bigquery" / "migrations"
 BQ_MIGRATE_SCRIPT = Path(__file__).parents[2] / "scripts" / "bq_migrate.py"
 

@@ -9,8 +9,6 @@ Validates:
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from data_platform.clients.graphql_client import GraphQLClient
 from data_platform.workers.typesense_sync.handler import (
     _map_graphql_row,
@@ -174,9 +172,7 @@ class TestUpsertRouting:
     @patch("data_platform.workers.typesense_sync.handler.get_client")
     @patch("data_platform.workers.typesense_sync.handler.create_collection")
     @patch("data_platform.workers.typesense_sync.handler.prepare_document")
-    @patch(
-        "data_platform.workers.typesense_sync.handler.fetch_news_for_typesense_via_graphql"
-    )
+    @patch("data_platform.workers.typesense_sync.handler.fetch_news_for_typesense_via_graphql")
     def test_uses_graphql_when_client_provided(
         self, mock_gql_fetch, mock_prepare, mock_create_coll, mock_get_client
     ):

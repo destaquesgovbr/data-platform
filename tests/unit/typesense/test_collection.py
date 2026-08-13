@@ -8,7 +8,6 @@ import pytest
 from typesense.exceptions import ObjectNotFound
 
 from data_platform.typesense.collection import (
-    COLLECTION_NAME,
     COLLECTION_SCHEMA,
     create_collection,
     delete_collection,
@@ -34,16 +33,12 @@ class TestCollectionSchema:
 
     def test_unique_id_is_facetable(self):
         """unique_id field is configured as facet."""
-        unique_id_field = next(
-            f for f in COLLECTION_SCHEMA["fields"] if f["name"] == "unique_id"
-        )
+        unique_id_field = next(f for f in COLLECTION_SCHEMA["fields"] if f["name"] == "unique_id")
         assert unique_id_field["facet"] is True
 
     def test_published_at_is_int64(self):
         """published_at is int64 (Unix timestamp)."""
-        pub_field = next(
-            f for f in COLLECTION_SCHEMA["fields"] if f["name"] == "published_at"
-        )
+        pub_field = next(f for f in COLLECTION_SCHEMA["fields"] if f["name"] == "published_at")
         assert pub_field["type"] == "int64"
 
     def test_schema_has_entity_fields(self):
@@ -167,8 +162,10 @@ class TestDeleteCollection:
         mock_collection.retrieve.side_effect = [{"num_documents": 100}, ObjectNotFound("gone")]
         mock_client.collections.__getitem__.return_value = mock_collection
 
-        with patch("builtins.input", return_value="DELETE"), \
-             patch("data_platform.typesense.collection.time.sleep"):
+        with (
+            patch("builtins.input", return_value="DELETE"),
+            patch("data_platform.typesense.collection.time.sleep"),
+        ):
             result = delete_collection(mock_client)
 
         assert result is True
@@ -229,7 +226,11 @@ class TestUpdateSchema:
         assert "unique_id" in result["already_exists"]
         assert "published_at" in result["already_exists"]
         mock_collection.update.assert_called_once_with(
-            {"fields": [{"name": "content_hash", "type": "string", "facet": True, "optional": True}]}
+            {
+                "fields": [
+                    {"name": "content_hash", "type": "string", "facet": True, "optional": True}
+                ]
+            }
         )
 
     def test_no_changes_when_schema_matches(self):

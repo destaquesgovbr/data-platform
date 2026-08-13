@@ -11,8 +11,9 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from data_platform.managers import PostgresManager
 from loguru import logger
+
+from data_platform.managers import PostgresManager
 
 
 def main():
@@ -40,9 +41,7 @@ def main():
         logger.info("\n4. Testing get_theme_by_code...")
         theme = manager.get_theme_by_code("01")
         if theme:
-            logger.success(
-                f"Found theme: {theme.full_name} (id={theme.id}, level={theme.level})"
-            )
+            logger.success(f"Found theme: {theme.full_name} (id={theme.id}, level={theme.level})")
         else:
             logger.warning("Theme 01 not found")
 
