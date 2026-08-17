@@ -47,6 +47,10 @@ def main() -> int:
         print(f"ERROR: Invalid YAML syntax: {e}")
         return 1
 
+    if data is None:
+        print("ERROR: Empty file or file contains only comments")
+        return 1
+
     if "features" not in data:
         print("ERROR: Missing 'features' key")
         return 1
