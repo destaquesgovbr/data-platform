@@ -8,9 +8,7 @@ These tests ensure that:
 4. Edge cases are handled properly
 """
 
-from datetime import datetime, date, timezone
-
-import pytest
+from datetime import UTC, date, datetime
 
 
 class TestParseDate:
@@ -125,7 +123,7 @@ class TestToTimestamp:
         """datetime converts to timestamp."""
         from data_platform.utils.datetime_utils import to_timestamp
 
-        dt = datetime(2025, 1, 15, 0, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2025, 1, 15, 0, 0, 0, tzinfo=UTC)
         ts = to_timestamp(dt)
         assert ts is not None
         assert isinstance(ts, int)

@@ -33,12 +33,16 @@ class TestFindOrphans:
 class TestGetTypesenseDocIds:
     def test_parses_jsonl_export(self):
         mock_client = MagicMock()
-        export_lines = "\n".join([
-            json.dumps({"id": "doc-1"}),
-            json.dumps({"id": "doc-2"}),
-            json.dumps({"id": "doc-3"}),
-        ])
-        mock_client.collections.__getitem__.return_value.documents.export.return_value = export_lines
+        export_lines = "\n".join(
+            [
+                json.dumps({"id": "doc-1"}),
+                json.dumps({"id": "doc-2"}),
+                json.dumps({"id": "doc-3"}),
+            ]
+        )
+        mock_client.collections.__getitem__.return_value.documents.export.return_value = (
+            export_lines
+        )
 
         result = get_typesense_doc_ids(mock_client, "news")
 

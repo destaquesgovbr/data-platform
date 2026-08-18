@@ -69,9 +69,7 @@ class TestFeatureStoreUpsert:
         features = postgres_manager.get_features(news.unique_id)
         assert features is not None
         assert features["word_count"] == 150, "Existing key should be preserved"
-        assert (
-            features["sentiment"]["label"] == "positive"
-        ), "Nested key preserved"
+        assert features["sentiment"]["label"] == "positive", "Nested key preserved"
         assert features["has_image"] is True, "New key added"
 
     def test_upsert_merges_features_overwrites_duplicates(
@@ -87,9 +85,7 @@ class TestFeatureStoreUpsert:
         postgres_manager.insert([news])
 
         # First upsert
-        postgres_manager.upsert_features(
-            news.unique_id, {"word_count": 150, "trending_score": 0.5}
-        )
+        postgres_manager.upsert_features(news.unique_id, {"word_count": 150, "trending_score": 0.5})
 
         # Second upsert: overwrite trending_score
         postgres_manager.upsert_features(news.unique_id, {"trending_score": 0.9})
@@ -147,13 +143,11 @@ class TestFeatureStoreUpsert:
 
         # Should be a foreign key violation
         error_message = str(exc_info.value).lower()
-        assert (
-            "foreign key" in error_message or "constraint" in error_message
-        ), f"Expected FK error, got: {error_message}"
+        assert "foreign key" in error_message or "constraint" in error_message, (
+            f"Expected FK error, got: {error_message}"
+        )
 
-    def test_upsert_empty_dict_returns_false(
-        self, postgres_manager: PostgresManager
-    ) -> None:
+    def test_upsert_empty_dict_returns_false(self, postgres_manager: PostgresManager) -> None:
         """Empty features dict is a no-op."""
         result = postgres_manager.upsert_features("any_id", {})
         assert result is False, "Empty dict should return False"
@@ -205,9 +199,7 @@ class TestFeatureStoreUpsert:
             postgres_manager.put_connection(conn)
 
         # Verify timestamp changed (strict inequality)
-        assert (
-            second_timestamp > first_timestamp
-        ), "updated_at should be updated on upsert"
+        assert second_timestamp > first_timestamp, "updated_at should be updated on upsert"
 
 
 @pytest.mark.integration
@@ -225,9 +217,7 @@ class TestFeatureStoreGet:
         cleanup_news.append(news.unique_id)
         postgres_manager.insert([news])
 
-        postgres_manager.upsert_features(
-            news.unique_id, {"word_count": 200, "has_image": True}
-        )
+        postgres_manager.upsert_features(news.unique_id, {"word_count": 200, "has_image": True})
 
         features = postgres_manager.get_features(news.unique_id)
 
@@ -235,9 +225,7 @@ class TestFeatureStoreGet:
         assert features["word_count"] == 200
         assert features["has_image"] is True
 
-    def test_get_features_nonexistent_article(
-        self, postgres_manager: PostgresManager
-    ) -> None:
+    def test_get_features_nonexistent_article(self, postgres_manager: PostgresManager) -> None:
         """Returns None for non-existent article."""
         features = postgres_manager.get_features("nonexistent_123")
         assert features is None
@@ -314,16 +302,12 @@ class TestFeatureStoreBatch:
         assert news2.unique_id not in result
         assert "nonexistent_999" not in result
 
-    def test_get_features_batch_empty_list(
-        self, postgres_manager: PostgresManager
-    ) -> None:
+    def test_get_features_batch_empty_list(self, postgres_manager: PostgresManager) -> None:
         """Empty input list returns empty dict."""
         result = postgres_manager.get_features_batch([])
         assert result == {}
 
-    def test_get_features_batch_none_exist(
-        self, postgres_manager: PostgresManager
-    ) -> None:
+    def test_get_features_batch_none_exist(self, postgres_manager: PostgresManager) -> None:
         """Batch get with no matching IDs returns empty dict."""
         result = postgres_manager.get_features_batch(["fake1", "fake2", "fake3"])
         assert result == {}
@@ -355,9 +339,7 @@ class TestFeatureStoreCascadeDelete:
         conn = postgres_manager.get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM news WHERE unique_id = %s", (news.unique_id,)
-                )
+                cur.execute("DELETE FROM news WHERE unique_id = %s", (news.unique_id,))
                 conn.commit()
         finally:
             postgres_manager.put_connection(conn)
@@ -403,7 +385,7 @@ class TestFeatureStoreEdgeCases:
         cleanup_news.append(news.unique_id)
         postgres_manager.insert([news])
 
-        special_text = 'Text with "quotes", \'apostrophes\', and émojis 🎉'
+        special_text = "Text with \"quotes\", 'apostrophes', and émojis 🎉"
         postgres_manager.upsert_features(news.unique_id, {"text": special_text})
 
         features = postgres_manager.get_features(news.unique_id)

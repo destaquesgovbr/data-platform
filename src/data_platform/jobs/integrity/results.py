@@ -64,19 +64,28 @@ def upsert_integrity_results(db_url: str, results: list[dict]) -> dict:
                 # Montar objeto integrity para merge
                 integrity = {}
                 for key in (
-                    "image_status", "image_http_code", "image_checked_at",
-                    "image_content_type", "content_status", "content_hash",
-                    "content_checked_at", "source_etag", "new_image_url",
+                    "image_status",
+                    "image_http_code",
+                    "image_checked_at",
+                    "image_content_type",
+                    "content_status",
+                    "content_hash",
+                    "content_checked_at",
+                    "source_etag",
+                    "new_image_url",
                 ):
                     if key in r:
                         integrity[key] = r[key]
 
                 integrity["check_count"] = state.get("check_count", 0) + 1
 
-                conn.execute(UPSERT_SQL, {
-                    "uid": uid,
-                    "integrity_fields": json.dumps(integrity),
-                })
+                conn.execute(
+                    UPSERT_SQL,
+                    {
+                        "uid": uid,
+                        "integrity_fields": json.dumps(integrity),
+                    },
+                )
                 count += 1
 
                 # Rastrear mudanças de status de imagem
@@ -101,8 +110,7 @@ def _load_existing_state(conn, unique_ids: list[str]) -> dict:
         return {}
     rows = conn.execute(LOAD_STATE_SQL, {"uids": unique_ids}).fetchall()
     return {
-        r.unique_id: {"check_count": r.check_count, "image_status": r.image_status}
-        for r in rows
+        r.unique_id: {"check_count": r.check_count, "image_status": r.image_status} for r in rows
     }
 
 

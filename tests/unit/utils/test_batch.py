@@ -8,7 +8,6 @@ These tests ensure that:
 4. Statistics are calculated correctly
 """
 
-import pytest
 import pandas as pd
 
 
@@ -53,9 +52,7 @@ class TestBatchIterator:
         from data_platform.utils.batch import batch_iterator
 
         results = list(
-            batch_iterator(
-                total_count=0, batch_size=10, fetch_fn=lambda o, l: pd.DataFrame()
-            )
+            batch_iterator(total_count=0, batch_size=10, fetch_fn=lambda o, l: pd.DataFrame())
         )
         assert len(results) == 0
 
@@ -64,9 +61,7 @@ class TestBatchIterator:
         from data_platform.utils.batch import batch_iterator
 
         results = list(
-            batch_iterator(
-                total_count=-10, batch_size=10, fetch_fn=lambda o, l: pd.DataFrame()
-            )
+            batch_iterator(total_count=-10, batch_size=10, fetch_fn=lambda o, l: pd.DataFrame())
         )
         assert len(results) == 0
 
@@ -83,9 +78,7 @@ class TestBatchIterator:
                 return pd.DataFrame()
             return pd.DataFrame({"id": [1, 2, 3]})
 
-        results = list(
-            batch_iterator(total_count=1000, batch_size=10, fetch_fn=fetch)
-        )
+        results = list(batch_iterator(total_count=1000, batch_size=10, fetch_fn=fetch))
         assert len(results) == 2
 
 
@@ -101,9 +94,7 @@ class TestProcessInBatches:
         def process(batch):
             processed_items.extend(batch)
 
-        stats = process_in_batches(
-            items=list(range(100)), batch_size=30, process_fn=process
-        )
+        stats = process_in_batches(items=list(range(100)), batch_size=30, process_fn=process)
 
         assert stats["total"] == 100
         assert stats["processed"] == 100
@@ -176,9 +167,7 @@ class TestProcessInBatches:
         def process(batch):
             processed_items.extend(batch)
 
-        stats = process_in_batches(
-            items=[1, 2, 3], batch_size=100, process_fn=process
-        )
+        stats = process_in_batches(items=[1, 2, 3], batch_size=100, process_fn=process)
 
         assert stats["total"] == 3
         assert stats["processed"] == 3
@@ -291,9 +280,9 @@ class TestImports:
         """Can import from utils package."""
         from data_platform.utils import (
             batch_iterator,
-            process_in_batches,
-            chunked,
             calculate_batch_stats,
+            chunked,
+            process_in_batches,
         )
 
         assert callable(batch_iterator)
@@ -305,9 +294,9 @@ class TestImports:
         """Can import directly from batch module."""
         from data_platform.utils.batch import (
             batch_iterator,
-            process_in_batches,
-            chunked,
             calculate_batch_stats,
+            chunked,
+            process_in_batches,
         )
 
         assert callable(batch_iterator)

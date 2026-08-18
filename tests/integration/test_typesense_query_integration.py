@@ -25,9 +25,7 @@ from data_platform.managers import PostgresManager
 class TestTypesenseQueryStructure:
     """Tests for _build_typesense_query structure."""
 
-    def test_query_contains_all_required_columns(
-        self, postgres_manager: PostgresManager
-    ) -> None:
+    def test_query_contains_all_required_columns(self, postgres_manager: PostgresManager) -> None:
         """Verify query includes all expected columns."""
         query = postgres_manager._build_typesense_query()
 
@@ -54,9 +52,7 @@ class TestTypesenseQueryStructure:
 
         # Features (JSONB extraction)
         assert "nf.features->'sentiment'->>'label' AS sentiment_label" in query
-        assert (
-            "(nf.features->'sentiment'->>'score')::float AS sentiment_score" in query
-        )
+        assert "(nf.features->'sentiment'->>'score')::float AS sentiment_score" in query
         assert "(nf.features->>'word_count')::int AS word_count" in query
         assert "(nf.features->>'has_image')::boolean AS has_image" in query
 
@@ -71,9 +67,7 @@ class TestTypesenseQueryStructure:
         assert "LEFT JOIN themes tm ON n.most_specific_theme_id = tm.id" in query
         assert "LEFT JOIN news_features nf ON n.unique_id = nf.unique_id" in query
 
-    def test_query_no_where_clause_in_base(
-        self, postgres_manager: PostgresManager
-    ) -> None:
+    def test_query_no_where_clause_in_base(self, postgres_manager: PostgresManager) -> None:
         """Base query has no WHERE - added by caller."""
         query = postgres_manager._build_typesense_query()
         assert "WHERE" not in query
@@ -88,9 +82,7 @@ class TestTypesenseQueryExecution:
         self, postgres_manager: PostgresManager, typesense_test_data: dict
     ) -> None:
         """Query returns pandas DataFrame."""
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         assert isinstance(df, pd.DataFrame)
 
@@ -98,9 +90,7 @@ class TestTypesenseQueryExecution:
         self, postgres_manager: PostgresManager, typesense_test_data: dict
     ) -> None:
         """Single-day query returns only articles from that day."""
-        df_today = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df_today = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         # Should have exactly 1 article (today's news)
         assert len(df_today) == 1
@@ -126,9 +116,7 @@ class TestTypesenseQueryExecution:
         self, postgres_manager: PostgresManager, typesense_test_data: dict
     ) -> None:
         """DataFrame contains all expected columns."""
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         if len(df) == 0:
             pytest.skip("No data returned for today")
@@ -168,9 +156,7 @@ class TestTypesenseQueryExecution:
         self, postgres_manager: PostgresManager, typesense_test_data: dict
     ) -> None:
         """JSONB extracted fields have correct Python types."""
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         if len(df) == 0:
             pytest.skip("No data for today")
@@ -178,9 +164,7 @@ class TestTypesenseQueryExecution:
         row = df.iloc[0]
 
         # String
-        assert isinstance(row["sentiment_label"], str) or pd.isna(
-            row["sentiment_label"]
-        )
+        assert isinstance(row["sentiment_label"], str) or pd.isna(row["sentiment_label"])
 
         # Float - pandas may use numpy types
         if pd.notna(row["sentiment_score"]):
@@ -204,9 +188,7 @@ class TestTypesenseQueryExecution:
         self, postgres_manager: PostgresManager, typesense_test_data: dict
     ) -> None:
         """JSONB extracted values match what was upserted."""
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         if len(df) == 0:
             pytest.skip("No data for today")
@@ -215,9 +197,7 @@ class TestTypesenseQueryExecution:
         expected_features = typesense_test_data["features"][0]
 
         assert row["sentiment_label"] == expected_features["sentiment"]["label"]
-        assert row["sentiment_score"] == pytest.approx(
-            expected_features["sentiment"]["score"]
-        )
+        assert row["sentiment_score"] == pytest.approx(expected_features["sentiment"]["score"])
         assert row["word_count"] == expected_features["word_count"]
         assert row["has_image"] == expected_features["has_image"]
         assert row["has_video"] == expected_features["has_video"]
@@ -226,9 +206,7 @@ class TestTypesenseQueryExecution:
         self, postgres_manager: PostgresManager, typesense_test_data: dict
     ) -> None:
         """Theme JOINs return correct labels."""
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         if len(df) == 0:
             pytest.skip("No data for today")
@@ -250,9 +228,7 @@ class TestTypesenseQueryExecution:
     ) -> None:
         """LEFT JOINs handle NULL themes gracefully."""
         # Two days ago news has only L1 theme
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["two_days_ago"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["two_days_ago"])
 
         if len(df) == 0:
             pytest.skip("No data for two days ago")
@@ -283,9 +259,7 @@ class TestTypesenseQueryExecution:
         self, postgres_manager: PostgresManager, typesense_test_data: dict
     ) -> None:
         """content_embedding field is included (not NULL for test data)."""
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         if len(df) == 0:
             pytest.skip("No data for today")
@@ -303,9 +277,7 @@ class TestTypesenseQueryExecution:
         self, postgres_manager: PostgresManager, typesense_test_data: dict
     ) -> None:
         """Timestamp fields are extracted correctly."""
-        df = postgres_manager.get_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        df = postgres_manager.get_news_for_typesense(typesense_test_data["dates"]["today"])
 
         if len(df) == 0:
             pytest.skip("No data for today")
@@ -338,9 +310,7 @@ class TestTypesenseCount:
         self, postgres_manager: PostgresManager, typesense_test_data: dict
     ) -> None:
         """Count for single day returns correct number."""
-        count = postgres_manager.count_news_for_typesense(
-            typesense_test_data["dates"]["today"]
-        )
+        count = postgres_manager.count_news_for_typesense(typesense_test_data["dates"]["today"])
 
         assert count == 1
 
@@ -374,9 +344,7 @@ class TestTypesenseCount:
 class TestTypesensePagination:
     """Tests for iter_news_for_typesense pagination."""
 
-    def test_iter_yields_nothing_for_empty_range(
-        self, postgres_manager: PostgresManager
-    ) -> None:
+    def test_iter_yields_nothing_for_empty_range(self, postgres_manager: PostgresManager) -> None:
         """Iterator yields nothing when count is 0."""
         # Use future date
         future_date = "2030-01-01"
@@ -429,9 +397,7 @@ class TestTypesensePagination:
         df_get = postgres_manager.get_news_for_typesense(*date_range)
 
         # Get via iter_news_for_typesense
-        batches = list(
-            postgres_manager.iter_news_for_typesense(*date_range, batch_size=10)
-        )
+        batches = list(postgres_manager.iter_news_for_typesense(*date_range, batch_size=10))
         df_iter = pd.concat(batches, ignore_index=True)
 
         # Compare

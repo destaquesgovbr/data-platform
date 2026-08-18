@@ -12,8 +12,8 @@ Commands:
 Note: Scraping commands moved to standalone scraper repo.
 Note: Enrichment commands removed — now handled by Airflow DAG enrich_news_llm (data-science repo).
 """
+
 import logging
-from typing import Optional
 
 import typer
 from dotenv import load_dotenv
@@ -22,14 +22,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 app = typer.Typer(
-    name="data-platform",
-    help="Data platform for DestaquesGovBr - storage and indexing"
+    name="data-platform", help="Data platform for DestaquesGovBr - storage and indexing"
 )
 
 
@@ -47,15 +43,18 @@ def sync_hf() -> None:
 @app.command()
 def migrate(
     batch_size: int = typer.Option(1000, help="Batch size for migration"),
-    max_records: Optional[int] = typer.Option(None, help="Max records to migrate (for testing)"),
+    max_records: int | None = typer.Option(None, help="Max records to migrate (for testing)"),
 ) -> None:
     """Migrate data from HuggingFace to PostgreSQL."""
     import sys
+
     sys.path.insert(0, str(__file__).replace("src/data_platform/cli.py", "scripts"))
 
     from scripts.migrate_hf_to_postgres import main as migrate_main
 
-    logging.info(f"Starting HF to PostgreSQL migration (batch_size={batch_size}, max_records={max_records})")
+    logging.info(
+        f"Starting HF to PostgreSQL migration (batch_size={batch_size}, max_records={max_records})"
+    )
 
     migrate_main(batch_size=batch_size, max_records=max_records)
 
@@ -65,10 +64,10 @@ def migrate(
 @app.command("sync-typesense")
 def sync_typesense(
     start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = typer.Option(None, help="End date (YYYY-MM-DD)"),
+    end_date: str | None = typer.Option(None, help="End date (YYYY-MM-DD)"),
     full_sync: bool = typer.Option(False, help="Force full sync (overwrite existing)"),
     batch_size: int = typer.Option(1000, help="Batch size for Typesense upsert"),
-    max_records: Optional[int] = typer.Option(None, help="Max records to sync (for testing)"),
+    max_records: int | None = typer.Option(None, help="Max records to sync (for testing)"),
 ) -> None:
     """
     Sync news from PostgreSQL to Typesense.
@@ -126,7 +125,9 @@ def typesense_update_schema(
 
 @app.command("typesense-detect-orphans")
 def typesense_detect_orphans(
-    dry_run: bool = typer.Option(True, "--dry-run/--delete", help="Dry run (default) or delete orphans"),
+    dry_run: bool = typer.Option(
+        True, "--dry-run/--delete", help="Dry run (default) or delete orphans"
+    ),
     collection_name: str = typer.Option("news", help="Typesense collection name"),
 ) -> None:
     """
@@ -145,7 +146,9 @@ def typesense_detect_orphans(
     )
 
     if dry_run and result["orphans"] > 0:
-        logging.info(f"Would delete {result.get('would_delete', result['orphans'])} documents. Use --delete to execute.")
+        logging.info(
+            f"Would delete {result.get('would_delete', result['orphans'])} documents. Use --delete to execute."
+        )
     elif not dry_run and result["orphans"] > 0:
         logging.info(
             f"Deleted: {result.get('deleted', 0)} | "

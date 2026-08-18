@@ -5,12 +5,9 @@ These tests require a running PostgreSQL database (via Cloud SQL Proxy or local 
 Run with: pytest tests/integration/ -v
 """
 
-from datetime import UTC, datetime
-
 import pytest
 
 from data_platform.managers import PostgresManager
-from data_platform.models import NewsInsert
 
 
 @pytest.mark.integration
@@ -93,9 +90,7 @@ class TestPostgresIntegration:
 
         # No manual cleanup needed - cleanup_news fixture handles it
 
-    def test_count_with_filters(
-        self, postgres_manager: PostgresManager, test_agency
-    ) -> None:
+    def test_count_with_filters(self, postgres_manager: PostgresManager, test_agency) -> None:
         """Test counting with filters."""
         # Get count of all news
         total = postgres_manager.count()

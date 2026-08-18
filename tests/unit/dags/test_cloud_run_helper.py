@@ -11,7 +11,9 @@ class TestGetIdToken:
     def test_fetches_token_for_audience(self, mock_request_cls, mock_fetch) -> None:
         mock_fetch.return_value = "test-token"
         token = get_id_token("https://my-service.run.app")
-        mock_fetch.assert_called_once_with(mock_request_cls.return_value, "https://my-service.run.app")
+        mock_fetch.assert_called_once_with(
+            mock_request_cls.return_value, "https://my-service.run.app"
+        )
         assert token == "test-token"
 
 

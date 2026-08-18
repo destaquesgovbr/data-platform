@@ -24,7 +24,6 @@ import time
 import unicodedata
 from datetime import date
 
-
 # =============================================================================
 # ID Generation Functions (inline copy)
 # Canonical source: scraper/src/govbr_scraper/scrapers/unique_id.py
@@ -52,7 +51,7 @@ def generate_suffix(agency: str, published_at_value, title: str) -> str:
         if isinstance(published_at_value, date)
         else str(published_at_value)
     )
-    hash_input = f"{agency}_{date_str}_{title}".encode("utf-8")
+    hash_input = f"{agency}_{date_str}_{title}".encode()
     return hashlib.md5(hash_input).hexdigest()[:6]
 
 
@@ -92,12 +91,8 @@ def fetch_all_news(conn):
 def _generate_id_with_extended_suffix(agency, published_at, title, extra_chars):
     """Generate ID with a longer suffix to resolve collisions."""
     slug = slugify(title)
-    date_str = (
-        published_at.isoformat()
-        if isinstance(published_at, date)
-        else str(published_at)
-    )
-    hash_input = f"{agency}_{date_str}_{title}".encode("utf-8")
+    date_str = published_at.isoformat() if isinstance(published_at, date) else str(published_at)
+    hash_input = f"{agency}_{date_str}_{title}".encode()
     suffix = hashlib.md5(hash_input).hexdigest()[: 6 + extra_chars]
     if slug:
         return f"{slug}_{suffix}"
@@ -128,16 +123,12 @@ def build_id_mapping(rows):
         if new_id in seen_new_ids:
             # Collision: extend suffix until unique
             for extra in range(1, 27):  # up to 32 hex chars total
-                new_id = _generate_id_with_extended_suffix(
-                    agency_key, published_at, title, extra
-                )
+                new_id = _generate_id_with_extended_suffix(agency_key, published_at, title, extra)
                 if new_id not in seen_new_ids:
                     break
             # Verify collision was actually resolved
             if new_id in seen_new_ids:
-                raise ValueError(
-                    f"Failed to resolve collision after 26 attempts for '{unique_id}'"
-                )
+                raise ValueError(f"Failed to resolve collision after 26 attempts for '{unique_id}'")
             collision_count += 1
             print(f"   Resolved collision for '{unique_id}' -> '{new_id}'")
 
@@ -250,9 +241,7 @@ def migrate(conn, batch_size=1000):
         if has_features:
             fk_name = get_fk_constraint_name(conn)
             if fk_name:
-                cursor.execute(
-                    f"ALTER TABLE news_features DROP CONSTRAINT {fk_name}"
-                )
+                cursor.execute(f"ALTER TABLE news_features DROP CONSTRAINT {fk_name}")
                 print(f"   ✓ Dropped FK constraint: {fk_name}")
 
         # 5. Update news_features in batches (execute_batch for performance)
@@ -296,9 +285,7 @@ def migrate(conn, batch_size=1000):
             print(f"   ✓ Re-added FK constraint: {fk_name}")
 
         # 8. Verify integrity
-        cursor.execute(
-            "SELECT COUNT(*) FROM news WHERE unique_id = legacy_unique_id"
-        )
+        cursor.execute("SELECT COUNT(*) FROM news WHERE unique_id = legacy_unique_id")
         unchanged = cursor.fetchone()[0]
         if unchanged > 0:
             print(f"\n⚠️  {unchanged} rows still have unique_id = legacy_unique_id")
@@ -327,18 +314,14 @@ def rollback(conn, batch_size=1000):
 
     try:
         # 1. Check legacy_unique_id is populated
-        cursor.execute(
-            "SELECT COUNT(*) FROM news WHERE legacy_unique_id IS NULL"
-        )
+        cursor.execute("SELECT COUNT(*) FROM news WHERE legacy_unique_id IS NULL")
         null_count = cursor.fetchone()[0]
         if null_count > 0:
             print(f"❌ {null_count} rows have NULL legacy_unique_id. Cannot rollback.")
             sys.exit(1)
 
         # 2. Count rows to rollback
-        cursor.execute(
-            "SELECT COUNT(*) FROM news WHERE unique_id != legacy_unique_id"
-        )
+        cursor.execute("SELECT COUNT(*) FROM news WHERE unique_id != legacy_unique_id")
         to_rollback = cursor.fetchone()[0]
         if to_rollback == 0:
             print("   ℹ️  All records already have MD5 unique_ids. Nothing to rollback.")
@@ -352,9 +335,7 @@ def rollback(conn, batch_size=1000):
         if has_features:
             fk_name = get_fk_constraint_name(conn)
             if fk_name:
-                cursor.execute(
-                    f"ALTER TABLE news_features DROP CONSTRAINT {fk_name}"
-                )
+                cursor.execute(f"ALTER TABLE news_features DROP CONSTRAINT {fk_name}")
                 print(f"   ✓ Dropped FK constraint: {fk_name}")
 
         # 4. Update news_features to legacy IDs
@@ -368,8 +349,7 @@ def rollback(conn, batch_size=1000):
 
         # 5. Update news to legacy IDs
         cursor.execute(
-            "UPDATE news SET unique_id = legacy_unique_id "
-            "WHERE unique_id != legacy_unique_id"
+            "UPDATE news SET unique_id = legacy_unique_id WHERE unique_id != legacy_unique_id"
         )
         rolled_back = cursor.rowcount
         print(f"   ✓ Rolled back {rolled_back} news rows")
@@ -383,9 +363,7 @@ def rollback(conn, batch_size=1000):
             print(f"   ✓ Re-added FK constraint: {fk_name}")
 
         # 7. Verify
-        cursor.execute(
-            "SELECT COUNT(*) FROM news WHERE unique_id != legacy_unique_id"
-        )
+        cursor.execute("SELECT COUNT(*) FROM news WHERE unique_id != legacy_unique_id")
         remaining = cursor.fetchone()[0]
         if remaining > 0:
             print(f"\n⚠️  {remaining} rows still differ from legacy_unique_id")

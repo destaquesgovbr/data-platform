@@ -15,7 +15,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 import psycopg2
 import yaml
@@ -25,7 +25,6 @@ from loguru import logger
 def get_db_connection_string() -> str:
     """Get database connection string from environment or Secret Manager."""
     import subprocess
-    import os
     from urllib.parse import quote_plus
 
     # Get password from Secret Manager
@@ -80,7 +79,7 @@ def get_db_connection_string() -> str:
     return secret_conn_str
 
 
-def load_agencies_yaml(filepath: Path) -> Dict[str, Any]:
+def load_agencies_yaml(filepath: Path) -> dict[str, Any]:
     """Load and parse agencies.yaml file."""
     logger.info(f"Loading agencies from {filepath}")
 
@@ -88,7 +87,7 @@ def load_agencies_yaml(filepath: Path) -> Dict[str, Any]:
         logger.error(f"File not found: {filepath}")
         sys.exit(1)
 
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
     if "sources" not in data:
@@ -99,7 +98,7 @@ def load_agencies_yaml(filepath: Path) -> Dict[str, Any]:
 
 
 def populate_agencies(
-    agencies: Dict[str, Any], connection_string: str, dry_run: bool = False
+    agencies: dict[str, Any], connection_string: str, dry_run: bool = False
 ) -> None:
     """Populate agencies table with data from YAML."""
     if dry_run:
@@ -184,9 +183,7 @@ def populate_agencies(
 
 def main() -> None:
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Populate agencies table from agencies.yaml"
-    )
+    parser = argparse.ArgumentParser(description="Populate agencies table from agencies.yaml")
     parser.add_argument(
         "--source",
         type=Path,

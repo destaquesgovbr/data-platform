@@ -47,9 +47,9 @@ class TestFetchBatchEngineDispose:
                         if isinstance(call.func, ast.Attribute) and call.func.attr == "dispose":
                             has_try_finally = True
 
-        assert (
-            has_try_finally
-        ), "fetch_batch must wrap engine usage in try/finally with engine.dispose()"
+        assert has_try_finally, (
+            "fetch_batch must wrap engine usage in try/finally with engine.dispose()"
+        )
 
 
 class TestGenerateThumbnailsParallel:

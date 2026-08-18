@@ -5,8 +5,8 @@ from datetime import datetime, timedelta
 
 try:
     from airflow.decorators import dag, task
-    from airflow.models import Variable
     from airflow.hooks.base import BaseHook
+    from airflow.models import Variable
 except ImportError:
     pass
 
@@ -25,12 +25,11 @@ except ImportError:
     },
 )
 def aggregate_engagement_dag():
-
     @task()
     def aggregate_and_sync(**context):
         from data_platform.jobs.bigquery.engagement import (
-            fetch_engagement_metrics,
             batch_upsert_engagement,
+            fetch_engagement_metrics,
         )
 
         project_id = Variable.get("gcp_project_id")

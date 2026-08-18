@@ -20,6 +20,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
+from datetime import UTC
 from pathlib import Path
 
 from loguru import logger
@@ -252,9 +253,9 @@ def _record_history(
     duration_ms = int((time.time() - started_at) * 1000)
     cursor = conn.cursor()
     try:
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        started_dt = datetime.fromtimestamp(started_at, tz=timezone.utc)
+        started_dt = datetime.fromtimestamp(started_at, tz=UTC)
         cursor.execute(
             RECORD_HISTORY_SQL,
             (

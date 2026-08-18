@@ -42,7 +42,6 @@ logger = logging.getLogger(__name__)
     """,
 )
 def sync_pg_to_bigquery():
-
     @task
     def sync_facts(**context):
         """Query PG for previous day's news + features, load into BigQuery."""

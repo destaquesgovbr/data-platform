@@ -79,6 +79,8 @@ include = '\.pyi?$'
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint]
 select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
@@ -91,10 +93,36 @@ select = [
 ignore = [
     "E501",  # line too long (handled by black)
     "B008",  # do not perform function calls in argument defaults
+    "E722",  # bare except (legacy code, fix gradually)
+    "B904",  # raise without from (legacy code, fix gradually)
+    "UP031", # percent format (legacy code, fix gradually)
+    "UP047", # type parameters (Python 3.12 feature, fix gradually)
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+"tests/**/*.py" = [
+    "F841",  # Unused vars common in tests (testing side-effects)
+    "E741",  # Ambiguous names in lambda/fixtures
+    "B006",  # Mutable defaults in test fixtures
+    "B007",  # Loop vars not used
+    "B905",  # zip without strict parameter
+    "B904",  # raise without from
+    "C416",  # List comprehensions in assertions
+    "E722",  # Bare except in tests
+    "F401",  # Imports for availability testing
+    "UP006", # Type parameter syntax
+    "UP038", # isinstance with non-tuple
+]
+"research/**/*.py" = [
+    "E402",  # Module level imports in notebooks/scripts
+]
+"scripts/**/*.py" = [
+    "E402",  # Module level imports in standalone scripts
+    "B007",  # Loop vars not used in legacy migration scripts
+    "C416",  # List comprehensions in old scripts
+    "F841",  # Unused vars in migration scripts
+]
 
 [tool.mypy]
 python_version = "3.12"

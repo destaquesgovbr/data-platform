@@ -13,9 +13,9 @@ Usage:
 
 import argparse
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone
+from typing import Any
 
 from datasets import load_dataset
 from loguru import logger
@@ -28,7 +28,7 @@ from data_platform.managers import PostgresManager
 from data_platform.models import NewsInsert
 
 
-def parse_datetime(dt_input: Optional[any]) -> Optional[datetime]:
+def parse_datetime(dt_input: any | None) -> datetime | None:
     """Parse datetime string or object to datetime object."""
     if not dt_input:
         return None
@@ -36,7 +36,7 @@ def parse_datetime(dt_input: Optional[any]) -> Optional[datetime]:
     # If already a datetime object, return it (ensure it has timezone)
     if isinstance(dt_input, datetime):
         if dt_input.tzinfo is None:
-            return dt_input.replace(tzinfo=timezone.utc)
+            return dt_input.replace(tzinfo=UTC)
         return dt_input
 
     # If not a string, can't parse
@@ -54,7 +54,7 @@ def parse_datetime(dt_input: Optional[any]) -> Optional[datetime]:
         for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
             try:
                 dt = datetime.strptime(dt_input, fmt)
-                return dt.replace(tzinfo=timezone.utc)
+                return dt.replace(tzinfo=UTC)
             except ValueError:
                 continue
 
@@ -67,11 +67,11 @@ def parse_datetime(dt_input: Optional[any]) -> Optional[datetime]:
 
 
 def map_hf_to_postgres(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     manager: PostgresManager,
-    agency_map: Dict[str, int],
-    theme_map: Dict[str, int],
-) -> Optional[NewsInsert]:
+    agency_map: dict[str, int],
+    theme_map: dict[str, int],
+) -> NewsInsert | None:
     """
     Map HuggingFace row to PostgreSQL NewsInsert model.
 
@@ -160,9 +160,9 @@ def map_hf_to_postgres(
 def migrate_hf_to_postgres(
     dataset_name: str = "nitaibezerra/govbrnews",
     batch_size: int = 1000,
-    max_records: Optional[int] = None,
+    max_records: int | None = None,
     dry_run: bool = False,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """
     Migrate data from HuggingFace to PostgreSQL.
 
@@ -205,14 +205,10 @@ def migrate_hf_to_postgres(
 
         # Build agency and theme mappings
         logger.info("Building mappings...")
-        agency_map = {
-            agency.key: agency.id for agency in manager._agencies_by_key.values()
-        }
+        agency_map = {agency.key: agency.id for agency in manager._agencies_by_key.values()}
         theme_map = {theme.code: theme.id for theme in manager._themes_by_code.values()}
 
-        logger.info(
-            f"Loaded {len(agency_map)} agencies, {len(theme_map)} themes from cache"
-        )
+        logger.info(f"Loaded {len(agency_map)} agencies, {len(theme_map)} themes from cache")
 
         # Migration stats
         stats = {
@@ -286,9 +282,7 @@ def migrate_hf_to_postgres(
 
 def main() -> None:
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Migrate news from HuggingFace to PostgreSQL"
-    )
+    parser = argparse.ArgumentParser(description="Migrate news from HuggingFace to PostgreSQL")
     parser.add_argument(
         "--dataset",
         type=str,

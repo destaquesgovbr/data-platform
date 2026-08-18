@@ -56,13 +56,15 @@ def batch_upsert_engagement_via_graphql(gql_client, metrics_df: pd.DataFrame) ->
 
     items = []
     for _, row in metrics_df.iterrows():
-        items.append({
-            "uniqueId": row["unique_id"],
-            "features": {
-                "view_count": int(row["view_count"]),
-                "unique_sessions": int(row["unique_sessions"]),
-            },
-        })
+        items.append(
+            {
+                "uniqueId": row["unique_id"],
+                "features": {
+                    "view_count": int(row["view_count"]),
+                    "unique_sessions": int(row["unique_sessions"]),
+                },
+            }
+        )
 
     if not items:
         return 0
@@ -119,10 +121,12 @@ def batch_upsert_engagement(db_url: str, metrics_df: pd.DataFrame) -> int:
                         f"Filtered {orphaned} orphaned unique_ids not found in news table"
                     )
             for _, row in metrics_df.iterrows():
-                features = json.dumps({
-                    "view_count": int(row["view_count"]),
-                    "unique_sessions": int(row["unique_sessions"]),
-                })
+                features = json.dumps(
+                    {
+                        "view_count": int(row["view_count"]),
+                        "unique_sessions": int(row["unique_sessions"]),
+                    }
+                )
                 conn.execute(upsert_sql, {"uid": row["unique_id"], "features": features})
                 count += 1
         logger.info(f"Upserted engagement metrics for {count} articles")

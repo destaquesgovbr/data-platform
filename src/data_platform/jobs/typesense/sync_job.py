@@ -13,10 +13,10 @@ from typing import Any
 
 from data_platform.managers.postgres_manager import PostgresManager
 from data_platform.typesense import (
-    get_client,
-    create_collection,
-    index_documents,
     calculate_published_week,
+    create_collection,
+    get_client,
+    index_documents,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,8 +61,7 @@ def sync_to_typesense(
     end_date = end_date or start_date
 
     logger.info(
-        f"Iniciando sincronização PostgreSQL → Typesense "
-        f"(período: {start_date} a {end_date})"
+        f"Iniciando sincronização PostgreSQL → Typesense (período: {start_date} a {end_date})"
     )
 
     # Conectar ao PostgreSQL
@@ -87,6 +86,7 @@ def sync_to_typesense(
         # Verificar se devemos pular (modo full sem force em coleção não vazia)
         if full_sync:
             from data_platform.typesense.collection import COLLECTION_NAME
+
             collection_info = client.collections[COLLECTION_NAME].retrieve()
             existing_count = collection_info.get("num_documents", 0)
             if existing_count > 0:
@@ -108,9 +108,7 @@ def sync_to_typesense(
             )
 
         # Processar em batches para datasets grandes
-        logger.info(
-            f"Processando em batches (pg_batch={pg_batch_size}, ts_batch={batch_size})"
-        )
+        logger.info(f"Processando em batches (pg_batch={pg_batch_size}, ts_batch={batch_size})")
 
         batch_num = 0
         for df_batch in pg_manager.iter_news_for_typesense(
@@ -214,9 +212,7 @@ def _sync_small_dataset(
     stats["total_fetched"] = len(df)
 
     logger.info(
-        f"Sincronização concluída: "
-        f"{stats['total_indexed']} indexados, "
-        f"{stats['errors']} erros"
+        f"Sincronização concluída: {stats['total_indexed']} indexados, {stats['errors']} erros"
     )
 
     return stats

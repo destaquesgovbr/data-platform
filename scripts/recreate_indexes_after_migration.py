@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from loguru import logger
+
 from data_platform.managers import PostgresManager
 
 
@@ -122,9 +123,7 @@ def recreate_indexes(dry_run: bool = False) -> None:
 
 def main() -> None:
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Recreate indexes after bulk migration"
-    )
+    parser = argparse.ArgumentParser(description="Recreate indexes after bulk migration")
     parser.add_argument(
         "--dry-run",
         action="store_true",

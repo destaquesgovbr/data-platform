@@ -1,6 +1,6 @@
 """Unit tests for NewsFeatures Pydantic model."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -32,7 +32,7 @@ class TestNewsFeatures:
         assert "updated_at" in data
 
     def test_updated_at_timezone_aware(self):
-        dt = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC)
         nf = NewsFeatures(unique_id="abc123", updated_at=dt)
         assert nf.updated_at == dt
 

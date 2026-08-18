@@ -196,9 +196,7 @@ def delete_collection(
         try:
             collection_info = client.collections[collection_name].retrieve()
             num_docs = collection_info.get("num_documents", 0)
-            logger.info(
-                f"Encontrada coleção '{collection_name}' com {num_docs} documentos"
-            )
+            logger.info(f"Encontrada coleção '{collection_name}' com {num_docs} documentos")
         except ObjectNotFound:
             logger.warning(f"Coleção '{collection_name}' não existe")
             return False
@@ -206,9 +204,7 @@ def delete_collection(
         # Prompt de confirmação
         if not confirm:
             logger.warning("=" * 80)
-            logger.warning(
-                f"ATENÇÃO: Você está prestes a deletar a coleção '{collection_name}'"
-            )
+            logger.warning(f"ATENÇÃO: Você está prestes a deletar a coleção '{collection_name}'")
             logger.warning(f"Isso removerá permanentemente {num_docs} documentos")
             logger.warning("=" * 80)
             response = input("Digite 'DELETE' para confirmar: ")
@@ -228,13 +224,9 @@ def delete_collection(
                 time.sleep(1)
                 try:
                     client.collections[collection_name].retrieve()
-                    logger.warning(
-                        f"Coleção ainda existe após tentativa {attempt} de deleção"
-                    )
+                    logger.warning(f"Coleção ainda existe após tentativa {attempt} de deleção")
                     if attempt < max_retries:
-                        logger.info(
-                            f"Tentando novamente... ({attempt + 1}/{max_retries})"
-                        )
+                        logger.info(f"Tentando novamente... ({attempt + 1}/{max_retries})")
                         time.sleep(2)
                         continue
                 except ObjectNotFound:
@@ -356,20 +348,16 @@ def update_schema(
         except Exception as e:
             error_msg = _sanitize_error(e)
             if attempt < _MAX_RETRIES:
-                delay = _RETRY_BASE_DELAY ** attempt
+                delay = _RETRY_BASE_DELAY**attempt
                 logger.warning(
                     f"Tentativa {attempt}/{_MAX_RETRIES} falhou: {error_msg}. "
                     f"Retentando em {delay}s..."
                 )
                 time.sleep(delay)
             else:
-                logger.error(
-                    f"Falha após {_MAX_RETRIES} tentativas: {error_msg}"
-                )
+                logger.error(f"Falha após {_MAX_RETRIES} tentativas: {error_msg}")
                 for f in missing_fields:
-                    result["errors"].append(
-                        {"field": f["name"], "error": error_msg}
-                    )
+                    result["errors"].append({"field": f["name"], "error": error_msg})
 
     logger.info(
         f"Schema update concluído: {len(result['added'])} adicionados, "

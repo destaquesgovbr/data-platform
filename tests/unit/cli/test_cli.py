@@ -2,13 +2,11 @@
 Unit tests for CLI commands.
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
-import pytest
 from typer.testing import CliRunner
 
 from data_platform.cli import app
-
 
 runner = CliRunner()
 

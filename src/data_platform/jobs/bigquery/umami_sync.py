@@ -130,8 +130,7 @@ def get_umami_db_url(airflow_conn_id: str = "umami_postgres") -> dict:
         logger.info(f"Using Airflow connection: {airflow_conn_id}")
     except Exception:
         logger.warning(
-            f"Connection '{airflow_conn_id}' not found, "
-            "deriving from 'postgres_default'"
+            f"Connection '{airflow_conn_id}' not found, deriving from 'postgres_default'"
         )
         conn = BaseHook.get_connection("postgres_default")
 
@@ -198,9 +197,7 @@ def fetch_umami_pageviews(
         List of dicts with pageview data joined with session info
     """
     rows = _fetch_rows(db_url, PAGEVIEWS_QUERY, (start_date, end_date))
-    logger.info(
-        f"Fetched {len(rows)} pageviews from Umami ({start_date} to {end_date})"
-    )
+    logger.info(f"Fetched {len(rows)} pageviews from Umami ({start_date} to {end_date})")
     return rows
 
 
@@ -220,9 +217,7 @@ def fetch_umami_events(
         List of dicts with custom event data including event_data JSON
     """
     rows = _fetch_rows(db_url, EVENTS_QUERY, (start_date, end_date))
-    logger.info(
-        f"Fetched {len(rows)} custom events from Umami ({start_date} to {end_date})"
-    )
+    logger.info(f"Fetched {len(rows)} custom events from Umami ({start_date} to {end_date})")
     return rows
 
 
@@ -262,9 +257,7 @@ def load_to_bigquery(
     )
 
     full_table_id = f"{project_id}.{table_id}"
-    load_job = client.load_table_from_json(
-        rows, full_table_id, job_config=job_config
-    )
+    load_job = client.load_table_from_json(rows, full_table_id, job_config=job_config)
     load_job.result()
 
     logger.info(f"Loaded {load_job.output_rows} rows into {full_table_id}")

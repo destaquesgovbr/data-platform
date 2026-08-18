@@ -14,7 +14,6 @@ Usage:
 
 import argparse
 import atexit
-import os
 import signal
 import subprocess
 import sys
@@ -51,7 +50,7 @@ MIGRATIONS = [
                 RAISE NOTICE 'pgvector extension enabled successfully';
             END $$;
         """,
-        "verify": "SELECT extversion FROM pg_extension WHERE extname = 'vector';"
+        "verify": "SELECT extversion FROM pg_extension WHERE extname = 'vector';",
     },
     {
         "name": "002_add_embedding_columns",
@@ -78,7 +77,7 @@ MIGRATIONS = [
             WHERE table_name = 'news'
               AND column_name IN ('content_embedding', 'embedding_generated_at')
             ORDER BY column_name;
-        """
+        """,
     },
     {
         "name": "003_create_embedding_indexes",
@@ -105,8 +104,8 @@ MIGRATIONS = [
             WHERE tablename = 'news'
               AND indexname LIKE '%embedding%'
             ORDER BY indexname;
-        """
-    }
+        """,
+    },
 ]
 
 
@@ -116,7 +115,7 @@ def get_secret(secret_name: str) -> str:
         ["gcloud", "secrets", "versions", "access", "latest", f"--secret={secret_name}"],
         capture_output=True,
         text=True,
-        check=True
+        check=True,
     )
     return result.stdout.strip()
 
@@ -127,9 +126,7 @@ def start_cloud_sql_proxy() -> subprocess.Popen:
 
     # Check if port is in use
     lsof = subprocess.run(
-        ["lsof", "-ti", f":{CLOUD_SQL_PROXY_PORT}"],
-        capture_output=True,
-        text=True
+        ["lsof", "-ti", f":{CLOUD_SQL_PROXY_PORT}"], capture_output=True, text=True
     )
     if lsof.stdout.strip():
         print(f"   Port {CLOUD_SQL_PROXY_PORT} already in use, killing existing process...")
@@ -138,13 +135,9 @@ def start_cloud_sql_proxy() -> subprocess.Popen:
 
     # Start proxy
     proxy = subprocess.Popen(
-        [
-            "cloud-sql-proxy",
-            f"--port={CLOUD_SQL_PROXY_PORT}",
-            CLOUD_SQL_INSTANCE
-        ],
+        ["cloud-sql-proxy", f"--port={CLOUD_SQL_PROXY_PORT}", CLOUD_SQL_INSTANCE],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        stderr=subprocess.DEVNULL,
     )
 
     time.sleep(3)  # Wait for proxy to start
@@ -187,10 +180,7 @@ def check_column_exists(conn, table: str, column: str) -> bool:
 def check_extension_exists(conn, extension: str) -> bool:
     """Check if an extension exists."""
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = %s)",
-            (extension,)
-        )
+        cur.execute("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = %s)", (extension,))
         return cur.fetchone()[0]
 
 
@@ -205,7 +195,7 @@ def apply_migration(conn, migration: dict, dry_run: bool = False) -> bool:
 
     if dry_run:
         print("   [DRY RUN] Would execute:")
-        for line in sql.strip().split('\n'):
+        for line in sql.strip().split("\n"):
             if line.strip():
                 print(f"   {line}")
         return True
@@ -214,7 +204,7 @@ def apply_migration(conn, migration: dict, dry_run: bool = False) -> bool:
         with conn.cursor() as cur:
             cur.execute(sql)
         conn.commit()
-        print(f"   ✓ Migration applied successfully")
+        print("   ✓ Migration applied successfully")
 
         # Run verification query if provided
         if verify:

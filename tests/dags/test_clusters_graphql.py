@@ -1,9 +1,6 @@
 """Tests for GraphQL-based cluster computation functions."""
 
-from unittest.mock import MagicMock, call
-
-import pandas as pd
-import pytest
+from unittest.mock import MagicMock
 
 from data_platform.jobs.similarity.clusters import (
     batch_upsert_clusters_via_graphql,
@@ -66,9 +63,7 @@ class TestFetchSimilarArticlesViaGraphQL:
         gql_client = MagicMock()
         gql_client.query.return_value = {"similarArticles": []}
 
-        fetch_similar_articles_via_graphql(
-            gql_client, ["a-1"], threshold=0.9, limit=3
-        )
+        fetch_similar_articles_via_graphql(gql_client, ["a-1"], threshold=0.9, limit=3)
 
         gql_client.query.assert_called_once()
         _, kwargs = gql_client.query.call_args
@@ -85,9 +80,7 @@ class TestBatchUpsertClustersViaGraphQL:
 
     def test_upserts_clusters_and_returns_count(self):
         gql_client = MagicMock()
-        gql_client.mutate.return_value = {
-            "batchUpsertFeatures": {"processed": 2, "failed": 0}
-        }
+        gql_client.mutate.return_value = {"batchUpsertFeatures": {"processed": 2, "failed": 0}}
 
         clusters = {
             "a-1": ["b-1", "b-2"],
@@ -116,9 +109,7 @@ class TestBatchUpsertClustersViaGraphQL:
 
     def test_handles_partial_failures(self):
         gql_client = MagicMock()
-        gql_client.mutate.return_value = {
-            "batchUpsertFeatures": {"processed": 1, "failed": 1}
-        }
+        gql_client.mutate.return_value = {"batchUpsertFeatures": {"processed": 1, "failed": 1}}
 
         clusters = {"a-1": ["b-1"], "a-2": ["c-1"]}
         count = batch_upsert_clusters_via_graphql(gql_client, clusters)

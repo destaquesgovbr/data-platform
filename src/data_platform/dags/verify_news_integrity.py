@@ -51,7 +51,6 @@ SCRAPER_REQUEST_TIMEOUT = 120  # 2 min para o batch completo
     """,
 )
 def verify_news_integrity_dag():
-
     @task()
     def fetch_batch(**context):
         """Busca batch priorizado de artigos para verificação."""

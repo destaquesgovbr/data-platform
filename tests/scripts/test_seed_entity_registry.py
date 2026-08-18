@@ -218,9 +218,9 @@ class TestAliasCollisions:
         collide_norm = mod.normalize("Casa Civil da Presidência da República")
         # (b) The ambiguous (alias_norm, 'ORG') key is inserted for NEITHER entity.
         for alias_norm, atype, _entity_id in alias_rows:
-            assert not (
-                alias_norm == collide_norm and atype == "ORG"
-            ), "ambiguous alias must not be inserted for any entity"
+            assert not (alias_norm == collide_norm and atype == "ORG"), (
+                "ambiguous alias must not be inserted for any entity"
+            )
 
         # The unambiguous keys (the agency keys themselves) survive.
         surviving = {(a, t) for a, t, _e in alias_rows}

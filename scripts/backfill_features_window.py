@@ -9,6 +9,7 @@ Uso:
     DATABASE_URL=... .venv/bin/python scripts/backfill_features_window.py \\
         --date-from 2026-06-01 --date-to 2026-07-01 --limit 50000
 """
+
 import argparse
 import os
 import sys
@@ -81,7 +82,9 @@ def main() -> int:
         if i % 500 == 0:
             conn.commit()
             elapsed = time.time() - t0
-            print(f"  {i}/{len(rows)}  updated={updated} skipped={skipped}  ({elapsed:.0f}s, {i/elapsed:.0f} art/s)")
+            print(
+                f"  {i}/{len(rows)}  updated={updated} skipped={skipped}  ({elapsed:.0f}s, {i / elapsed:.0f} art/s)"
+            )
 
     conn.commit()
     elapsed = time.time() - t0

@@ -10,13 +10,12 @@ Functions:
     calculate_published_week: Calculate ISO week ID (YYYYWW format)
 """
 
-from datetime import datetime, date, timezone
-from typing import Union
+from datetime import UTC, date, datetime
 
 import pandas as pd
 
 
-def parse_date(value: Union[str, datetime, date, int, float, None]) -> datetime | None:
+def parse_date(value: str | datetime | date | int | float | None) -> datetime | None:
     """
     Parse various date formats to datetime.
 
@@ -56,7 +55,7 @@ def parse_date(value: Union[str, datetime, date, int, float, None]) -> datetime 
         if value <= 0:
             return None
         try:
-            return datetime.fromtimestamp(value, tz=timezone.utc)
+            return datetime.fromtimestamp(value, tz=UTC)
         except (OSError, ValueError, OverflowError):
             return None
 
@@ -165,7 +164,7 @@ def get_current_timestamp() -> int:
     Returns:
         Current Unix timestamp as int
     """
-    return int(datetime.now(timezone.utc).timestamp())
+    return int(datetime.now(UTC).timestamp())
 
 
 def get_today_str() -> str:
@@ -175,4 +174,4 @@ def get_today_str() -> str:
     Returns:
         Today's date as string in YYYY-MM-DD format
     """
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.now(UTC).strftime("%Y-%m-%d")

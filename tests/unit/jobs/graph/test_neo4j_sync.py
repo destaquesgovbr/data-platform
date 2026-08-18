@@ -11,6 +11,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from data_platform.jobs.graph.neo4j_sync import (
     _MERGE_EDGES_CYPHER_TMPL,
     BATCH_SIZE,
@@ -181,8 +182,10 @@ class TestSyncOrchestration:
         ]
 
         patcher, _ = self._install_fake_neo4j(driver)
-        with patcher, patch.object(neo4j_sync, "fetch_nodes", return_value=nodes), patch.object(
-            neo4j_sync, "fetch_edges", return_value=edges
+        with (
+            patcher,
+            patch.object(neo4j_sync, "fetch_nodes", return_value=nodes),
+            patch.object(neo4j_sync, "fetch_edges", return_value=edges),
         ):
             result = neo4j_sync.sync_graph_to_neo4j(
                 "postgresql://x", {"url": "bolt://x:7687", "user": "neo4j", "password": "p"}
@@ -213,22 +216,34 @@ class TestSyncOrchestration:
         driver.session.return_value.__enter__.return_value = session
 
         nodes = [
-            {"entity_id": "Q1", "name": "A", "type": "ORG", "wikidata_id": "Q1", "agency_key": None},
-            {"entity_id": "Q2", "name": "B", "type": "PER", "wikidata_id": None, "agency_key": None},
+            {
+                "entity_id": "Q1",
+                "name": "A",
+                "type": "ORG",
+                "wikidata_id": "Q1",
+                "agency_key": None,
+            },
+            {
+                "entity_id": "Q2",
+                "name": "B",
+                "type": "PER",
+                "wikidata_id": None,
+                "agency_key": None,
+            },
         ]
 
         patcher, _ = self._install_fake_neo4j(driver)
-        with patcher, patch.object(neo4j_sync, "fetch_nodes", return_value=nodes), patch.object(
-            neo4j_sync, "fetch_edges", return_value=[]
+        with (
+            patcher,
+            patch.object(neo4j_sync, "fetch_nodes", return_value=nodes),
+            patch.object(neo4j_sync, "fetch_edges", return_value=[]),
         ):
             result = neo4j_sync.sync_graph_to_neo4j(
                 "postgresql://x", {"url": "bolt://x:7687", "password": "p"}
             )
 
         # achou a chamada de DELETE com valid_ids = ids dos nós sincronizados
-        delete_calls = [
-            c for c in session.run.call_args_list if "DETACH DELETE" in str(c.args[0])
-        ]
+        delete_calls = [c for c in session.run.call_args_list if "DETACH DELETE" in str(c.args[0])]
         assert len(delete_calls) == 1
         assert delete_calls[0].kwargs["valid_ids"] == ["Q1", "Q2"]
         assert result["deleted_stale"] == 4
@@ -242,16 +257,16 @@ class TestSyncOrchestration:
         driver.session.return_value.__enter__.return_value = session
 
         patcher, _ = self._install_fake_neo4j(driver)
-        with patcher, patch.object(neo4j_sync, "fetch_nodes", return_value=[]), patch.object(
-            neo4j_sync, "fetch_edges", return_value=[]
+        with (
+            patcher,
+            patch.object(neo4j_sync, "fetch_nodes", return_value=[]),
+            patch.object(neo4j_sync, "fetch_edges", return_value=[]),
         ):
             result = neo4j_sync.sync_graph_to_neo4j(
                 "postgresql://x", {"url": "bolt://x", "password": "p"}
             )
 
-        delete_calls = [
-            c for c in session.run.call_args_list if "DETACH DELETE" in str(c.args[0])
-        ]
+        delete_calls = [c for c in session.run.call_args_list if "DETACH DELETE" in str(c.args[0])]
         assert delete_calls == []
         assert result["deleted_stale"] == 0
 
@@ -262,8 +277,10 @@ class TestSyncOrchestration:
         driver.session.side_effect = RuntimeError("boom")
 
         patcher, _ = self._install_fake_neo4j(driver)
-        with patcher, patch.object(neo4j_sync, "fetch_nodes", return_value=[]), patch.object(
-            neo4j_sync, "fetch_edges", return_value=[]
+        with (
+            patcher,
+            patch.object(neo4j_sync, "fetch_nodes", return_value=[]),
+            patch.object(neo4j_sync, "fetch_edges", return_value=[]),
         ):
             with pytest.raises(RuntimeError):
                 neo4j_sync.sync_graph_to_neo4j(

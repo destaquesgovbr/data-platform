@@ -3,8 +3,6 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 def _import_migration_006():
     """Import the migration module dynamically (numeric prefix not importable directly)."""
@@ -110,7 +108,7 @@ class TestMigrate006:
             ("abc123hash00000000000000000000ff", "mec", "2024-01-15", "Test Title", None),
         ]
         mock_cursor.fetchone.side_effect = [
-            (True,),   # has_news_features_table
+            (True,),  # has_news_features_table
             ("news_features_unique_id_fkey",),  # FK name
         ]
 
@@ -138,11 +136,11 @@ class TestMigrate006:
         mock_cursor = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
         mock_cursor.fetchone.side_effect = [
-            (0,),     # null legacy count
-            (5,),     # rows to rollback
+            (0,),  # null legacy count
+            (5,),  # rows to rollback
             (True,),  # has_news_features_table
             ("news_features_unique_id_fkey",),  # FK name
-            (0,),     # verification
+            (0,),  # verification
         ]
 
         result = mod.rollback(mock_conn, dry_run=False)
@@ -155,8 +153,8 @@ class TestMigrate006:
         mock_cursor = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
         mock_cursor.fetchone.side_effect = [
-            (0,),     # null legacy count
-            (5,),     # rows to rollback
+            (0,),  # null legacy count
+            (5,),  # rows to rollback
         ]
 
         result = mod.rollback(mock_conn, dry_run=True)
@@ -179,7 +177,9 @@ class TestParity:
     def test_matches_original_generate_readable_unique_id(self):
         mod = _import_migration_006()
         # These must produce identical output to the original script
-        result = mod.generate_readable_unique_id("mec", "2024-01-15", "Governo anuncia novo programa")
+        result = mod.generate_readable_unique_id(
+            "mec", "2024-01-15", "Governo anuncia novo programa"
+        )
         assert "_" in result
         parts = result.rsplit("_", 1)
         assert len(parts[1]) == 6

@@ -17,13 +17,10 @@ Usage:
 import argparse
 import atexit
 import json
-import os
 import signal
 import subprocess
 import sys
 import time
-from datetime import datetime
-from typing import Dict, List, Optional
 from urllib.parse import quote_plus
 
 import psycopg2
@@ -55,7 +52,7 @@ def get_secret(secret_name: str) -> str:
         ["gcloud", "secrets", "versions", "access", "latest", f"--secret={secret_name}"],
         capture_output=True,
         text=True,
-        check=True
+        check=True,
     )
     return result.stdout.strip()
 
@@ -66,9 +63,7 @@ def start_cloud_sql_proxy() -> subprocess.Popen:
 
     # Check if port is in use
     lsof = subprocess.run(
-        ["lsof", "-ti", f":{CLOUD_SQL_PROXY_PORT}"],
-        capture_output=True,
-        text=True
+        ["lsof", "-ti", f":{CLOUD_SQL_PROXY_PORT}"], capture_output=True, text=True
     )
     if lsof.stdout.strip():
         print(f"   Port {CLOUD_SQL_PROXY_PORT} already in use, killing existing process...")
@@ -77,13 +72,9 @@ def start_cloud_sql_proxy() -> subprocess.Popen:
 
     # Start proxy
     proxy = subprocess.Popen(
-        [
-            "cloud-sql-proxy",
-            f"--port={CLOUD_SQL_PROXY_PORT}",
-            CLOUD_SQL_INSTANCE
-        ],
+        ["cloud-sql-proxy", f"--port={CLOUD_SQL_PROXY_PORT}", CLOUD_SQL_INSTANCE],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        stderr=subprocess.DEVNULL,
     )
 
     time.sleep(3)  # Wait for proxy to start
@@ -108,36 +99,43 @@ def get_pg_connection(database_url: str):
     return psycopg2.connect(database_url)
 
 
-def get_typesense_client(config: Dict) -> typesense.Client:
+def get_typesense_client(config: dict) -> typesense.Client:
     """Get a Typesense client from config dict."""
-    return typesense.Client({
-        'nodes': [{
-            'host': config['host'],
-            'port': str(config['port']),
-            'protocol': config.get('protocol', 'http')
-        }],
-        'api_key': config['apiKey'],
-        'connection_timeout_seconds': 10
-    })
+    return typesense.Client(
+        {
+            "nodes": [
+                {
+                    "host": config["host"],
+                    "port": str(config["port"]),
+                    "protocol": config.get("protocol", "http"),
+                }
+            ],
+            "api_key": config["apiKey"],
+            "connection_timeout_seconds": 10,
+        }
+    )
 
 
-def check_typesense_collection(client: typesense.Client) -> Dict:
+def check_typesense_collection(client: typesense.Client) -> dict:
     """Check if the Typesense collection exists and has embedding field."""
     try:
         collection = client.collections[COLLECTION_NAME].retrieve()
-        print(f"   ✓ Collection '{COLLECTION_NAME}' found with {collection['num_documents']} documents")
+        print(
+            f"   ✓ Collection '{COLLECTION_NAME}' found with {collection['num_documents']} documents"
+        )
 
         # Check if content_embedding field exists
         embedding_field = next(
-            (f for f in collection['fields'] if f['name'] == 'content_embedding'),
-            None
+            (f for f in collection["fields"] if f["name"] == "content_embedding"), None
         )
 
         if not embedding_field:
-            print(f"   ⚠ Collection doesn't have 'content_embedding' field")
+            print("   ⚠ Collection doesn't have 'content_embedding' field")
             print("   You may need to recreate the collection with the updated schema")
         else:
-            print(f"   ✓ content_embedding field exists (dims: {embedding_field.get('num_dim', 'unknown')})")
+            print(
+                f"   ✓ content_embedding field exists (dims: {embedding_field.get('num_dim', 'unknown')})"
+            )
 
         return collection
 
@@ -159,18 +157,14 @@ def count_embeddings_in_pg(conn, start_date: str, end_date: str) -> int:
               AND published_at < %s::date + INTERVAL '1 day'
               AND content_embedding IS NOT NULL
             """,
-            (start_date, end_date)
+            (start_date, end_date),
         )
         return cur.fetchone()[0]
 
 
 def fetch_news_with_embeddings(
-    conn,
-    start_date: str,
-    end_date: str,
-    batch_size: int,
-    offset: int
-) -> List[Dict]:
+    conn, start_date: str, end_date: str, batch_size: int, offset: int
+) -> list[dict]:
     """Fetch news records with embeddings from PostgreSQL."""
     query = """
         SELECT
@@ -212,25 +206,36 @@ def fetch_news_with_embeddings(
     with conn.cursor() as cur:
         cur.execute(query, (start_date, end_date, batch_size, offset))
         columns = [desc[0] for desc in cur.description]
-        return [dict(zip(columns, row)) for row in cur.fetchall()]
+        return [dict(zip(columns, row, strict=False)) for row in cur.fetchall()]
 
 
-def prepare_typesense_document(news: Dict) -> Dict:
+def prepare_typesense_document(news: dict) -> dict:
     """Prepare a news record for Typesense indexing."""
     doc = {
-        'id': news['unique_id'],
-        'unique_id': news['unique_id'],
-        'published_at': int(news['published_at'].timestamp()) if news['published_at'] else 0
+        "id": news["unique_id"],
+        "unique_id": news["unique_id"],
+        "published_at": int(news["published_at"].timestamp()) if news["published_at"] else 0,
     }
 
     # Add optional fields
     optional_fields = [
-        'agency_key', 'title', 'url', 'image_url', 'category',
-        'content', 'summary', 'subtitle', 'editorial_lead',
-        'theme_l1_code', 'theme_l1_label',
-        'theme_l2_code', 'theme_l2_label',
-        'theme_l3_code', 'theme_l3_label',
-        'most_specific_theme_code', 'most_specific_theme_label'
+        "agency_key",
+        "title",
+        "url",
+        "image_url",
+        "category",
+        "content",
+        "summary",
+        "subtitle",
+        "editorial_lead",
+        "theme_l1_code",
+        "theme_l1_label",
+        "theme_l2_code",
+        "theme_l2_label",
+        "theme_l3_code",
+        "theme_l3_label",
+        "most_specific_theme_code",
+        "most_specific_theme_label",
     ]
 
     for field in optional_fields:
@@ -238,21 +243,21 @@ def prepare_typesense_document(news: Dict) -> Dict:
             doc[field] = str(news[field]).strip()
 
     # Add agency_name as agency (for compatibility)
-    if news.get('agency_name'):
-        doc['agency'] = news['agency_name']
+    if news.get("agency_name"):
+        doc["agency"] = news["agency_name"]
 
     # Add extracted_at timestamp
-    if news.get('extracted_at'):
-        doc['extracted_at'] = int(news['extracted_at'].timestamp())
+    if news.get("extracted_at"):
+        doc["extracted_at"] = int(news["extracted_at"].timestamp())
 
     # Add published_year and published_month for faceting
-    if news.get('published_at'):
-        doc['published_year'] = news['published_at'].year
-        doc['published_month'] = news['published_at'].month
+    if news.get("published_at"):
+        doc["published_year"] = news["published_at"].year
+        doc["published_month"] = news["published_at"].month
 
     # Add content_embedding
-    if news.get('content_embedding'):
-        embedding = news['content_embedding']
+    if news.get("content_embedding"):
+        embedding = news["content_embedding"]
 
         if isinstance(embedding, str):
             # Parse string representation
@@ -265,26 +270,25 @@ def prepare_typesense_document(news: Dict) -> Dict:
             embedding_list = None
 
         if embedding_list:
-            doc['content_embedding'] = embedding_list
+            doc["content_embedding"] = embedding_list
 
     return doc
 
 
-def upsert_documents_batch(client: typesense.Client, documents: List[Dict]) -> int:
+def upsert_documents_batch(client: typesense.Client, documents: list[dict]) -> int:
     """Upsert a batch of documents to Typesense."""
     try:
         results = client.collections[COLLECTION_NAME].documents.import_(
-            documents,
-            {'action': 'upsert'}
+            documents, {"action": "upsert"}
         )
 
-        successes = sum(1 for r in results if r.get('success'))
+        successes = sum(1 for r in results if r.get("success"))
         failures = len(results) - successes
 
         if failures > 0:
             # Log first few failures
             for r in results[:3]:
-                if not r.get('success'):
+                if not r.get("success"):
                     print(f"      ⚠ Failed: {r.get('error', 'Unknown error')}")
 
         return successes
@@ -295,12 +299,20 @@ def upsert_documents_batch(client: typesense.Client, documents: List[Dict]) -> i
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Sync embeddings from production PostgreSQL to Typesense")
-    parser.add_argument("--start-date", type=str, default="2025-01-01", help="Start date (YYYY-MM-DD)")
+    parser = argparse.ArgumentParser(
+        description="Sync embeddings from production PostgreSQL to Typesense"
+    )
+    parser.add_argument(
+        "--start-date", type=str, default="2025-01-01", help="Start date (YYYY-MM-DD)"
+    )
     parser.add_argument("--end-date", type=str, default="2025-12-31", help="End date (YYYY-MM-DD)")
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE, help="Batch size for sync")
-    parser.add_argument("--max-records", type=int, default=None, help="Max records to sync (for testing)")
-    parser.add_argument("--full-sync", action="store_true", help="Sync all records (ignore last sync)")
+    parser.add_argument(
+        "--max-records", type=int, default=None, help="Max records to sync (for testing)"
+    )
+    parser.add_argument(
+        "--full-sync", action="store_true", help="Sync all records (ignore last sync)"
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -371,7 +383,7 @@ def main():
                 args.start_date,
                 args.end_date,
                 min(batch_size, total_to_sync - synced),
-                offset
+                offset,
             )
 
             if not records:
@@ -381,13 +393,13 @@ def main():
             documents = [prepare_typesense_document(r) for r in records]
 
             # Filter out documents without embeddings
-            documents = [d for d in documents if d.get('content_embedding')]
+            documents = [d for d in documents if d.get("content_embedding")]
 
             if documents:
                 try:
                     successful = upsert_documents_batch(ts_client, documents)
                     synced += successful
-                    failed += (len(documents) - successful)
+                    failed += len(documents) - successful
                     pbar.update(successful)
                 except Exception as e:
                     print(f"\n   ✗ Error syncing batch: {e}")
@@ -398,7 +410,7 @@ def main():
     # Get final Typesense count
     try:
         collection = ts_client.collections[COLLECTION_NAME].retrieve()
-        ts_count = collection['num_documents']
+        ts_count = collection["num_documents"]
     except:
         ts_count = "unknown"
 

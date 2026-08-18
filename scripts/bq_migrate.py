@@ -18,7 +18,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -48,17 +48,20 @@ def discover_migrations() -> list[dict[str, Any]]:
     for f in sorted(MIGRATIONS_DIR.glob("*.sql")):
         match = MIGRATION_PATTERN.match(f.name)
         if match:
-            migrations.append({
-                "version": match.group(1),
-                "name": match.group(2),
-                "path": f,
-            })
+            migrations.append(
+                {
+                    "version": match.group(1),
+                    "name": match.group(2),
+                    "path": f,
+                }
+            )
     return migrations
 
 
 def get_bigquery_client():
     """Get authenticated BigQuery client."""
     from google.cloud import bigquery
+
     return bigquery.Client(project=PROJECT_ID)
 
 
@@ -78,8 +81,9 @@ def get_applied_versions(client) -> set[str]:
         return set()
 
 
-def record_migration(client, version: str, name: str, status: str,
-                     duration_ms: int, error_message: str | None = None) -> None:
+def record_migration(
+    client, version: str, name: str, status: str, duration_ms: int, error_message: str | None = None
+) -> None:
     """Record migration execution in history table."""
     query = f"""
     INSERT INTO `{PROJECT_ID}.{HISTORY_TABLE}`
@@ -87,13 +91,13 @@ def record_migration(client, version: str, name: str, status: str,
     VALUES (@version, @name, @status, @applied_at, @applied_by, @duration_ms, @error_message)
     """
     from google.cloud import bigquery
+
     job_config = bigquery.QueryJobConfig(
         query_parameters=[
             bigquery.ScalarQueryParameter("version", "STRING", version),
             bigquery.ScalarQueryParameter("name", "STRING", name),
             bigquery.ScalarQueryParameter("status", "STRING", status),
-            bigquery.ScalarQueryParameter("applied_at", "TIMESTAMP",
-                                          datetime.now(timezone.utc).isoformat()),
+            bigquery.ScalarQueryParameter("applied_at", "TIMESTAMP", datetime.now(UTC).isoformat()),
             bigquery.ScalarQueryParameter("applied_by", "STRING", getpass.getuser()),
             bigquery.ScalarQueryParameter("duration_ms", "INT64", duration_ms),
             bigquery.ScalarQueryParameter("error_message", "STRING", error_message),

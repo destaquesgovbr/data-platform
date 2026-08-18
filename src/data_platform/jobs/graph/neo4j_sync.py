@@ -211,14 +211,10 @@ def sync_graph_to_neo4j(db_url: str, bolt_config: dict) -> dict:
             # NUNCA deve zerar o grafo.
             if nodes:
                 valid_ids = [n["entity_id"] for n in nodes]
-                rec = session.run(
-                    DELETE_STALE_NODES_CYPHER, valid_ids=valid_ids
-                ).single()
+                rec = session.run(DELETE_STALE_NODES_CYPHER, valid_ids=valid_ids).single()
                 result["deleted_stale"] = rec["deleted"] if rec else 0
             else:
-                logger.warning(
-                    "fetch_nodes vazio — pulando cleanup de nos stale (protecao)"
-                )
+                logger.warning("fetch_nodes vazio — pulando cleanup de nos stale (protecao)")
                 result["deleted_stale"] = 0
     finally:
         driver.close()

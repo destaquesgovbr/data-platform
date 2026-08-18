@@ -199,9 +199,7 @@ def prepare_document(row: pd.Series) -> dict[str, Any]:
         Dicionário formatado para o Typesense
     """
     # Usa unique_id como id do documento para comportamento de upsert
-    unique_id = (
-        str(row["unique_id"]) if pd.notna(row["unique_id"]) else f"doc_{row.name}"
-    )
+    unique_id = str(row["unique_id"]) if pd.notna(row["unique_id"]) else f"doc_{row.name}"
 
     doc: dict[str, Any] = {
         "id": unique_id,  # Typesense usa 'id' como chave primária para upsert
@@ -335,9 +333,7 @@ def index_documents(
     }
 
     try:
-        logger.info(
-            f"Indexando documentos no Typesense (modo: {mode}, force: {force})..."
-        )
+        logger.info(f"Indexando documentos no Typesense (modo: {mode}, force: {force})...")
 
         # Verifica documentos existentes na coleção
         collection_info = client.collections[collection_name].retrieve()
@@ -347,19 +343,13 @@ def index_documents(
             logger.info(f"Coleção já contém {existing_count} documentos")
             if mode == "full":
                 if force:
-                    logger.warning(
-                        "Modo force ativado: Documentos existentes serão sobrescritos"
-                    )
-                    logger.warning(
-                        f"{existing_count} documentos existentes serão substituídos"
-                    )
+                    logger.warning("Modo force ativado: Documentos existentes serão sobrescritos")
+                    logger.warning(f"{existing_count} documentos existentes serão substituídos")
                 else:
                     logger.info(
                         "Modo full em coleção não vazia. Use modo 'incremental' para atualizar."
                     )
-                    logger.info(
-                        "Ou use --force para sobrescrever dados existentes."
-                    )
+                    logger.info("Ou use --force para sobrescrever dados existentes.")
                     logger.info("Pulando indexação para evitar duplicados.")
                     stats["skipped"] = True
                     return stats
@@ -438,9 +428,7 @@ def index_documents(
         raise
 
 
-def run_test_queries(
-    client: typesense.Client, collection_name: str = COLLECTION_NAME
-) -> None:
+def run_test_queries(client: typesense.Client, collection_name: str = COLLECTION_NAME) -> None:
     """
     Executa consultas de teste para verificar a funcionalidade.
 

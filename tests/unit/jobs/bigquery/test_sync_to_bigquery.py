@@ -1,6 +1,5 @@
 """Unit tests for BigQuery sync DAG and job module."""
 
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -12,6 +11,7 @@ from data_platform.jobs.bigquery.sync_to_bigquery import SYNC_QUERY
 def _airflow_available():
     try:
         import airflow
+
         return True
     except ImportError:
         return False
@@ -22,11 +22,19 @@ class TestSyncQuery:
 
     def test_query_has_required_columns(self):
         required = [
-            "unique_id", "title", "agency_key", "published_at",
+            "unique_id",
+            "title",
+            "agency_key",
+            "published_at",
             "content_hash",
-            "word_count", "sentiment_score", "sentiment_label",
-            "has_image", "has_video", "readability_flesch",
-            "theme_l1_code", "most_specific_theme_code",
+            "word_count",
+            "sentiment_score",
+            "sentiment_label",
+            "has_image",
+            "has_video",
+            "readability_flesch",
+            "theme_l1_code",
+            "most_specific_theme_code",
         ]
         for col in required:
             assert col in SYNC_QUERY, f"Missing column: {col}"
@@ -141,13 +149,17 @@ class TestDagStructure:
     """Tests for the DAG definition — only runs when Airflow is available."""
 
     def test_dag_exists_and_has_correct_schedule(self):
-        pytest.importorskip("airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)")
+        pytest.importorskip(
+            "airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)"
+        )
         from data_platform.dags.sync_pg_to_bigquery import dag_instance
 
         assert dag_instance.dag_id == "sync_pg_to_bigquery"
 
     def test_dag_has_tasks(self):
-        pytest.importorskip("airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)")
+        pytest.importorskip(
+            "airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)"
+        )
         from data_platform.dags.sync_pg_to_bigquery import dag_instance
 
         task_ids = [t.task_id for t in dag_instance.tasks]
@@ -155,14 +167,18 @@ class TestDagStructure:
         assert "sync_dims" in task_ids
 
     def test_dag_catchup_disabled(self):
-        pytest.importorskip("airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)")
+        pytest.importorskip(
+            "airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)"
+        )
         from data_platform.dags.sync_pg_to_bigquery import dag_instance
 
         assert dag_instance.catchup is False
 
     def test_dag_does_not_have_ensure_schema_task(self):
         """ensure_schema was a workaround removed in issue #163."""
-        pytest.importorskip("airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)")
+        pytest.importorskip(
+            "airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)"
+        )
         from data_platform.dags.sync_pg_to_bigquery import dag_instance
 
         task_ids = [t.task_id for t in dag_instance.tasks]
@@ -170,7 +186,9 @@ class TestDagStructure:
 
     def test_sync_tasks_have_no_upstream(self):
         """After removing ensure_schema, sync tasks have no upstream deps."""
-        pytest.importorskip("airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)")
+        pytest.importorskip(
+            "airflow.decorators", reason="Airflow not installed (runs in Cloud Composer only)"
+        )
         from data_platform.dags.sync_pg_to_bigquery import dag_instance
 
         for task in dag_instance.tasks:

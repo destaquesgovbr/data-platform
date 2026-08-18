@@ -5,8 +5,8 @@ Tests handle_feature_computation() orchestration:
 - fetch article → compute features → upsert
 """
 
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, Mock, patch
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -49,7 +49,7 @@ class TestHandleFeatureComputation:
                 "Conteúdo do artigo com várias palavras para teste.",
                 "https://example.com/img.jpg",
                 None,
-                datetime(2024, 6, 17, 14, 0, 0, tzinfo=timezone.utc),
+                datetime(2024, 6, 17, 14, 0, 0, tzinfo=UTC),
                 None,  # entities
             )
         )
@@ -107,9 +107,7 @@ class TestHandleFeatureComputation:
 
     def test_propagates_upsert_error(self, mock_pg):
         conn = MagicMock()
-        cursor = _make_cursor(
-            row=("abc123", "Conteúdo.", None, None, datetime(2024, 1, 1), None)
-        )
+        cursor = _make_cursor(row=("abc123", "Conteúdo.", None, None, datetime(2024, 1, 1), None))
         conn.cursor.return_value = cursor
         mock_pg.get_connection.return_value = conn
         mock_pg.upsert_features.side_effect = Exception("DB error during upsert")
@@ -119,9 +117,7 @@ class TestHandleFeatureComputation:
 
     def test_connection_returned_to_pool_on_success(self, mock_pg):
         conn = MagicMock()
-        cursor = _make_cursor(
-            row=("abc123", "Conteúdo.", None, None, datetime(2024, 1, 1), None)
-        )
+        cursor = _make_cursor(row=("abc123", "Conteúdo.", None, None, datetime(2024, 1, 1), None))
         conn.cursor.return_value = cursor
         mock_pg.get_connection.return_value = conn
 
@@ -147,7 +143,7 @@ class TestHandleFeatureComputation:
                 "Texto de artigo.",
                 None,
                 None,
-                datetime(2024, 6, 17, 14, 30, 0, tzinfo=timezone.utc),
+                datetime(2024, 6, 17, 14, 30, 0, tzinfo=UTC),
                 None,
             )
         )
@@ -163,9 +159,7 @@ class TestHandleFeatureComputation:
 
     def test_features_omit_publication_fields_when_published_at_none(self, mock_pg):
         conn = MagicMock()
-        cursor = _make_cursor(
-            row=("abc123", "Texto de artigo.", None, None, None, None)
-        )
+        cursor = _make_cursor(row=("abc123", "Texto de artigo.", None, None, None, None))
         conn.cursor.return_value = cursor
         mock_pg.get_connection.return_value = conn
 

@@ -3,16 +3,14 @@
 import csv
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 from migrate_unique_ids import (
     build_id_mapping,
     dry_run,
     generate_readable_unique_id,
     generate_suffix,
-    has_news_features_table,
     rollback,
     slugify,
 )
@@ -145,13 +143,12 @@ class TestBuildIdMapping:
 
     def test_no_duplicate_new_ids(self):
         rows = [
-            self._make_row(f"hash{i:04d}", "secom", f"2024-01-{i+1:02d}", f"Title {i}")
+            self._make_row(f"hash{i:04d}", "secom", f"2024-01-{i + 1:02d}", f"Title {i}")
             for i in range(100)
         ]
         mapping = build_id_mapping(rows)
         new_ids = list(mapping.values())
         assert len(new_ids) == len(set(new_ids))
-
 
 
 # ---------------------------------------------------------------------------
@@ -225,10 +222,10 @@ class TestRollback:
 
         # has_news_features_table returns False (simpler case)
         mock_cursor.fetchone.side_effect = [
-            (0,),    # count of rows with NULL legacy_unique_id
-            (5,),    # count of rows to rollback
+            (0,),  # count of rows with NULL legacy_unique_id
+            (5,),  # count of rows to rollback
             (False,),  # has_news_features_table
-            (0,),    # verification: count of mismatched rows
+            (0,),  # verification: count of mismatched rows
         ]
         mock_cursor.fetchall.return_value = []
 
@@ -243,11 +240,11 @@ class TestRollback:
         mock_conn.cursor.return_value = mock_cursor
 
         mock_cursor.fetchone.side_effect = [
-            (0,),       # count of rows with NULL legacy_unique_id
-            (5,),       # count of rows to rollback
-            (True,),    # has_news_features_table
+            (0,),  # count of rows with NULL legacy_unique_id
+            (5,),  # count of rows to rollback
+            (True,),  # has_news_features_table
             ("news_features_unique_id_fkey",),  # FK constraint name
-            (0,),       # verification
+            (0,),  # verification
         ]
         mock_cursor.fetchall.return_value = []
 

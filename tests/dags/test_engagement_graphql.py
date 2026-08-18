@@ -1,9 +1,8 @@
 """Tests for batch_upsert_engagement_via_graphql."""
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pandas as pd
-import pytest
 
 from data_platform.jobs.bigquery.engagement import (
     batch_upsert_engagement_via_graphql,
@@ -16,15 +15,15 @@ class TestUpsertEngagementViaGraphql:
     def test_upsert_engagement_via_graphql(self):
         """Should call mutate with correct items structure."""
         mock_client = MagicMock()
-        mock_client.mutate.return_value = {
-            "batchUpsertFeatures": {"processed": 3, "failed": 0}
-        }
+        mock_client.mutate.return_value = {"batchUpsertFeatures": {"processed": 3, "failed": 0}}
 
-        metrics_df = pd.DataFrame([
-            {"unique_id": "aaa", "view_count": 100, "unique_sessions": 50},
-            {"unique_id": "bbb", "view_count": 200, "unique_sessions": 80},
-            {"unique_id": "ccc", "view_count": 10, "unique_sessions": 5},
-        ])
+        metrics_df = pd.DataFrame(
+            [
+                {"unique_id": "aaa", "view_count": 100, "unique_sessions": 50},
+                {"unique_id": "bbb", "view_count": 200, "unique_sessions": 80},
+                {"unique_id": "ccc", "view_count": 10, "unique_sessions": 5},
+            ]
+        )
 
         count = batch_upsert_engagement_via_graphql(mock_client, metrics_df)
 
@@ -57,13 +56,10 @@ class TestUpsertEngagementViaGraphql:
     def test_upsert_engagement_batches_large_payload(self):
         """More than 500 items should be sent in multiple batches."""
         mock_client = MagicMock()
-        mock_client.mutate.return_value = {
-            "batchUpsertFeatures": {"processed": 500, "failed": 0}
-        }
+        mock_client.mutate.return_value = {"batchUpsertFeatures": {"processed": 500, "failed": 0}}
 
         rows = [
-            {"unique_id": f"id-{i}", "view_count": i, "unique_sessions": i // 2}
-            for i in range(600)
+            {"unique_id": f"id-{i}", "view_count": i, "unique_sessions": i // 2} for i in range(600)
         ]
         metrics_df = pd.DataFrame(rows)
 

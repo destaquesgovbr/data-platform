@@ -15,10 +15,10 @@ Usage:
 """
 
 import argparse
+import random
 import sys
 from pathlib import Path
-from typing import Dict, Any, List
-import random
+from typing import Any
 
 from datasets import load_dataset
 from loguru import logger
@@ -30,9 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from data_platform.managers import PostgresManager
 
 
-def validate_counts(
-    dataset_name: str, manager: PostgresManager
-) -> Dict[str, Any]:
+def validate_counts(dataset_name: str, manager: PostgresManager) -> dict[str, Any]:
     """
     Compare record counts between HuggingFace and PostgreSQL.
 
@@ -78,7 +76,7 @@ def validate_counts(
     return result
 
 
-def validate_integrity(manager: PostgresManager) -> Dict[str, Any]:
+def validate_integrity(manager: PostgresManager) -> dict[str, Any]:
     """
     Validate data integrity in PostgreSQL.
 
@@ -181,7 +179,9 @@ def validate_integrity(manager: PostgresManager) -> Dict[str, Any]:
     logger.info(f"Invalid agency references:  {results['invalid_agencies']}")
     logger.info(f"Invalid theme references:   {results['invalid_themes']}")
     logger.info(f"Duplicate unique_ids:       {results['duplicate_unique_ids']}")
-    logger.info(f"Records with theme:         {results['records_with_theme']:,} ({results['theme_coverage_pct']:.1f}%)")
+    logger.info(
+        f"Records with theme:         {results['records_with_theme']:,} ({results['theme_coverage_pct']:.1f}%)"
+    )
     logger.info(f"Inconsistent denorm fields: {results['inconsistent_denormalized']}")
 
     # Check if all validations passed
@@ -206,7 +206,7 @@ def validate_integrity(manager: PostgresManager) -> Dict[str, Any]:
 
 def sample_records(
     dataset_name: str, manager: PostgresManager, sample_size: int = 10
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Sample records to verify consistency between HF and PG.
 
@@ -259,14 +259,13 @@ def sample_records(
         else:
             results["mismatched"] += 1
             logger.warning(
-                f"✗ Mismatch for {unique_id}: "
-                f"title={title_match}, agency={agency_match}"
+                f"✗ Mismatch for {unique_id}: title={title_match}, agency={agency_match}"
             )
 
     # Calculate percentage
     match_pct = (results["matched"] / results["sampled"] * 100) if results["sampled"] > 0 else 0
 
-    logger.info(f"\nSample results:")
+    logger.info("\nSample results:")
     logger.info(f"  Sampled:    {results['sampled']}")
     logger.info(f"  Matched:    {results['matched']} ({match_pct:.1f}%)")
     logger.info(f"  Mismatched: {results['mismatched']}")
@@ -283,9 +282,9 @@ def sample_records(
 
 
 def generate_report(
-    count_results: Dict[str, Any],
-    integrity_results: Dict[str, Any],
-    sample_results: Dict[str, Any],
+    count_results: dict[str, Any],
+    integrity_results: dict[str, Any],
+    sample_results: dict[str, Any],
 ) -> None:
     """
     Generate validation report.
@@ -303,7 +302,10 @@ def generate_report(
     count_table = [
         ["HuggingFace", f"{count_results['hf_count']:,}"],
         ["PostgreSQL", f"{count_results['pg_count']:,}"],
-        ["Difference", f"{count_results['difference']:,} ({count_results['difference_pct']:+.2f}%)"],
+        [
+            "Difference",
+            f"{count_results['difference']:,} ({count_results['difference_pct']:+.2f}%)",
+        ],
         ["Status", "✓ Match" if count_results["match"] else "✗ Mismatch"],
     ]
 
@@ -312,16 +314,42 @@ def generate_report(
 
     # Integrity checks
     integrity_table = [
-        ["NULL required fields", integrity_results["null_required_fields"], "✓" if integrity_results["null_required_fields"] == 0 else "✗"],
-        ["Invalid agencies", integrity_results["invalid_agencies"], "✓" if integrity_results["invalid_agencies"] == 0 else "✗"],
-        ["Invalid themes", integrity_results["invalid_themes"], "✓" if integrity_results["invalid_themes"] == 0 else "✗"],
-        ["Duplicate unique_ids", integrity_results["duplicate_unique_ids"], "✓" if integrity_results["duplicate_unique_ids"] == 0 else "✗"],
-        ["Theme coverage", f"{integrity_results['theme_coverage_pct']:.1f}%", "✓" if integrity_results["theme_coverage_pct"] >= 95 else "✗"],
-        ["Inconsistent denorm", integrity_results["inconsistent_denormalized"], "✓" if integrity_results["inconsistent_denormalized"] == 0 else "✗"],
+        [
+            "NULL required fields",
+            integrity_results["null_required_fields"],
+            "✓" if integrity_results["null_required_fields"] == 0 else "✗",
+        ],
+        [
+            "Invalid agencies",
+            integrity_results["invalid_agencies"],
+            "✓" if integrity_results["invalid_agencies"] == 0 else "✗",
+        ],
+        [
+            "Invalid themes",
+            integrity_results["invalid_themes"],
+            "✓" if integrity_results["invalid_themes"] == 0 else "✗",
+        ],
+        [
+            "Duplicate unique_ids",
+            integrity_results["duplicate_unique_ids"],
+            "✓" if integrity_results["duplicate_unique_ids"] == 0 else "✗",
+        ],
+        [
+            "Theme coverage",
+            f"{integrity_results['theme_coverage_pct']:.1f}%",
+            "✓" if integrity_results["theme_coverage_pct"] >= 95 else "✗",
+        ],
+        [
+            "Inconsistent denorm",
+            integrity_results["inconsistent_denormalized"],
+            "✓" if integrity_results["inconsistent_denormalized"] == 0 else "✗",
+        ],
     ]
 
     logger.info("\n## Data Integrity")
-    logger.info("\n" + tabulate(integrity_table, headers=["Check", "Value", "Status"], tablefmt="simple"))
+    logger.info(
+        "\n" + tabulate(integrity_table, headers=["Check", "Value", "Status"], tablefmt="simple")
+    )
 
     # Sample consistency
     sample_table = [

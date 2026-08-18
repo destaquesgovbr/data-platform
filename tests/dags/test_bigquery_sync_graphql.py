@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock
 
 import pandas as pd
-import pytest
 
 from data_platform.jobs.bigquery.sync_to_bigquery import (
     fetch_news_for_bigquery_via_graphql,
@@ -75,22 +74,33 @@ class TestFetchViaGraphqlPaginates:
     def test_columns_are_snake_case(self):
         """Verify camelCase GraphQL fields are converted to snake_case."""
         mock_client = MagicMock()
-        mock_client.query.return_value = {
-            "newsBatchForBigQuery": [_make_article("abc")]
-        }
+        mock_client.query.return_value = {"newsBatchForBigQuery": [_make_article("abc")]}
 
-        df = fetch_news_for_bigquery_via_graphql(
-            mock_client, "2025-06-01", "2025-06-02"
-        )
+        df = fetch_news_for_bigquery_via_graphql(mock_client, "2025-06-01", "2025-06-02")
 
         expected_cols = {
-            "unique_id", "title", "url", "agency_key", "agency_name",
-            "published_at", "theme_l1_code", "theme_l1_label",
-            "theme_l2_code", "theme_l2_label",
-            "most_specific_theme_code", "most_specific_theme_label",
-            "word_count", "char_count", "paragraph_count",
-            "has_image", "has_video", "sentiment_label", "sentiment_score",
-            "readability_flesch", "publication_hour", "publication_dow",
+            "unique_id",
+            "title",
+            "url",
+            "agency_key",
+            "agency_name",
+            "published_at",
+            "theme_l1_code",
+            "theme_l1_label",
+            "theme_l2_code",
+            "theme_l2_label",
+            "most_specific_theme_code",
+            "most_specific_theme_label",
+            "word_count",
+            "char_count",
+            "paragraph_count",
+            "has_image",
+            "has_video",
+            "sentiment_label",
+            "sentiment_score",
+            "readability_flesch",
+            "publication_hour",
+            "publication_dow",
         }
         assert set(df.columns) == expected_cols
 
@@ -103,9 +113,7 @@ class TestFetchViaGraphqlEmptyRange:
         mock_client = MagicMock()
         mock_client.query.return_value = {"newsBatchForBigQuery": []}
 
-        df = fetch_news_for_bigquery_via_graphql(
-            mock_client, "2099-01-01", "2099-01-02"
-        )
+        df = fetch_news_for_bigquery_via_graphql(mock_client, "2099-01-01", "2099-01-02")
 
         assert isinstance(df, pd.DataFrame)
         assert df.empty

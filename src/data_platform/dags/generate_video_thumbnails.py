@@ -13,7 +13,6 @@ import logging
 from datetime import datetime, timedelta
 
 import requests
-
 from airflow.decorators import dag, task
 from airflow.hooks.base import BaseHook
 from airflow.models import Variable

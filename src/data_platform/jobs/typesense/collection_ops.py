@@ -8,11 +8,11 @@ import logging
 from typing import Any
 
 from data_platform.typesense import (
-    get_client,
+    COLLECTION_NAME,
     delete_collection,
+    get_client,
     list_collections,
     update_schema,
-    COLLECTION_NAME,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,8 +64,7 @@ def update_typesense_schema(
         Dicionário com resultado (added, already_exists, errors)
     """
     logger.info(
-        f"Atualizando schema da coleção '{collection_name}'"
-        f"{' [DRY-RUN]' if dry_run else ''}..."
+        f"Atualizando schema da coleção '{collection_name}'{' [DRY-RUN]' if dry_run else ''}..."
     )
 
     client = get_client()

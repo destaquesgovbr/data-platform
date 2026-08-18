@@ -6,10 +6,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from data_platform.jobs.integrity.priority import (
-    ALLOWED_URL_PREFIXES,
     CONTENT_CHECK_RATIO,
-    PRIORITY_TIERS,
     PRIORITY_QUERY,
+    PRIORITY_TIERS,
     _is_allowed_url,
     fetch_priority_batch,
 )
@@ -111,7 +110,10 @@ class TestIsAllowedUrl:
         assert _is_allowed_url("https://live.staticflickr.com/123/img.jpg") is True
 
     def test_gcs_thumbnails_is_allowed(self):
-        assert _is_allowed_url("https://storage.googleapis.com/destaquesgovbr-thumbnails/x.jpg") is True
+        assert (
+            _is_allowed_url("https://storage.googleapis.com/destaquesgovbr-thumbnails/x.jpg")
+            is True
+        )
 
     def test_random_domain_is_rejected(self):
         assert _is_allowed_url("https://cdn.example.com/img.jpg") is False
@@ -126,9 +128,13 @@ class TestIsAllowedUrl:
         assert _is_allowed_url("https://storage.googleapis.com/other-bucket/x.jpg") is False
 
 
-def _make_row(unique_id="art-1", url="https://www.gov.br/mec/noticia",
-              image_url="https://www.gov.br/mec/img.jpg", published_at=None,
-              integrity=None):
+def _make_row(
+    unique_id="art-1",
+    url="https://www.gov.br/mec/noticia",
+    image_url="https://www.gov.br/mec/img.jpg",
+    published_at=None,
+    integrity=None,
+):
     """Cria um mock de row do SQLAlchemy."""
     row = MagicMock()
     row.unique_id = unique_id

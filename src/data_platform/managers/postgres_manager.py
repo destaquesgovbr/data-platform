@@ -13,11 +13,9 @@ from urllib.parse import quote_plus
 import pandas as pd
 from loguru import logger
 from psycopg2 import extensions, pool
-from psycopg2.extras import RealDictCursor, execute_values
+from psycopg2.extras import Json, RealDictCursor, execute_values
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
-
-from psycopg2.extras import Json
 
 from data_platform.models.news import Agency, News, NewsInsert, Theme
 
