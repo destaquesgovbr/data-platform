@@ -25,6 +25,12 @@ CREATE TABLE IF NOT EXISTS dgb_gold.fato_noticias (
   -- Timestamps
   published_at TIMESTAMP NOT NULL,
   extracted_at TIMESTAMP,
+
+  -- Content moderation (summary guardrails)
+  summary_blocked BOOL,
+  summary_blocked_reason STRING,
+  summary_blocked_at TIMESTAMP,
+
   synced_at TIMESTAMP NOT NULL,
 
   -- Features (from news_features JSONB)
