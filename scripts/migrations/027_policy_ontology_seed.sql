@@ -1,4 +1,4 @@
--- 026_policy_ontology_seed.sql
+-- 027_policy_ontology_seed.sql
 -- Popula campos de ontologia (domain, lifecycle_phase) para entidades POLICY existentes
 -- via JOIN com o gazetteer de políticas
 -- Aplicar após confirmar que entity_registry tem entidades POLICY (verificar com SELECT COUNT(*) WHERE type='POLICY')

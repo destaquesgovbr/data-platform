@@ -121,7 +121,11 @@ class MigrationInfo:
 
 
 def discover_migrations(migrations_dir: Path) -> list[MigrationInfo]:
-    """Discover migration files in a directory by naming convention."""
+    """Discover migration files in a directory by naming convention.
+
+    Raises ValueError if two files share the same version number: history is
+    keyed by version, so a duplicate would silently hide one of the migrations.
+    """
     if not migrations_dir.exists():
         return []
 
@@ -135,12 +139,23 @@ def discover_migrations(migrations_dir: Path) -> list[MigrationInfo]:
         if name.endswith(ROLLBACK_SUFFIX):
             match = re.match(r"^(\d{3})_", name)
             if match:
-                rollbacks[match.group(1)] = f
+                version = match.group(1)
+                if version in rollbacks:
+                    raise ValueError(
+                        f"Duplicate rollback version {version}: "
+                        f"{rollbacks[version].name} and {name}"
+                    )
+                rollbacks[version] = f
             continue
 
         match = MIGRATION_PATTERN.match(name)
         if match:
             version = match.group(1)
+            if version in migrations:
+                raise ValueError(
+                    f"Duplicate migration version {version}: "
+                    f"{migrations[version].path.name} and {name}"
+                )
             desc = match.group(2)
             mtype = "python" if match.group(3) == "py" else "sql"
             migrations[version] = MigrationInfo(
