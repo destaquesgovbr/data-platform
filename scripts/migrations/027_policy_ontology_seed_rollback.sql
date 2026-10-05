@@ -1,5 +1,5 @@
--- 026_policy_ontology_seed_rollback.sql
--- Remove campos de ontologia adicionados pela migração 026
+-- 027_policy_ontology_seed_rollback.sql
+-- Remove campos de ontologia adicionados pela migração 027
 -- AVISO: Remove entidades que foram inseridas pelo gazetteer (provenance = 'gazetteer')
 
 -- 1. Remover entidades inseridas diretamente pelo gazetteer

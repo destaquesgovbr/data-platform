@@ -65,6 +65,25 @@ class TestDiscoverMigrations:
         migrations = discover_migrations(tmp_path / "nonexistent")
         assert migrations == []
 
+    def test_duplicate_version_raises(self, tmp_path):
+        (tmp_path / "026_add_column.sql").write_text("SELECT 1;")
+        (tmp_path / "026_seed_data.sql").write_text("SELECT 2;")
+
+        from migrate import discover_migrations
+
+        with pytest.raises(ValueError, match="Duplicate migration version 026"):
+            discover_migrations(tmp_path)
+
+    def test_duplicate_rollback_version_raises(self, tmp_path):
+        (tmp_path / "026_add_column.sql").write_text("SELECT 1;")
+        (tmp_path / "026_add_column_rollback.sql").write_text("SELECT 1;")
+        (tmp_path / "026_seed_data_rollback.sql").write_text("SELECT 2;")
+
+        from migrate import discover_migrations
+
+        with pytest.raises(ValueError, match="Duplicate rollback version 026"):
+            discover_migrations(tmp_path)
+
 
 # ---------------------------------------------------------------------------
 # Bootstrap
