@@ -96,6 +96,8 @@ datasets/
 secrets/
 *.pem
 *.key
+# Respostas do copier (template airflow-dgb): contêm a connection string do Postgres
+.copier-answers.yml
 
 # Coverage
 .coverage.*
