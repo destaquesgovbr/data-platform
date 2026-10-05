@@ -14,6 +14,7 @@ from datetime import date
 
 import pytest
 
+from data_platform.jobs.trend_detection.persist import upsert_trending_scores
 from data_platform.jobs.trend_detection.signals import load_snapshot
 from tests.integration.test_migrate_integration import (
     DATABASE_URL,
@@ -87,3 +88,75 @@ class TestLoadSnapshotSql:
         assert override["entity_stats"]["Q_junho"]["baseline_count"] == 1
         assert override["entity_stats"]["Q_junho"]["is_new"] is False
         assert override["entity_stats"]["Q_junho"]["volume_ratio"] == pytest.approx(8.0)
+
+
+def _stats(name: str, **overrides) -> dict:
+    s = {
+        "canonical_name": name,
+        "entity_type": "ORG",
+        "window_count": 3,
+        "baseline_count": 0,
+        "window_daily": 3 / 7,
+        "baseline_daily": 0.0,
+        "volume_ratio": 16.0,
+        "is_new": True,
+        "window_active_days": 2,
+        "window_agencies": 2,
+        "baseline_agencies": 0,
+        "semantic_novelty": 0.0,
+        "new_edge_count": 0,
+    }
+    s.update(overrides)
+    return s
+
+
+def _insert_stale_score(entity_id: str) -> None:
+    _execute(
+        "INSERT INTO entity_trending_scores (entity_id, canonical_name, type, trending_score, "
+        "volume_ratio, window_count, window_agencies, computed_at) "
+        f"VALUES ('{entity_id}', 'Velha', 'ORG', 99.0, 8571.0, 3, 2, NOW() - INTERVAL '6 hours')"
+    )
+
+
+@pytest.mark.integration
+class TestPersistSnapshotSql:
+    def test_substitui_execucao_anterior_e_grava_baseline(self):
+        _insert_stale_score("Q_velho")
+
+        count = upsert_trending_scores(
+            DATABASE_URL,
+            [("Q_novo", 9.0)],
+            {"Q_novo": _stats("Nova", baseline_count=2, baseline_agencies=1, volume_ratio=4.0)},
+        )
+
+        assert count == 1
+        rows = _execute(
+            "SELECT entity_id, volume_ratio, baseline_count, baseline_agencies "
+            "FROM entity_trending_scores"
+        )
+        assert rows == [("Q_novo", 4.0, 2, 1)]
+
+    def test_reexecucao_mantem_um_unico_computed_at(self):
+        stats = {"Q1": _stats("Um"), "Q2": _stats("Dois")}
+        upsert_trending_scores(DATABASE_URL, [("Q1", 5.0), ("Q2", 4.0)], stats)
+        upsert_trending_scores(DATABASE_URL, [("Q1", 6.0)], stats)
+
+        rows = _execute(
+            "SELECT count(*), count(DISTINCT computed_at), max(trending_score) "
+            "FROM entity_trending_scores"
+        )
+        assert rows == [(1, 1, 6.0)]
+
+    def test_sem_stats_preserva_snapshot(self):
+        _insert_stale_score("Q_velho")
+
+        assert upsert_trending_scores(DATABASE_URL, [], {}) == 0
+
+        assert _execute("SELECT entity_id FROM entity_trending_scores") == [("Q_velho",)]
+
+    def test_scores_vazios_com_stats_esvaziam_snapshot(self):
+        _insert_stale_score("Q_velho")
+
+        assert upsert_trending_scores(DATABASE_URL, [], {"Q1": _stats("Um")}) == 0
+
+        assert _execute("SELECT count(*) FROM entity_trending_scores") == [(0,)]
