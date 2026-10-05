@@ -340,3 +340,61 @@ class TestMigrationSequence:
 
         result = _run_migrate("status")
         assert "Pending: 0" in result.stdout
+
+
+def _execute(sql: str) -> list[tuple] | None:
+    """Run SQL in its own transaction and return the rows, if any."""
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            rows = cur.fetchall() if cur.description else None
+        conn.commit()
+        return rows
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+class TestPolicyGazetteerMigrations:
+    """027 (seed do gazetteer de políticas) e 028 (remoção das POLICYs órfãs)."""
+
+    def test_028_removes_orphan_gazetteer_policies(self):
+        _apply_all_migrations()
+
+        rows = _execute("SELECT count(*) FROM entity_registry WHERE provenance = 'gazetteer'")
+        assert rows == [(0,)]
+
+    def test_028_keeps_gazetteer_policy_with_references(self):
+        _apply_all_migrations()
+        _execute(
+            "INSERT INTO entity_registry (entity_id, canonical_name, type, provenance) VALUES "
+            "('dgb_usada', 'Usada', 'POLICY', 'gazetteer'), "
+            "('dgb_orfa', 'Órfã', 'POLICY', 'gazetteer')"
+        )
+        _execute(
+            "INSERT INTO entity_alias (alias_norm, type, entity_id, source) "
+            "VALUES ('usada', 'POLICY', 'dgb_usada', 'manual')"
+        )
+
+        _execute((MIGRATIONS_DIR / "028_remove_orphan_gazetteer_policies.sql").read_text())
+
+        rows = _execute("SELECT entity_id FROM entity_registry WHERE provenance = 'gazetteer'")
+        assert rows == [("dgb_usada",)]
+
+    def test_027_rollback_only_touches_gazetteer_policies(self):
+        _apply_all_migrations()
+        _execute(
+            "INSERT INTO entity_registry (entity_id, canonical_name, type, provenance, extra) VALUES "
+            "('dgb_pe-de-meia', 'Pé-de-Meia', 'POLICY', 'llm', "
+            """'{"domain": "SOCIAL", "lifecycle_phase": "ROUTINE"}'), """
+            "('dgb_outra-politica', 'Outra', 'POLICY', 'llm', "
+            """'{"domain": "HEALTH", "lifecycle_phase": "ROUTINE"}')"""
+        )
+
+        result = _run_migrate("rollback", "027", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+
+        extra = dict(_execute("SELECT entity_id, extra FROM entity_registry WHERE type = 'POLICY'"))
+        assert "domain" not in extra["dgb_pe-de-meia"]
+        assert extra["dgb_outra-politica"] == {"domain": "HEALTH", "lifecycle_phase": "ROUTINE"}
