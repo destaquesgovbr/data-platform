@@ -16,7 +16,7 @@ TREND_DETECTION_VERSION = "trend_detection v2 (laplace, snapshot)"
 BLACKOUT_FIRST_DAY = date(2026, 7, 4)
 BLACKOUT_LAST_DAY = date(2026, 10, 25)
 
-# Limiar de volume do oráculo (e do scorer): window_daily > 1,5 × baseline_daily.
+# Limiar de volume do oráculo (e do scorer): volume_ratio (Laplace) > 1,5.
 VOLUME_RATIO_THRESHOLD = 1.5
 
 
