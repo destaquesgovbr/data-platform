@@ -1,5 +1,6 @@
 """Tests for Feature Worker GraphQL integration."""
 
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -35,12 +36,12 @@ def sample_graphql_response():
             "agencyName": "Example Agency",
             "publishedAt": "2025-06-15T10:00:00Z",
             "extractedAt": "2025-06-15T12:00:00Z",
-            "themL1Code": "01",
-            "themL1Label": "Theme L1",
-            "themL2Code": None,
-            "themL2Label": None,
-            "themL3Code": None,
-            "themL3Label": None,
+            "themeL1Code": "01",
+            "themeL1Label": "Theme L1",
+            "themeL2Code": None,
+            "themeL2Label": None,
+            "themeL3Code": None,
+            "themeL3Label": None,
             "mostSpecificThemeCode": "01",
             "mostSpecificThemeLabel": "Theme L1",
             "features": None,
@@ -59,7 +60,8 @@ class TestFetchArticleViaGraphql:
         assert result["content"] == "Full article content here."
         assert result["image_url"] == "https://example.gov.br/img.jpg"
         assert result["video_url"] is None
-        assert result["published_at"] == "2025-06-15T10:00:00Z"
+        # DateTime do GraphQL chega como str ISO; o handler entrega datetime UTC
+        assert result["published_at"] == datetime(2025, 6, 15, 10, 0, tzinfo=UTC)
         mock_gql_client.query.assert_called_once()
 
     def test_fetch_article_not_found(self, mock_gql_client):
@@ -80,12 +82,9 @@ class TestUpsertFeaturesViaGraphql:
         call_args = mock_gql_client.mutate.call_args
         variables = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("variables")
         assert variables["uniqueId"] == "article-123"
-        # features should be JSON-serialized
-        import json
-
-        parsed = json.loads(variables["features"])
-        assert parsed["word_count"] == 150
-        assert parsed["has_image"] is True
+        # O escalar JSON recebe o objeto. Uma string (json.dumps) seria gravada
+        # como jsonb string e o merge `features || $2::jsonb` viraria array.
+        assert variables["features"] == {"word_count": 150, "has_image": True}
 
 
 class TestHandleUsesGraphql:
@@ -108,3 +107,17 @@ class TestHandleUsesGraphql:
         # Should have called GraphQL client
         mock_gql_client.query.assert_called_once()
         mock_gql_client.mutate.assert_called_once()
+
+    def test_handle_graphql_sem_mock_calcula_publicacao(
+        self, mock_gql_client, sample_graphql_response
+    ):
+        """compute_all real: publishedAt str não pode quebrar publication_hour."""
+        mock_gql_client.query.return_value = sample_graphql_response
+
+        result = handle_feature_computation("article-123", MagicMock(), gql_client=mock_gql_client)
+
+        assert result["status"] == "computed"
+        features = mock_gql_client.mutate.call_args[0][1]["features"]
+        assert isinstance(features, dict)
+        assert features["publication_hour"] == 10
+        assert features["publication_dow"] == 6  # domingo

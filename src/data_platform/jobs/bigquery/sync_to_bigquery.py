@@ -50,6 +50,96 @@ SYNC_QUERY = """
 """
 
 
+# Schema de load do dgb_gold.fato_noticias: (coluna, tipo BigQuery, modo).
+# Fonte única do LoadJobConfig, dos dtypes do parquet e da ordem das colunas
+# (igual ao SELECT do SYNC_QUERY e ao scripts/bigquery/create_tables.sql; os
+# testes conferem os três).
+FATO_NOTICIAS_SCHEMA: tuple[tuple[str, str, str], ...] = (
+    ("unique_id", "STRING", "REQUIRED"),
+    ("title", "STRING", "NULLABLE"),
+    ("url", "STRING", "NULLABLE"),
+    ("content_hash", "STRING", "NULLABLE"),
+    ("agency_key", "STRING", "NULLABLE"),
+    ("agency_name", "STRING", "NULLABLE"),
+    ("theme_l1_code", "STRING", "NULLABLE"),
+    ("theme_l1_label", "STRING", "NULLABLE"),
+    ("theme_l2_code", "STRING", "NULLABLE"),
+    ("theme_l2_label", "STRING", "NULLABLE"),
+    ("most_specific_theme_code", "STRING", "NULLABLE"),
+    ("most_specific_theme_label", "STRING", "NULLABLE"),
+    ("published_at", "TIMESTAMP", "REQUIRED"),
+    ("extracted_at", "TIMESTAMP", "NULLABLE"),
+    ("synced_at", "TIMESTAMP", "REQUIRED"),
+    ("word_count", "INTEGER", "NULLABLE"),
+    ("char_count", "INTEGER", "NULLABLE"),
+    ("paragraph_count", "INTEGER", "NULLABLE"),
+    ("has_image", "BOOLEAN", "NULLABLE"),
+    ("has_video", "BOOLEAN", "NULLABLE"),
+    ("sentiment_score", "FLOAT", "NULLABLE"),
+    ("sentiment_label", "STRING", "NULLABLE"),
+    ("publication_hour", "INTEGER", "NULLABLE"),
+    ("publication_dow", "INTEGER", "NULLABLE"),
+    ("readability_flesch", "FLOAT", "NULLABLE"),
+)
+
+_FATO_COLUMNS: tuple[str, ...] = tuple(name for name, _, _ in FATO_NOTICIAS_SCHEMA)
+
+# Tipo BigQuery → dtype nulável do pandas (TIMESTAMP vai por pd.to_datetime).
+_PANDAS_DTYPES: dict[str, str] = {
+    "STRING": "string",
+    "INTEGER": "Int64",
+    "FLOAT": "Float64",
+    "BOOLEAN": "boolean",
+}
+
+
+# Caminho GraphQL: coluna ← campo de BigQueryRecordType (query newsBatchForBigquery).
+# Todo campo precisa estar selecionado em NEWS_BATCH_FOR_BIGQUERY_QUERY (teste de contrato).
+_BIGQUERY_GRAPHQL_FIELDS: dict[str, str] = {
+    "unique_id": "uniqueId",
+    "title": "title",
+    "url": "url",
+    "agency_key": "agencyKey",
+    "agency_name": "agencyName",
+    "theme_l1_code": "themeL1Code",
+    "theme_l1_label": "themeL1Label",
+    "theme_l2_code": "themeL2Code",
+    "theme_l2_label": "themeL2Label",
+    "most_specific_theme_code": "mostSpecificThemeCode",
+    "most_specific_theme_label": "mostSpecificThemeLabel",
+    "published_at": "publishedAt",
+    "extracted_at": "extractedAt",
+    "word_count": "wordCount",
+    "has_image": "hasImage",
+    "has_video": "hasVideo",
+    "sentiment_score": "sentimentScore",
+    "sentiment_label": "sentimentLabel",
+    "readability_flesch": "readabilityFlesch",
+}
+
+# Colunas sem campo em BigQueryRecordType: lidas do blob `features`, com a mesma
+# chave que o SYNC_QUERY lê de news_features.features.
+_BIGQUERY_FEATURE_FIELDS: tuple[str, ...] = (
+    "char_count",
+    "paragraph_count",
+    "publication_hour",
+    "publication_dow",
+)
+
+
+def previous_day_window(logical_date) -> tuple[str, str]:
+    """Janela de 1 dia para a execução diária: só o dia anterior ao logical_date.
+
+    Retorna (start, end) para fetch_news_for_bigquery, que trata ``end`` como
+    inclusivo (``< end + 1 dia``); com start == end a janela é exatamente
+    [D-1, D) e execuções consecutivas não se sobrepõem.
+    """
+    from datetime import timedelta
+
+    day = (logical_date - timedelta(days=1)).strftime("%Y-%m-%d")
+    return day, day
+
+
 def fetch_news_for_bigquery(
     db_url: str,
     start_date: str,
@@ -76,12 +166,60 @@ def fetch_news_for_bigquery(
     return df
 
 
+def coerce_to_load_schema(df: pd.DataFrame) -> pd.DataFrame:
+    """Colunas do FATO_NOTICIAS_SCHEMA, na ordem do load, com dtypes nuláveis.
+
+    Sem isso, uma coluna inteira NULL (dtype object no read_sql) vira o tipo
+    ``null`` do pyarrow, gravado como INT32 no parquet, e o load falha com
+    "Parquet column 'has_image' has type INT32 which does not match the target
+    cpp_type BOOL" (incidente de jun–out/2026).
+
+    Raises:
+        ValueError: se faltar alguma coluna do schema.
+    """
+    missing = [c for c in _FATO_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError(f"Colunas ausentes para o load do fato_noticias: {missing}")
+    extra = [c for c in df.columns if c not in _FATO_COLUMNS]
+    if extra:
+        logger.warning(f"Colunas fora do schema de load descartadas: {extra}")
+
+    columns: dict[str, pd.Series] = {}
+    for name, bq_type, _mode in FATO_NOTICIAS_SCHEMA:
+        if bq_type == "TIMESTAMP":
+            # ISO8601: o caminho GraphQL entrega str com e sem microssegundos.
+            columns[name] = pd.to_datetime(df[name], utc=True, format="ISO8601")
+        else:
+            columns[name] = df[name].astype(_PANDAS_DTYPES[bq_type])
+    return pd.DataFrame(columns, index=df.index)
+
+
+def _arrow_load_schema():
+    """Schema pyarrow equivalente ao FATO_NOTICIAS_SCHEMA (todas as colunas nuláveis).
+
+    TIMESTAMP em ns UTC; o writer converte para us (coerce_timestamps).
+    """
+    import pyarrow as pa
+
+    arrow_types = {
+        "STRING": pa.string(),
+        "INTEGER": pa.int64(),
+        "FLOAT": pa.float64(),
+        "BOOLEAN": pa.bool_(),
+        "TIMESTAMP": pa.timestamp("ns", tz="UTC"),
+    }
+    return pa.schema([pa.field(name, arrow_types[t]) for name, t, _ in FATO_NOTICIAS_SCHEMA])
+
+
 def write_to_parquet_gcs(
     df: pd.DataFrame,
     bucket_name: str,
     date_str: str,
 ) -> str:
     """Write DataFrame to Parquet in GCS silver/analytics/ path.
+
+    Os tipos do parquet seguem o FATO_NOTICIAS_SCHEMA (coerce_to_load_schema +
+    schema pyarrow explícito), mesmo quando uma coluna vem inteira nula.
 
     Args:
         df: DataFrame to write
@@ -91,32 +229,26 @@ def write_to_parquet_gcs(
     Returns:
         GCS URI of the written file
     """
+    import tempfile
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
     from google.cloud import storage
 
     gcs_path = f"silver/analytics/{date_str}.parquet"
     gcs_uri = f"gs://{bucket_name}/{gcs_path}"
 
-    # Cast nullable int columns to Int64 (Pandas nullable integer) so Parquet
-    # writes them as INT64 instead of DOUBLE when NaN values are present.
-    int_cols = [
-        "word_count",
-        "char_count",
-        "paragraph_count",
-        "publication_hour",
-        "publication_dow",
-    ]
-    for col in int_cols:
-        if col in df.columns:
-            df[col] = df[col].astype("Int64")
+    table = pa.Table.from_pandas(
+        coerce_to_load_schema(df),
+        schema=_arrow_load_schema(),
+        preserve_index=False,
+    )
 
     # Write to local temp, then upload
-    import tempfile
-
     with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
-        df.to_parquet(
+        pq.write_table(
+            table,
             tmp.name,
-            index=False,
-            engine="pyarrow",
             coerce_timestamps="us",
             allow_truncated_timestamps=True,
         )
@@ -147,31 +279,8 @@ def load_parquet_to_bigquery(
     client = bigquery.Client(project=project_id)
 
     schema = [
-        bigquery.SchemaField("unique_id", "STRING", mode="REQUIRED"),
-        bigquery.SchemaField("title", "STRING"),
-        bigquery.SchemaField("url", "STRING"),
-        bigquery.SchemaField("content_hash", "STRING"),
-        bigquery.SchemaField("agency_key", "STRING"),
-        bigquery.SchemaField("agency_name", "STRING"),
-        bigquery.SchemaField("theme_l1_code", "STRING"),
-        bigquery.SchemaField("theme_l1_label", "STRING"),
-        bigquery.SchemaField("theme_l2_code", "STRING"),
-        bigquery.SchemaField("theme_l2_label", "STRING"),
-        bigquery.SchemaField("most_specific_theme_code", "STRING"),
-        bigquery.SchemaField("most_specific_theme_label", "STRING"),
-        bigquery.SchemaField("published_at", "TIMESTAMP", mode="REQUIRED"),
-        bigquery.SchemaField("extracted_at", "TIMESTAMP"),
-        bigquery.SchemaField("synced_at", "TIMESTAMP", mode="REQUIRED"),
-        bigquery.SchemaField("word_count", "INTEGER"),
-        bigquery.SchemaField("char_count", "INTEGER"),
-        bigquery.SchemaField("paragraph_count", "INTEGER"),
-        bigquery.SchemaField("has_image", "BOOLEAN"),
-        bigquery.SchemaField("has_video", "BOOLEAN"),
-        bigquery.SchemaField("sentiment_score", "FLOAT"),
-        bigquery.SchemaField("sentiment_label", "STRING"),
-        bigquery.SchemaField("publication_hour", "INTEGER"),
-        bigquery.SchemaField("publication_dow", "INTEGER"),
-        bigquery.SchemaField("readability_flesch", "FLOAT"),
+        bigquery.SchemaField(name, bq_type, mode=mode)
+        for name, bq_type, mode in FATO_NOTICIAS_SCHEMA
     ]
 
     job_config = bigquery.LoadJobConfig(
@@ -222,7 +331,7 @@ def fetch_news_for_bigquery_via_graphql(
             variables["cursor"] = cursor
 
         data = gql_client.query(NEWS_BATCH_FOR_BIGQUERY_QUERY, variables)
-        batch = data.get("newsBatchForBigQuery", [])
+        batch = data.get("newsBatchForBigquery") or []
 
         if not batch:
             break
@@ -240,39 +349,28 @@ def fetch_news_for_bigquery_via_graphql(
         logger.info(f"No data via GraphQL for {start_date} to {end_date}")
         return pd.DataFrame()
 
-    # Convert camelCase GraphQL response to snake_case DataFrame columns
-    rows = []
-    for r in all_rows:
-        rows.append(
-            {
-                "unique_id": r.get("uniqueId"),
-                "title": r.get("title"),
-                "url": r.get("url"),
-                "agency_key": r.get("agencyKey"),
-                "agency_name": r.get("agencyName"),
-                "published_at": r.get("publishedAt"),
-                "theme_l1_code": r.get("themL1Code"),
-                "theme_l1_label": r.get("themL1Label"),
-                "theme_l2_code": r.get("themL2Code"),
-                "theme_l2_label": r.get("themL2Label"),
-                "most_specific_theme_code": r.get("mostSpecificThemeCode"),
-                "most_specific_theme_label": r.get("mostSpecificThemeLabel"),
-                "word_count": r.get("wordCount"),
-                "char_count": r.get("charCount"),
-                "paragraph_count": r.get("paragraphCount"),
-                "has_image": r.get("hasImage"),
-                "has_video": r.get("hasVideo"),
-                "sentiment_label": r.get("sentimentLabel"),
-                "sentiment_score": r.get("sentimentScore"),
-                "readability_flesch": r.get("readabilityFlesch"),
-                "publication_hour": r.get("publicationHour"),
-                "publication_dow": r.get("publicationDow"),
-            }
-        )
+    # camelCase do GraphQL → colunas do SYNC_QUERY (mesmo shape do caminho PG).
+    # content_hash não é exposto em BigQueryRecordType; synced_at faz o papel do NOW().
+    synced_at = pd.Timestamp.now(tz="UTC")
+    rows = [_graphql_record_to_row(r, synced_at) for r in all_rows]
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows, columns=list(_FATO_COLUMNS))
     logger.info(f"Fetched {len(df)} rows via GraphQL ({start_date} to {end_date})")
     return df
+
+
+def _graphql_record_to_row(record: dict, synced_at: pd.Timestamp) -> dict:
+    """Um item de newsBatchForBigquery → linha com as colunas do fato_noticias."""
+    features = record.get("features")
+    if not isinstance(features, dict):
+        features = {}
+    row: dict = dict.fromkeys(_FATO_COLUMNS)
+    for column, field in _BIGQUERY_GRAPHQL_FIELDS.items():
+        row[column] = record.get(field)
+    for column in _BIGQUERY_FEATURE_FIELDS:
+        row[column] = features.get(column)
+    row["synced_at"] = synced_at
+    return row
 
 
 def sync_dimensions(db_url: str, project_id: str) -> None:

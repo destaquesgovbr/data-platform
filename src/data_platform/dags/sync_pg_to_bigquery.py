@@ -48,6 +48,7 @@ def sync_pg_to_bigquery():
         from data_platform.jobs.bigquery.sync_to_bigquery import (
             fetch_news_for_bigquery,
             load_parquet_to_bigquery,
+            previous_day_window,
             write_to_parquet_gcs,
         )
 
@@ -56,8 +57,7 @@ def sync_pg_to_bigquery():
         if logical_date is None:
             logical_date = datetime.utcnow()
 
-        target_date = (logical_date - timedelta(days=1)).strftime("%Y-%m-%d")
-        end_date = logical_date.strftime("%Y-%m-%d")
+        target_date, end_date = previous_day_window(logical_date)
 
         # Get config
         conn = BaseHook.get_connection("postgres_default")

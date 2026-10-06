@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from data_platform.managers.postgres_manager import PostgresManager
+from data_platform.utils.datetime_utils import parse_iso_datetime
 from data_platform.workers.feature_worker.features import (
     compute_all,
     compute_annotations_source_hash,
@@ -31,21 +32,26 @@ def _fetch_article_via_graphql(unique_id: str, gql_client) -> dict | None:
 
     The `features` blob (already returned by NEWS_BY_ID_QUERY) is surfaced so the
     handler can derive content annotations from the current entity mentions.
+    `features` chega como str JSON (asyncpg sem codec de JSONB na API): tratá-lo
+    como `{}` descartaria entities, hash e content_annotations, e o upsert
+    apagaria as anotações gravadas. `publishedAt` (escalar DateTime, str ISO)
+    vira datetime UTC, como no caminho PG: compute_publication_hour/dow usam
+    `.hour`/`.weekday()`.
     """
-    from data_platform.clients.graphql_client import NEWS_BY_ID_QUERY
+    from data_platform.clients.graphql_client import NEWS_BY_ID_QUERY, coerce_json_object
 
     data = gql_client.query(NEWS_BY_ID_QUERY, {"uniqueId": unique_id})
     article = data.get("newsById")
     if not article:
         return None
-    features = article.get("features") if isinstance(article.get("features"), dict) else {}
+    features = coerce_json_object(article.get("features"))
     entities = _coerce_entities(features.get("entities"))
     return {
         "unique_id": article.get("uniqueId"),
         "content": article.get("content"),
         "image_url": article.get("imageUrl"),
         "video_url": article.get("videoUrl"),
-        "published_at": article.get("publishedAt"),
+        "published_at": parse_iso_datetime(article.get("publishedAt")),
         "entities": entities,
         "existing_annotations_hash": features.get("annotations_source_hash"),
         "has_content_annotations": "content_annotations" in features,
@@ -53,12 +59,16 @@ def _fetch_article_via_graphql(unique_id: str, gql_client) -> dict | None:
 
 
 def _upsert_features_via_graphql(unique_id: str, features: dict, gql_client) -> None:
-    """Upsert computed features via GraphQL mutation."""
+    """Upsert computed features via GraphQL mutation.
+
+    O escalar `JSON` recebe o objeto. Uma string (json.dumps) seria gravada como
+    jsonb string e o merge `features || $2::jsonb` da API viraria um array.
+    """
     from data_platform.clients.graphql_client import UPSERT_FEATURES_MUTATION
 
     gql_client.mutate(
         UPSERT_FEATURES_MUTATION,
-        {"uniqueId": unique_id, "features": json.dumps(features)},
+        {"uniqueId": unique_id, "features": features},
     )
 
 

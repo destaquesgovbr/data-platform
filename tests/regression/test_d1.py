@@ -20,7 +20,6 @@ Cobrem cenários explicitamente destacados no plano:
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -102,12 +101,12 @@ class TestFeatureWorkerMutationPayloadCamelCase:
         assert "unique_id" not in variables
         assert variables["uniqueId"] == "agency-2026-01-01-x"
 
-        # `features` é serializado como JSON string (assinatura da mutation
-        # exige scalar JSON). O valor interno pode permanecer snake_case porque
-        # já é um payload aplicação-específica armazenado como JSONB no PG.
-        parsed = json.loads(variables["features"])
-        assert parsed["word_count"] == 250
-        assert parsed["quality_score"] == 0.87
+        # `features` vai como objeto: o escalar `JSON` do Strawberry recebe o
+        # dict e a API faz `json.dumps` antes do `features || $2::jsonb`. Uma
+        # string (json.dumps no cliente) seria gravada como jsonb string e o
+        # merge viraria array. As chaves internas seguem snake_case (payload da
+        # aplicação, armazenado como JSONB no PG).
+        assert variables["features"] == features
 
 
 # ---------------------------------------------------------------------------
@@ -138,12 +137,12 @@ class TestTypesenseSyncHandlesNoneInOptionalFields:
             "agencyName": None,
             "publishedAt": None,
             "extractedAt": None,
-            "themL1Code": None,
-            "themL1Label": None,
-            "themL2Code": None,
-            "themL2Label": None,
-            "themL3Code": None,
-            "themL3Label": None,
+            "themeL1Code": None,
+            "themeL1Label": None,
+            "themeL2Code": None,
+            "themeL2Label": None,
+            "themeL3Code": None,
+            "themeL3Label": None,
             "mostSpecificThemeCode": None,
             "mostSpecificThemeLabel": None,
             "contentEmbedding": None,

@@ -117,6 +117,29 @@ class TestComputeReadabilityFlesch:
     def test_short_text(self):
         assert compute_readability_flesch("Curto") is None
 
+    # Escala fixada: fórmula inglesa do textstat 0.7.13 (206,835 − 1,015·ASL −
+    # 84,6·ASW), sem set_lang. Não é a adaptação pt-BR (Martins/1996) e pode dar
+    # negativo. Se este valor mudar (set_lang('pt') acidental, troca de versão do
+    # textstat/pyphen), a série histórica de readability_flesch deixa de ser
+    # comparável: crie uma chave nova (ex.: readability_flesch_ptbr) em vez de
+    # alterar esta.
+    _FRASE_CURTA = (
+        "O Ministério da Educação anunciou nesta segunda-feira a ampliação do "
+        "programa de bolsas para estudantes de baixa renda em todo o país."
+    )
+    _FRASE_LONGA = (
+        "A Secretaria de Comunicação Social da Presidência da República informa que "
+        "as inscrições para o processo seletivo simplificado de contratação temporária "
+        "de profissionais especializados estarão abertas a partir da próxima semana, "
+        "conforme os critérios estabelecidos no edital."
+    )
+
+    def test_flesch_formula_inglesa_fixada(self):
+        assert compute_readability_flesch(self._FRASE_CURTA) == 38.38
+
+    def test_flesch_ingles_pode_ser_negativo_em_pt(self):
+        assert compute_readability_flesch(self._FRASE_LONGA) == -15.93
+
 
 class TestComputeAll:
     def test_complete_article(self):

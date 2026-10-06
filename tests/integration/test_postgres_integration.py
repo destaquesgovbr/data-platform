@@ -148,3 +148,65 @@ class TestPostgresIntegration:
         assert news.title == "Updated via Insert"
 
         # No manual cleanup needed - cleanup_news fixture handles it
+
+    def test_allow_update_preserva_colunas_preenchidas_downstream(
+        self,
+        postgres_manager: PostgresManager,
+        news_factory: callable,
+        cleanup_news: list[str],
+        test_theme,
+    ) -> None:
+        """Re-insert com NULL/'' não apaga resumo, temas nem image_url (scraper#64)."""
+        original = news_factory(
+            title="Original",
+            summary="Resumo do enriquecimento",
+            theme_l1_id=test_theme.id,
+            theme_l2_id=test_theme.id,
+            theme_l3_id=test_theme.id,
+            most_specific_theme_id=test_theme.id,
+            image_url="https://gov.br/thumb.jpg",
+        )
+        cleanup_news.append(original.unique_id)
+        postgres_manager.insert([original])
+
+        rescrape = news_factory(
+            unique_id=original.unique_id,
+            title="Título atualizado",
+            summary=None,
+            image_url="",
+        )
+        assert postgres_manager.insert([rescrape], allow_update=True) == 1
+
+        news = postgres_manager.get_by_unique_id(original.unique_id)
+        assert news is not None
+        assert news.title == "Título atualizado"
+        assert news.summary == "Resumo do enriquecimento"
+        assert news.theme_l1_id == test_theme.id
+        assert news.theme_l2_id == test_theme.id
+        assert news.theme_l3_id == test_theme.id
+        assert news.most_specific_theme_id == test_theme.id
+        assert news.image_url == "https://gov.br/thumb.jpg"
+
+    def test_allow_update_valor_explicito_prevalece(
+        self,
+        postgres_manager: PostgresManager,
+        news_factory: callable,
+        cleanup_news: list[str],
+        test_theme,
+    ) -> None:
+        original = news_factory(summary="Antigo", image_url="https://gov.br/a.jpg")
+        cleanup_news.append(original.unique_id)
+        postgres_manager.insert([original])
+
+        novo = news_factory(
+            unique_id=original.unique_id,
+            summary="Novo",
+            most_specific_theme_id=test_theme.id,
+            image_url="https://gov.br/b.jpg",
+        )
+        postgres_manager.insert([novo], allow_update=True)
+
+        news = postgres_manager.get_by_unique_id(original.unique_id)
+        assert news.summary == "Novo"
+        assert news.most_specific_theme_id == test_theme.id
+        assert news.image_url == "https://gov.br/b.jpg"
