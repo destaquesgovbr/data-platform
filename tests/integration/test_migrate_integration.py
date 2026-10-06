@@ -398,3 +398,58 @@ class TestPolicyGazetteerMigrations:
         extra = dict(_execute("SELECT entity_id, extra FROM entity_registry WHERE type = 'POLICY'"))
         assert "domain" not in extra["dgb_pe-de-meia"]
         assert extra["dgb_outra-politica"] == {"domain": "HEALTH", "lifecycle_phase": "ROUTINE"}
+
+
+def _columns(table: str) -> dict[str, tuple[str, str]]:
+    """{coluna: (data_type, is_nullable)} de uma tabela do schema public."""
+    rows = _execute(
+        "SELECT column_name, data_type, is_nullable FROM information_schema.columns "
+        f"WHERE table_schema = 'public' AND table_name = '{table}'"
+    )
+    return {name: (dtype, nullable) for name, dtype, nullable in rows or []}
+
+
+@pytest.mark.integration
+class TestEntityTrendingBaselineMigration:
+    """029: baseline_count/baseline_agencies em entity_trending_scores (Fase 2.5, F2)."""
+
+    def test_029_adiciona_colunas_baseline_nulas(self):
+        _apply_all_migrations()
+
+        cols = _columns("entity_trending_scores")
+        assert cols["baseline_count"] == ("integer", "YES")
+        assert cols["baseline_agencies"] == ("integer", "YES")
+
+    def test_029_nao_cria_indice(self):
+        """Com o DELETE por execução a tabela guarda um único snapshot: índice é desnecessário."""
+        _apply_all_migrations()
+
+        rows = _execute(
+            "SELECT indexname FROM pg_indexes WHERE tablename = 'entity_trending_scores'"
+        )
+        assert {r[0] for r in rows} == {"entity_trending_scores_pkey", "idx_entity_trending_score"}
+
+    def test_029_insert_legado_sem_baseline_continua_valido(self):
+        """O persist anterior lista colunas explícitas; a 029 não pode quebrá-lo."""
+        _apply_all_migrations()
+        _execute(
+            "INSERT INTO entity_trending_scores (entity_id, canonical_name, type, "
+            "trending_score, volume_ratio, window_count, window_agencies) "
+            "VALUES ('Q1', 'Org', 'ORG', 1.0, 2.0, 3, 2)"
+        )
+
+        rows = _execute("SELECT baseline_count, baseline_agencies FROM entity_trending_scores")
+        assert rows == [(None, None)]
+
+    def test_029_rollback_remove_colunas_e_reaplica(self):
+        _apply_all_migrations()
+
+        result = _run_migrate("rollback", "029", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+        cols = _columns("entity_trending_scores")
+        assert "baseline_count" not in cols
+        assert "baseline_agencies" not in cols
+
+        result = _run_migrate("migrate", "--yes")
+        assert result.returncode == 0, f"Re-apply failed:\n{result.stdout}\n{result.stderr}"
+        assert {"baseline_count", "baseline_agencies"} <= set(_columns("entity_trending_scores"))

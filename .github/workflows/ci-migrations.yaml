@@ -3,9 +3,15 @@ name: Migration Integration Tests
 on:
   pull_request:
     paths:
+      - '.github/workflows/ci-migrations.yaml'
       - 'scripts/migrate.py'
       - 'scripts/migrations/**'
+      - 'scripts/backfill_features_window.py'
+      - 'src/data_platform/jobs/trend_detection/**'
+      - 'src/data_platform/workers/feature_worker/**'
       - 'tests/integration/test_migrate_integration.py'
+      - 'tests/integration/test_trend_detection_integration.py'
+      - 'tests/integration/test_backfill_features_window_integration.py'
   workflow_dispatch:
 
 jobs:
@@ -52,7 +58,14 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
 
+      # Todo teste de integração que usa este banco descartável entra aqui
+      # (tests/unit/test_ci_migrations_workflow.py confere).
       - name: Run migration integration tests
         env:
           MIGRATION_TEST_DATABASE_URL: postgresql://test:test@localhost:5432/test_migrations
-        run: poetry run pytest tests/integration/test_migrate_integration.py -v --tb=short --no-cov
+        run: >-
+          poetry run pytest
+          tests/integration/test_migrate_integration.py
+          tests/integration/test_trend_detection_integration.py
+          tests/integration/test_backfill_features_window_integration.py
+          -v --tb=short --no-cov
