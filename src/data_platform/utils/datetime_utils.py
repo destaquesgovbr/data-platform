@@ -6,6 +6,7 @@ used across the codebase, replacing duplicated parsing logic.
 
 Functions:
     parse_date: Parse various date formats to datetime
+    parse_iso_datetime: Parse an ISO-8601 string (GraphQL DateTime) to datetime in UTC
     to_timestamp: Convert datetime to Unix timestamp
     calculate_published_week: Calculate ISO week ID (YYYYWW format)
 """
@@ -69,6 +70,38 @@ def parse_date(value: str | datetime | date | int | float | None) -> datetime | 
             return None
 
     return None
+
+
+def parse_iso_datetime(value: str | datetime | None) -> datetime | None:
+    """
+    Parse an ISO-8601 datetime (GraphQL ``DateTime`` scalar) to ``datetime``.
+
+    O escalar ``DateTime`` chega como str (``...Z`` ou com offset). Datetimes com
+    fuso são normalizados para UTC, igual ao que as features documentam
+    (``publication_hour`` em UTC). Datetimes sem fuso ficam como estão.
+
+    Args:
+        value: str ISO-8601, datetime ou None
+
+    Returns:
+        datetime (UTC quando houver fuso) ou None se vazio/inválido
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        if not value.strip():
+            return None
+        try:
+            dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(UTC)
+    return dt
 
 
 def to_timestamp(dt: datetime | date | None) -> int | None:

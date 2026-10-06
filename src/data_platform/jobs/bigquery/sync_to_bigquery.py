@@ -50,6 +50,69 @@ SYNC_QUERY = """
 """
 
 
+# Colunas do fato_noticias, na ordem do SYNC_QUERY e do schema de load.
+_FATO_COLUMNS: tuple[str, ...] = (
+    "unique_id",
+    "title",
+    "url",
+    "content_hash",
+    "agency_key",
+    "agency_name",
+    "theme_l1_code",
+    "theme_l1_label",
+    "theme_l2_code",
+    "theme_l2_label",
+    "most_specific_theme_code",
+    "most_specific_theme_label",
+    "published_at",
+    "extracted_at",
+    "synced_at",
+    "word_count",
+    "char_count",
+    "paragraph_count",
+    "has_image",
+    "has_video",
+    "sentiment_score",
+    "sentiment_label",
+    "publication_hour",
+    "publication_dow",
+    "readability_flesch",
+)
+
+# Caminho GraphQL: coluna ← campo de BigQueryRecordType (query newsBatchForBigquery).
+# Todo campo precisa estar selecionado em NEWS_BATCH_FOR_BIGQUERY_QUERY (teste de contrato).
+_BIGQUERY_GRAPHQL_FIELDS: dict[str, str] = {
+    "unique_id": "uniqueId",
+    "title": "title",
+    "url": "url",
+    "agency_key": "agencyKey",
+    "agency_name": "agencyName",
+    "theme_l1_code": "themeL1Code",
+    "theme_l1_label": "themeL1Label",
+    "theme_l2_code": "themeL2Code",
+    "theme_l2_label": "themeL2Label",
+    "most_specific_theme_code": "mostSpecificThemeCode",
+    "most_specific_theme_label": "mostSpecificThemeLabel",
+    "published_at": "publishedAt",
+    "extracted_at": "extractedAt",
+    "word_count": "wordCount",
+    "has_image": "hasImage",
+    "has_video": "hasVideo",
+    "sentiment_score": "sentimentScore",
+    "sentiment_label": "sentimentLabel",
+    "readability_flesch": "readabilityFlesch",
+}
+
+# Colunas sem campo em BigQueryRecordType: lidas do blob `features`, com a mesma
+# chave que o SYNC_QUERY lê de news_features.features.
+_BIGQUERY_FEATURE_FIELDS: tuple[str, ...] = (
+    "char_count",
+    "paragraph_count",
+    "publication_hour",
+    "publication_dow",
+)
+
+
 def fetch_news_for_bigquery(
     db_url: str,
     start_date: str,
@@ -222,7 +285,7 @@ def fetch_news_for_bigquery_via_graphql(
             variables["cursor"] = cursor
 
         data = gql_client.query(NEWS_BATCH_FOR_BIGQUERY_QUERY, variables)
-        batch = data.get("newsBatchForBigQuery", [])
+        batch = data.get("newsBatchForBigquery") or []
 
         if not batch:
             break
@@ -240,39 +303,28 @@ def fetch_news_for_bigquery_via_graphql(
         logger.info(f"No data via GraphQL for {start_date} to {end_date}")
         return pd.DataFrame()
 
-    # Convert camelCase GraphQL response to snake_case DataFrame columns
-    rows = []
-    for r in all_rows:
-        rows.append(
-            {
-                "unique_id": r.get("uniqueId"),
-                "title": r.get("title"),
-                "url": r.get("url"),
-                "agency_key": r.get("agencyKey"),
-                "agency_name": r.get("agencyName"),
-                "published_at": r.get("publishedAt"),
-                "theme_l1_code": r.get("themL1Code"),
-                "theme_l1_label": r.get("themL1Label"),
-                "theme_l2_code": r.get("themL2Code"),
-                "theme_l2_label": r.get("themL2Label"),
-                "most_specific_theme_code": r.get("mostSpecificThemeCode"),
-                "most_specific_theme_label": r.get("mostSpecificThemeLabel"),
-                "word_count": r.get("wordCount"),
-                "char_count": r.get("charCount"),
-                "paragraph_count": r.get("paragraphCount"),
-                "has_image": r.get("hasImage"),
-                "has_video": r.get("hasVideo"),
-                "sentiment_label": r.get("sentimentLabel"),
-                "sentiment_score": r.get("sentimentScore"),
-                "readability_flesch": r.get("readabilityFlesch"),
-                "publication_hour": r.get("publicationHour"),
-                "publication_dow": r.get("publicationDow"),
-            }
-        )
+    # camelCase do GraphQL → colunas do SYNC_QUERY (mesmo shape do caminho PG).
+    # content_hash não é exposto em BigQueryRecordType; synced_at faz o papel do NOW().
+    synced_at = pd.Timestamp.now(tz="UTC")
+    rows = [_graphql_record_to_row(r, synced_at) for r in all_rows]
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows, columns=list(_FATO_COLUMNS))
     logger.info(f"Fetched {len(df)} rows via GraphQL ({start_date} to {end_date})")
     return df
+
+
+def _graphql_record_to_row(record: dict, synced_at: pd.Timestamp) -> dict:
+    """Um item de newsBatchForBigquery → linha com as colunas do fato_noticias."""
+    features = record.get("features")
+    if not isinstance(features, dict):
+        features = {}
+    row: dict = dict.fromkeys(_FATO_COLUMNS)
+    for column, field in _BIGQUERY_GRAPHQL_FIELDS.items():
+        row[column] = record.get(field)
+    for column in _BIGQUERY_FEATURE_FIELDS:
+        row[column] = features.get(column)
+    row["synced_at"] = synced_at
+    return row
 
 
 def sync_dimensions(db_url: str, project_id: str) -> None:

@@ -4,45 +4,61 @@ import logging
 import os
 
 from data_platform.managers.postgres_manager import PostgresManager
+from data_platform.utils.datetime_utils import parse_iso_datetime
 from data_platform.workers.bronze_writer.storage import build_gcs_path, write_to_gcs
 
 logger = logging.getLogger(__name__)
 
 
+# Campo do GraphQL (NewsRecordType) → chave do JSON bronze (mesmos nomes do caminho PG).
+# Toda chave precisa estar selecionada em NEWS_BY_ID_QUERY (teste de contrato).
+_GRAPHQL_TO_SNAKE: dict[str, str] = {
+    "uniqueId": "unique_id",
+    "title": "title",
+    "url": "url",
+    "imageUrl": "image_url",
+    "videoUrl": "video_url",
+    "content": "content",
+    "summary": "summary",
+    "subtitle": "subtitle",
+    "editorialLead": "editorial_lead",
+    "category": "category",
+    "tags": "tags",
+    "agencyKey": "agency_key",
+    "agencyName": "agency_name",
+    "publishedAt": "published_at",
+    "extractedAt": "extracted_at",
+    "themeL1Code": "theme_l1_code",
+    "themeL1Label": "theme_l1_label",
+    "themeL2Code": "theme_l2_code",
+    "themeL2Label": "theme_l2_label",
+    "themeL3Code": "theme_l3_code",
+    "themeL3Label": "theme_l3_label",
+    "mostSpecificThemeCode": "most_specific_theme_code",
+    "mostSpecificThemeLabel": "most_specific_theme_label",
+    "features": "features",
+}
+
+# DateTime do GraphQL chega como str ISO; o caminho PG entrega datetime.
+_DATETIME_FIELDS = ("published_at", "extracted_at")
+
+
 def _fetch_full_article_via_graphql(unique_id: str, gql_client) -> dict | None:
-    """Fetch full article via GraphQL, mapping camelCase to snake_case for compatibility."""
+    """Fetch full article via GraphQL, mapping camelCase to snake_case for compatibility.
+
+    `published_at`/`extracted_at` viram datetime UTC: `build_gcs_path` particiona
+    por `published_at.strftime(...)` e o JSON sai no mesmo formato do caminho PG.
+    """
     from data_platform.clients.graphql_client import NEWS_BY_ID_QUERY
 
     data = gql_client.query(NEWS_BY_ID_QUERY, {"uniqueId": unique_id})
     article = data.get("newsById")
     if not article:
         return None
-    return {
-        "unique_id": article.get("uniqueId"),
-        "title": article.get("title"),
-        "url": article.get("url"),
-        "image_url": article.get("imageUrl"),
-        "video_url": article.get("videoUrl"),
-        "content": article.get("content"),
-        "summary": article.get("summary"),
-        "subtitle": article.get("subtitle"),
-        "editorial_lead": article.get("editorialLead"),
-        "category": article.get("category"),
-        "tags": article.get("tags"),
-        "agency_key": article.get("agencyKey"),
-        "agency_name": article.get("agencyName"),
-        "published_at": article.get("publishedAt"),
-        "extracted_at": article.get("extractedAt"),
-        "theme_l1_code": article.get("themL1Code"),
-        "theme_l1_label": article.get("themL1Label"),
-        "theme_l2_code": article.get("themL2Code"),
-        "theme_l2_label": article.get("themL2Label"),
-        "theme_l3_code": article.get("themL3Code"),
-        "theme_l3_label": article.get("themL3Label"),
-        "most_specific_theme_code": article.get("mostSpecificThemeCode"),
-        "most_specific_theme_label": article.get("mostSpecificThemeLabel"),
-        "features": article.get("features"),
-    }
+    mapped = {snake: article.get(camel) for camel, snake in _GRAPHQL_TO_SNAKE.items()}
+    for key in _DATETIME_FIELDS:
+        mapped[key] = parse_iso_datetime(mapped[key])
+    return mapped
 
 
 def handle_bronze_write(unique_id: str, pg: PostgresManager, gql_client=None) -> dict:
