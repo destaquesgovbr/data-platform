@@ -12,7 +12,11 @@ from datetime import UTC
 import pandas as pd
 from loguru import logger
 
-from data_platform.clients.graphql_client import NEWS_FOR_TYPESENSE_QUERY, GraphQLClient
+from data_platform.clients.graphql_client import (
+    NEWS_FOR_TYPESENSE_QUERY,
+    GraphQLClient,
+    coerce_json_object,
+)
 from data_platform.managers.postgres_manager import PostgresManager
 from data_platform.typesense.client import get_client
 from data_platform.typesense.collection import COLLECTION_NAME, create_collection
@@ -89,13 +93,13 @@ def _map_graphql_row(gql_row: dict) -> dict:
             mapped[snake_key] = gql_row[gql_key]
 
     # Extrai entidades e view_count do JSON `features` (não expostos como campos
-    # escalares pelo schema graphql; chegam dentro do blob `features`).
-    features = gql_row.get("features")
-    if isinstance(features, dict):
-        for key in _FEATURES_PASSTHROUGH:
-            value = features.get(key)
-            if value is not None:
-                mapped[key] = value
+    # escalares pelo schema graphql; chegam dentro do blob `features`). O blob pode
+    # vir como str JSON (asyncpg sem codec de JSONB na API).
+    features = coerce_json_object(gql_row.get("features"))
+    for key in _FEATURES_PASSTHROUGH:
+        value = features.get(key)
+        if value is not None:
+            mapped[key] = value
 
     # Convert ISO datetime strings to epoch timestamps (prepare_document expects these)
     if "published_at" in mapped:

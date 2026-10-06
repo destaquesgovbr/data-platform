@@ -32,16 +32,19 @@ def _fetch_article_via_graphql(unique_id: str, gql_client) -> dict | None:
 
     The `features` blob (already returned by NEWS_BY_ID_QUERY) is surfaced so the
     handler can derive content annotations from the current entity mentions.
-    `publishedAt` (escalar DateTime, str ISO) vira datetime UTC, como no caminho
-    PG: compute_publication_hour/dow usam `.hour`/`.weekday()`.
+    `features` chega como str JSON (asyncpg sem codec de JSONB na API): tratá-lo
+    como `{}` descartaria entities, hash e content_annotations, e o upsert
+    apagaria as anotações gravadas. `publishedAt` (escalar DateTime, str ISO)
+    vira datetime UTC, como no caminho PG: compute_publication_hour/dow usam
+    `.hour`/`.weekday()`.
     """
-    from data_platform.clients.graphql_client import NEWS_BY_ID_QUERY
+    from data_platform.clients.graphql_client import NEWS_BY_ID_QUERY, coerce_json_object
 
     data = gql_client.query(NEWS_BY_ID_QUERY, {"uniqueId": unique_id})
     article = data.get("newsById")
     if not article:
         return None
-    features = article.get("features") if isinstance(article.get("features"), dict) else {}
+    features = coerce_json_object(article.get("features"))
     entities = _coerce_entities(features.get("entities"))
     return {
         "unique_id": article.get("uniqueId"),

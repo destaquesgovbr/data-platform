@@ -4,6 +4,7 @@ GraphQL client for internal API calls from workers and DAGs.
 Uses httpx for HTTP + google-auth for Cloud Run OIDC authentication.
 """
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -28,6 +29,23 @@ def normalize_graphql_url(url: str) -> str:
     if parts.path in ("", "/"):
         return urlunsplit(parts._replace(path=GRAPHQL_PATH))
     return url
+
+
+def coerce_json_object(value: Any) -> dict[str, Any]:
+    """Valor do escalar ``JSON`` da graphql-api → dict.
+
+    No ``newsById``, a API repassa ``news_features.features`` cru do asyncpg, que
+    não registra codec de JSONB: o escalar ``JSON`` entrega uma str. Os
+    mapeadores de ``newsForTypesense``/``newsBatchForBigquery`` já devolvem o
+    objeto. Str JSON de objeto vira dict; dict passa; ausente, JSON inválido ou
+    JSON que não é objeto (``null``, array, texto) vira ``{}``.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return value if isinstance(value, dict) else {}
 
 
 def oidc_audience(url: str, audience: str | None = None) -> str:

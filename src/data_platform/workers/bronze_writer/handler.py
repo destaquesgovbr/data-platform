@@ -48,8 +48,10 @@ def _fetch_full_article_via_graphql(unique_id: str, gql_client) -> dict | None:
 
     `published_at`/`extracted_at` viram datetime UTC: `build_gcs_path` particiona
     por `published_at.strftime(...)` e o JSON sai no mesmo formato do caminho PG.
+    `features` chega como str JSON (asyncpg sem codec de JSONB na API) e vira
+    objeto, para o bronze não guardar uma string dentro do JSON.
     """
-    from data_platform.clients.graphql_client import NEWS_BY_ID_QUERY
+    from data_platform.clients.graphql_client import NEWS_BY_ID_QUERY, coerce_json_object
 
     data = gql_client.query(NEWS_BY_ID_QUERY, {"uniqueId": unique_id})
     article = data.get("newsById")
@@ -58,6 +60,7 @@ def _fetch_full_article_via_graphql(unique_id: str, gql_client) -> dict | None:
     mapped = {snake: article.get(camel) for camel, snake in _GRAPHQL_TO_SNAKE.items()}
     for key in _DATETIME_FIELDS:
         mapped[key] = parse_iso_datetime(mapped[key])
+    mapped["features"] = coerce_json_object(mapped["features"])
     return mapped
 
 
