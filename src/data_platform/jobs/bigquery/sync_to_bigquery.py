@@ -50,34 +50,48 @@ SYNC_QUERY = """
 """
 
 
-# Colunas do fato_noticias, na ordem do SYNC_QUERY e do schema de load.
-_FATO_COLUMNS: tuple[str, ...] = (
-    "unique_id",
-    "title",
-    "url",
-    "content_hash",
-    "agency_key",
-    "agency_name",
-    "theme_l1_code",
-    "theme_l1_label",
-    "theme_l2_code",
-    "theme_l2_label",
-    "most_specific_theme_code",
-    "most_specific_theme_label",
-    "published_at",
-    "extracted_at",
-    "synced_at",
-    "word_count",
-    "char_count",
-    "paragraph_count",
-    "has_image",
-    "has_video",
-    "sentiment_score",
-    "sentiment_label",
-    "publication_hour",
-    "publication_dow",
-    "readability_flesch",
+# Schema de load do dgb_gold.fato_noticias: (coluna, tipo BigQuery, modo).
+# Fonte única do LoadJobConfig, dos dtypes do parquet e da ordem das colunas
+# (igual ao SELECT do SYNC_QUERY e ao scripts/bigquery/create_tables.sql; os
+# testes conferem os três).
+FATO_NOTICIAS_SCHEMA: tuple[tuple[str, str, str], ...] = (
+    ("unique_id", "STRING", "REQUIRED"),
+    ("title", "STRING", "NULLABLE"),
+    ("url", "STRING", "NULLABLE"),
+    ("content_hash", "STRING", "NULLABLE"),
+    ("agency_key", "STRING", "NULLABLE"),
+    ("agency_name", "STRING", "NULLABLE"),
+    ("theme_l1_code", "STRING", "NULLABLE"),
+    ("theme_l1_label", "STRING", "NULLABLE"),
+    ("theme_l2_code", "STRING", "NULLABLE"),
+    ("theme_l2_label", "STRING", "NULLABLE"),
+    ("most_specific_theme_code", "STRING", "NULLABLE"),
+    ("most_specific_theme_label", "STRING", "NULLABLE"),
+    ("published_at", "TIMESTAMP", "REQUIRED"),
+    ("extracted_at", "TIMESTAMP", "NULLABLE"),
+    ("synced_at", "TIMESTAMP", "REQUIRED"),
+    ("word_count", "INTEGER", "NULLABLE"),
+    ("char_count", "INTEGER", "NULLABLE"),
+    ("paragraph_count", "INTEGER", "NULLABLE"),
+    ("has_image", "BOOLEAN", "NULLABLE"),
+    ("has_video", "BOOLEAN", "NULLABLE"),
+    ("sentiment_score", "FLOAT", "NULLABLE"),
+    ("sentiment_label", "STRING", "NULLABLE"),
+    ("publication_hour", "INTEGER", "NULLABLE"),
+    ("publication_dow", "INTEGER", "NULLABLE"),
+    ("readability_flesch", "FLOAT", "NULLABLE"),
 )
+
+_FATO_COLUMNS: tuple[str, ...] = tuple(name for name, _, _ in FATO_NOTICIAS_SCHEMA)
+
+# Tipo BigQuery → dtype nulável do pandas (TIMESTAMP vai por pd.to_datetime).
+_PANDAS_DTYPES: dict[str, str] = {
+    "STRING": "string",
+    "INTEGER": "Int64",
+    "FLOAT": "Float64",
+    "BOOLEAN": "boolean",
+}
+
 
 # Caminho GraphQL: coluna ← campo de BigQueryRecordType (query newsBatchForBigquery).
 # Todo campo precisa estar selecionado em NEWS_BATCH_FOR_BIGQUERY_QUERY (teste de contrato).
@@ -139,12 +153,60 @@ def fetch_news_for_bigquery(
     return df
 
 
+def coerce_to_load_schema(df: pd.DataFrame) -> pd.DataFrame:
+    """Colunas do FATO_NOTICIAS_SCHEMA, na ordem do load, com dtypes nuláveis.
+
+    Sem isso, uma coluna inteira NULL (dtype object no read_sql) vira o tipo
+    ``null`` do pyarrow, gravado como INT32 no parquet, e o load falha com
+    "Parquet column 'has_image' has type INT32 which does not match the target
+    cpp_type BOOL" (incidente de jun–out/2026).
+
+    Raises:
+        ValueError: se faltar alguma coluna do schema.
+    """
+    missing = [c for c in _FATO_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError(f"Colunas ausentes para o load do fato_noticias: {missing}")
+    extra = [c for c in df.columns if c not in _FATO_COLUMNS]
+    if extra:
+        logger.warning(f"Colunas fora do schema de load descartadas: {extra}")
+
+    columns: dict[str, pd.Series] = {}
+    for name, bq_type, _mode in FATO_NOTICIAS_SCHEMA:
+        if bq_type == "TIMESTAMP":
+            # ISO8601: o caminho GraphQL entrega str com e sem microssegundos.
+            columns[name] = pd.to_datetime(df[name], utc=True, format="ISO8601")
+        else:
+            columns[name] = df[name].astype(_PANDAS_DTYPES[bq_type])
+    return pd.DataFrame(columns, index=df.index)
+
+
+def _arrow_load_schema():
+    """Schema pyarrow equivalente ao FATO_NOTICIAS_SCHEMA (todas as colunas nuláveis).
+
+    TIMESTAMP em ns UTC; o writer converte para us (coerce_timestamps).
+    """
+    import pyarrow as pa
+
+    arrow_types = {
+        "STRING": pa.string(),
+        "INTEGER": pa.int64(),
+        "FLOAT": pa.float64(),
+        "BOOLEAN": pa.bool_(),
+        "TIMESTAMP": pa.timestamp("ns", tz="UTC"),
+    }
+    return pa.schema([pa.field(name, arrow_types[t]) for name, t, _ in FATO_NOTICIAS_SCHEMA])
+
+
 def write_to_parquet_gcs(
     df: pd.DataFrame,
     bucket_name: str,
     date_str: str,
 ) -> str:
     """Write DataFrame to Parquet in GCS silver/analytics/ path.
+
+    Os tipos do parquet seguem o FATO_NOTICIAS_SCHEMA (coerce_to_load_schema +
+    schema pyarrow explícito), mesmo quando uma coluna vem inteira nula.
 
     Args:
         df: DataFrame to write
@@ -154,32 +216,26 @@ def write_to_parquet_gcs(
     Returns:
         GCS URI of the written file
     """
+    import tempfile
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
     from google.cloud import storage
 
     gcs_path = f"silver/analytics/{date_str}.parquet"
     gcs_uri = f"gs://{bucket_name}/{gcs_path}"
 
-    # Cast nullable int columns to Int64 (Pandas nullable integer) so Parquet
-    # writes them as INT64 instead of DOUBLE when NaN values are present.
-    int_cols = [
-        "word_count",
-        "char_count",
-        "paragraph_count",
-        "publication_hour",
-        "publication_dow",
-    ]
-    for col in int_cols:
-        if col in df.columns:
-            df[col] = df[col].astype("Int64")
+    table = pa.Table.from_pandas(
+        coerce_to_load_schema(df),
+        schema=_arrow_load_schema(),
+        preserve_index=False,
+    )
 
     # Write to local temp, then upload
-    import tempfile
-
     with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
-        df.to_parquet(
+        pq.write_table(
+            table,
             tmp.name,
-            index=False,
-            engine="pyarrow",
             coerce_timestamps="us",
             allow_truncated_timestamps=True,
         )
@@ -210,31 +266,8 @@ def load_parquet_to_bigquery(
     client = bigquery.Client(project=project_id)
 
     schema = [
-        bigquery.SchemaField("unique_id", "STRING", mode="REQUIRED"),
-        bigquery.SchemaField("title", "STRING"),
-        bigquery.SchemaField("url", "STRING"),
-        bigquery.SchemaField("content_hash", "STRING"),
-        bigquery.SchemaField("agency_key", "STRING"),
-        bigquery.SchemaField("agency_name", "STRING"),
-        bigquery.SchemaField("theme_l1_code", "STRING"),
-        bigquery.SchemaField("theme_l1_label", "STRING"),
-        bigquery.SchemaField("theme_l2_code", "STRING"),
-        bigquery.SchemaField("theme_l2_label", "STRING"),
-        bigquery.SchemaField("most_specific_theme_code", "STRING"),
-        bigquery.SchemaField("most_specific_theme_label", "STRING"),
-        bigquery.SchemaField("published_at", "TIMESTAMP", mode="REQUIRED"),
-        bigquery.SchemaField("extracted_at", "TIMESTAMP"),
-        bigquery.SchemaField("synced_at", "TIMESTAMP", mode="REQUIRED"),
-        bigquery.SchemaField("word_count", "INTEGER"),
-        bigquery.SchemaField("char_count", "INTEGER"),
-        bigquery.SchemaField("paragraph_count", "INTEGER"),
-        bigquery.SchemaField("has_image", "BOOLEAN"),
-        bigquery.SchemaField("has_video", "BOOLEAN"),
-        bigquery.SchemaField("sentiment_score", "FLOAT"),
-        bigquery.SchemaField("sentiment_label", "STRING"),
-        bigquery.SchemaField("publication_hour", "INTEGER"),
-        bigquery.SchemaField("publication_dow", "INTEGER"),
-        bigquery.SchemaField("readability_flesch", "FLOAT"),
+        bigquery.SchemaField(name, bq_type, mode=mode)
+        for name, bq_type, mode in FATO_NOTICIAS_SCHEMA
     ]
 
     job_config = bigquery.LoadJobConfig(

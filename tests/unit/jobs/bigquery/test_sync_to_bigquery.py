@@ -519,3 +519,21 @@ class TestParquetDtypes:
         assert arrow.field("synced_at").type == pa.timestamp("us", tz="UTC")
         assert arrow.field("has_image").type == pa.bool_()
         assert arrow.field("char_count").type == pa.int64()
+
+    def test_datas_iso_com_e_sem_microssegundos(self):
+        """O DateTime do GraphQL sai com isoformat(): microssegundos só quando != 0."""
+        from datetime import UTC, datetime
+
+        from data_platform.jobs.bigquery.sync_to_bigquery import coerce_to_load_schema
+
+        df = _pg_like_frame(
+            n=2,
+            published_at=["2026-10-05T12:00:00+00:00", "2026-10-05T12:00:00.250000-03:00"],
+        )
+
+        out = coerce_to_load_schema(df)
+
+        assert out["published_at"].tolist() == [
+            datetime(2026, 10, 5, 12, 0, tzinfo=UTC),
+            datetime(2026, 10, 5, 15, 0, 0, 250000, tzinfo=UTC),
+        ]
