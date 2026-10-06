@@ -13,9 +13,15 @@ To set up a new experiment, work with the user to:
 3. **Read the in-scope files** (all 4 are small — read them all):
    - `program.md` — this file.
    - `evaluate.py` — fixed harness. **Do not modify.**
-   - `signals.py` — fixed data loading. **Do not modify.**
-   - `scorer.py` — **the only file you edit.**
-4. **Verify DB connection**:
+   - `signals.py` — fixed data loading. **Do not modify.** It delegates to the
+     production code (`src/data_platform/jobs/trend_detection/signals.py`, the
+     same code the `compute_entity_trending` DAG runs), so the oracle and the
+     signals are always the production ones.
+   - `scorer.py` — **the only file you edit.** It starts as a re-export of the
+     production scorer (`src/data_platform/jobs/trend_detection/scorer.py`); to
+     experiment, replace the re-export with a local `compute_scores` copied from it.
+4. **Verify DB connection** (use the repo venv, `<repo>/.venv/bin/python`, plus
+   `scikit-learn`; `signals.py`/`scorer.py` put this checkout's `src/` on `sys.path`):
    ```bash
    python -c "from signals import load_snapshot; d = load_snapshot(); print(len(d['entity_stats']), 'entities,', sum(d['oracle_labels'].values()), 'oracle positives')"
    ```
@@ -68,7 +74,7 @@ Each experiment:
 - Access the database in `scorer.py` (all data comes via the `data` dict).
 - Modify the oracle definition.
 
-**Goal: maximize ndcg@10.** Current baseline with 2 signals: ~0.2–0.4.
+**Goal: maximize ndcg@10.** The first run (production scorer) sets the baseline.
 
 **Simplicity criterion**: a tiny improvement that adds 30 lines of code is
 probably not worth it. A simplification that maintains NDCG is always worth it.
@@ -84,11 +90,15 @@ probably not worth it. A simplification that maintains NDCG is always worth it.
 | `window_count`     | int   | Articles mentioning this entity in the window (last 7 days)   |
 | `baseline_count`   | int   | Articles in the baseline (days −35 to −7)                     |
 | `window_daily`     | float | window_count / 7                                              |
-| `baseline_daily`   | float | baseline_count / 28 (min 0.001 to avoid div/0)                |
+| `baseline_daily`   | float | baseline_count / 28 (no floor: 0.0 when there is no baseline) |
+| `volume_ratio`     | float | Laplace: ((window_count+1)/7) / ((baseline_count+1)/28)       |
+| `is_new`           | bool  | baseline_count == 0                                           |
+| `window_active_days`| int  | Distinct days (America/Sao_Paulo) with mentions in the window |
 | `window_agencies`  | int   | Distinct government agencies covering this entity in window   |
 | `baseline_agencies`| int   | Distinct agencies in baseline                                 |
 | `semantic_novelty` | float | avg cosine distance of window articles from baseline centroid |
 |                    |       | (0 = same context, 1 = entirely new semantic context)         |
+|                    |       | 0.0 by default, like the DAG (`compute_embeddings=False`)     |
 | `new_edge_count`   | int   | Co-mention edges with first_seen in the window                |
 
 Note: LOC entities (states, regions) are in entity_stats but excluded from
@@ -98,10 +108,22 @@ oracle_labels (they're too generic). The scorer may still use them as features.
 
 An entity is marked as oracle-positive if ALL of:
 - entity_type != 'LOC'
-- window_daily > 1.5 × baseline_daily
+- volume_ratio > 1.5 (Laplace, the same value the scorer and the DAG use)
 - window_agencies > baseline_agencies
 - window_count >= 3
 - baseline_agencies <= 20 (not a "permanent" entity like "Brasil" or "Lula")
+
+The baseline comes from `resolve_baseline_window`, like in the DAG: rolling
+(days −35 to −7), except for 2026-10-26 ≤ date_end < 2026-11-30, when it is the
+28 days before the electoral blackout ([2026-06-06, 2026-07-04)).
+
+## Decision D1 (Fase 2.5)
+
+D1 (`log1p(volume_ratio)` and a cap on `agency_growth`) is decided with this
+harness: run `evaluate.py` unchanged first (it measures the production scorer),
+then each variant in `scorer.py`. Windows inside the electoral blackout
+(2026-07-04 to 2026-10-25, ~35% less volume) distort both window and baseline;
+read the NDCG of those evaluation points with care.
 
 ## Output format
 
