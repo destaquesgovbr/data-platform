@@ -68,3 +68,31 @@ class TestAudience:
             headers = client._get_auth_headers()
         assert headers == {"Authorization": "Bearer tok"}
         assert fetch.call_args[0][1] == "graphql-api-internal"
+
+
+class TestCoerceJsonObject:
+    """O escalar `JSON` da graphql-api pode chegar como str.
+
+    No `newsById`, o `features` sai cru do asyncpg, que não tem codec de JSONB:
+    a coluna chega como texto e o escalar `JSON` repassa a string.
+    """
+
+    def test_dict_passa_inalterado(self):
+        from data_platform.clients.graphql_client import coerce_json_object
+
+        blob = {"entities": [{"text": "Anvisa"}], "word_count": 3}
+        assert coerce_json_object(blob) == blob
+
+    def test_str_json_de_objeto_vira_dict(self):
+        from data_platform.clients.graphql_client import coerce_json_object
+
+        assert coerce_json_object('{"annotations_source_hash": "abc", "x": [1]}') == {
+            "annotations_source_hash": "abc",
+            "x": [1],
+        }
+
+    @pytest.mark.parametrize("raw", [None, "", "não é json", "null", "[1, 2]", '"texto"', [], 3])
+    def test_ausente_invalido_ou_nao_objeto_vira_vazio(self, raw):
+        from data_platform.clients.graphql_client import coerce_json_object
+
+        assert coerce_json_object(raw) == {}

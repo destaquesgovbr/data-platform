@@ -5,6 +5,7 @@ Tests handle_feature_computation() orchestration:
 - fetch article → compute features → upsert
 """
 
+import json
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
@@ -453,3 +454,67 @@ class TestHandleFeatureComputationGraphql:
 
         annotations = gql.mutate.call_args[0][1]["features"]["content_annotations"]
         assert [a["text"] for a in annotations] == ["Ministério da Educação"]
+
+
+class TestHandleFeatureComputationGraphqlFeaturesComoString:
+    """No `newsById`, o `features` chega como str JSON (asyncpg sem codec de JSONB).
+
+    Tratar a str como `{}` descartava entities, annotations_source_hash e a
+    chave content_annotations: o worker mandava `content_annotations: []` e o
+    merge `features || $2::jsonb` da API apagava as anotações gravadas.
+    """
+
+    CONTENT = "O Ministério da Educação anunciou hoje um novo programa nacional amplo."
+    ENTITIES = [{"text": "Ministério da Educação", "type": "ORG", "count": 1}]
+
+    def _gql(self, blob: dict):
+        gql = MagicMock()
+        gql.query.return_value = _graphql_news_by_id(
+            content=self.CONTENT, features=json.dumps(blob, ensure_ascii=False)
+        )
+        return gql
+
+    def test_entities_da_string_geram_anotacoes(self, mock_pg):
+        gql = self._gql({"entities": self.ENTITIES})
+
+        result = handle_feature_computation("abc123", mock_pg, gql_client=gql)
+
+        assert result["annotations_skipped"] is False
+        annotations = gql.mutate.call_args[0][1]["features"]["content_annotations"]
+        assert [a["text"] for a in annotations] == ["Ministério da Educação"]
+
+    def test_hash_igual_na_string_pula_e_nao_sobrescreve_anotacoes(self, mock_pg):
+        from data_platform.workers.feature_worker.features import (
+            compute_annotations_source_hash,
+        )
+
+        blob = {
+            "entities": self.ENTITIES,
+            "content_annotations": [{"x": 1}],
+            "annotations_source_hash": compute_annotations_source_hash(self.CONTENT, self.ENTITIES),
+        }
+        gql = self._gql(blob)
+
+        result = handle_feature_computation("abc123", mock_pg, gql_client=gql)
+
+        assert result["annotations_skipped"] is True
+        sent = gql.mutate.call_args[0][1]["features"]
+        assert "content_annotations" not in sent
+        assert "annotations_source_hash" not in sent
+
+    def test_fetch_le_hash_e_presenca_das_anotacoes_da_string(self):
+        from data_platform.workers.feature_worker.handler import _fetch_article_via_graphql
+
+        gql = self._gql(
+            {
+                "entities": self.ENTITIES,
+                "content_annotations": [],
+                "annotations_source_hash": "abc",
+            }
+        )
+
+        article = _fetch_article_via_graphql("abc123", gql)
+
+        assert article["entities"] == self.ENTITIES
+        assert article["existing_annotations_hash"] == "abc"
+        assert article["has_content_annotations"] is True

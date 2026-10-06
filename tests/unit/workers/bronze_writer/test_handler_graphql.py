@@ -4,6 +4,7 @@ Os campos lidos seguem o SDL (`themeL*`) e `publishedAt` (str ISO) vira datetime
 porque `build_gcs_path` particiona por `published_at.strftime(...)`.
 """
 
+import json
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
@@ -68,6 +69,25 @@ class TestFetchFullArticleViaGraphql:
 
         assert article["published_at"] == datetime(2025, 6, 15, 10, 0, tzinfo=UTC)
         assert article["extracted_at"] == datetime(2025, 6, 15, 12, 0, tzinfo=UTC)
+
+    def test_features_como_string_vira_objeto(self):
+        """newsById devolve `features` como str JSON (asyncpg sem codec de JSONB).
+
+        Sem o parse, o JSON bronze guardaria uma string dentro do JSON.
+        """
+        blob = {"entities": [{"text": "MEC", "type": "ORG", "count": 1}], "word_count": 1}
+        gql = MagicMock()
+        gql.query.return_value = _news_by_id(features=json.dumps(blob))
+
+        article = _fetch_full_article_via_graphql("mec-456", gql)
+
+        assert article["features"] == blob
+
+    def test_features_nulo_vira_objeto_vazio(self):
+        gql = MagicMock()
+        gql.query.return_value = _news_by_id(features=None)
+
+        assert _fetch_full_article_via_graphql("mec-456", gql)["features"] == {}
 
     def test_nao_encontrado(self):
         gql = MagicMock()

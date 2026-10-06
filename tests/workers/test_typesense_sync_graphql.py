@@ -124,6 +124,18 @@ class TestMapGraphqlRow:
         mapped = _map_graphql_row(SAMPLE_GRAPHQL_RESPONSE)
         assert "features" not in mapped
 
+    def test_features_como_string_json(self):
+        """`features` como str JSON (asyncpg sem codec de JSONB) ainda entrega entities."""
+        import json
+
+        row = {
+            **SAMPLE_GRAPHQL_RESPONSE,
+            "features": json.dumps(SAMPLE_GRAPHQL_RESPONSE["features"]),
+        }
+        mapped = _map_graphql_row(row)
+        assert mapped["entities"] == SAMPLE_GRAPHQL_RESPONSE["features"]["entities"]
+        assert mapped["view_count"] == 1234
+
     def test_missing_features_is_safe(self):
         """A response with no `features` key omits entities/view_count."""
         row = {k: v for k, v in SAMPLE_GRAPHQL_RESPONSE.items() if k != "features"}
