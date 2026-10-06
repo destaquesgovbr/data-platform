@@ -193,3 +193,163 @@ class TestDagStructure:
 
         for task in dag_instance.tasks:
             assert len(task.upstream_list) == 0
+
+
+# =============================================================================
+# Caminho GraphQL (newsBatchForBigquery), inerte enquanto GRAPHQL_API_URL faltar
+# =============================================================================
+
+# Colunas do SYNC_QUERY (caminho PG), na ordem do schema de load.
+_FATO_COLUMNS = [
+    "unique_id",
+    "title",
+    "url",
+    "content_hash",
+    "agency_key",
+    "agency_name",
+    "theme_l1_code",
+    "theme_l1_label",
+    "theme_l2_code",
+    "theme_l2_label",
+    "most_specific_theme_code",
+    "most_specific_theme_label",
+    "published_at",
+    "extracted_at",
+    "synced_at",
+    "word_count",
+    "char_count",
+    "paragraph_count",
+    "has_image",
+    "has_video",
+    "sentiment_score",
+    "sentiment_label",
+    "publication_hour",
+    "publication_dow",
+    "readability_flesch",
+]
+
+
+def _bq_record(unique_id: str = "mec-1", **overrides) -> dict:
+    """Item de newsBatchForBigquery com os campos que existem em BigQueryRecordType."""
+    record = {
+        "uniqueId": unique_id,
+        "title": f"Título {unique_id}",
+        "url": f"https://gov.br/{unique_id}",
+        "agencyKey": "mec",
+        "agencyName": "Ministério da Educação",
+        "publishedAt": "2025-06-01T10:00:00+00:00",
+        "extractedAt": "2025-06-01T11:00:00+00:00",
+        "themeL1Code": "06",
+        "themeL1Label": "Educação",
+        "themeL2Code": "06.01",
+        "themeL2Label": "Ensino Superior",
+        "mostSpecificThemeCode": "06.01",
+        "mostSpecificThemeLabel": "Ensino Superior",
+        "wordCount": 300,
+        "hasImage": True,
+        "hasVideo": False,
+        "sentimentLabel": "positive",
+        "sentimentScore": 0.8,
+        "readabilityFlesch": 35.5,
+        "features": {
+            "word_count": 300,
+            "char_count": 1500,
+            "paragraph_count": 5,
+            "publication_hour": 10,
+            "publication_dow": 6,
+            "has_image": True,
+        },
+    }
+    record.update(overrides)
+    return record
+
+
+class TestFetchNewsForBigqueryViaGraphql:
+    def test_le_o_campo_newsBatchForBigquery(self):
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {"newsBatchForBigquery": [_bq_record("a"), _bq_record("b")]}
+
+        df = fetch_news_for_bigquery_via_graphql(gql, "2025-06-01", "2025-06-02")
+
+        assert list(df["unique_id"]) == ["a", "b"]
+
+    def test_datas_enviadas_como_string(self):
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {"newsBatchForBigquery": []}
+
+        fetch_news_for_bigquery_via_graphql(gql, "2025-06-01", "2025-06-02")
+
+        variables = gql.query.call_args[0][1]
+        assert variables["startDate"] == "2025-06-01"
+        assert variables["endDate"] == "2025-06-02"
+
+    def test_mapeia_themeL(self):
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {"newsBatchForBigquery": [_bq_record()]}
+
+        row = fetch_news_for_bigquery_via_graphql(gql, "2025-06-01", "2025-06-02").iloc[0]
+
+        assert row["theme_l1_code"] == "06"
+        assert row["theme_l1_label"] == "Educação"
+        assert row["theme_l2_code"] == "06.01"
+        assert row["theme_l2_label"] == "Ensino Superior"
+        assert row["most_specific_theme_code"] == "06.01"
+
+    def test_campos_ausentes_no_schema_saem_de_features(self):
+        """charCount/paragraphCount/publicationHour/publicationDow não existem no SDL."""
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {"newsBatchForBigquery": [_bq_record()]}
+
+        row = fetch_news_for_bigquery_via_graphql(gql, "2025-06-01", "2025-06-02").iloc[0]
+
+        assert row["char_count"] == 1500
+        assert row["paragraph_count"] == 5
+        assert row["publication_hour"] == 10
+        assert row["publication_dow"] == 6
+        assert row["word_count"] == 300
+        assert row["readability_flesch"] == 35.5
+
+    def test_features_nulo_vira_colunas_nulas(self):
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {"newsBatchForBigquery": [_bq_record(features=None)]}
+
+        row = fetch_news_for_bigquery_via_graphql(gql, "2025-06-01", "2025-06-02").iloc[0]
+
+        assert pd.isna(row["char_count"])
+        assert pd.isna(row["publication_hour"])
+
+    def test_mesmas_colunas_do_caminho_pg(self):
+        """Mesmo shape do SYNC_QUERY: o parquet carrega no mesmo schema (synced_at é REQUIRED)."""
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {"newsBatchForBigquery": [_bq_record()]}
+
+        df = fetch_news_for_bigquery_via_graphql(gql, "2025-06-01", "2025-06-02")
+
+        assert list(df.columns) == _FATO_COLUMNS
+        assert df.iloc[0]["synced_at"] is not None
+        assert pd.isna(df.iloc[0]["content_hash"])  # não exposto em BigQueryRecordType
+        assert df.iloc[0]["extracted_at"] == "2025-06-01T11:00:00+00:00"

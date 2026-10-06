@@ -1,5 +1,6 @@
 """Tests for Bronze Writer GraphQL integration."""
 
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,12 +35,12 @@ def sample_graphql_response():
             "agencyName": "Example Agency",
             "publishedAt": "2025-06-15T10:00:00Z",
             "extractedAt": "2025-06-15T12:00:00Z",
-            "themL1Code": "01",
-            "themL1Label": "Theme L1",
-            "themL2Code": None,
-            "themL2Label": None,
-            "themL3Code": None,
-            "themL3Label": None,
+            "themeL1Code": "01",
+            "themeL1Label": "Theme L1",
+            "themeL2Code": None,
+            "themeL2Label": None,
+            "themeL3Code": None,
+            "themeL3Label": None,
             "mostSpecificThemeCode": "01",
             "mostSpecificThemeLabel": "Theme L1",
             "features": None,
@@ -61,7 +62,7 @@ class TestFetchFullArticleViaGraphql:
         assert result["content"] == "Full article content."
         assert result["agency_key"] == "example"
         assert result["agency_name"] == "Example Agency"
-        assert result["published_at"] == "2025-06-15T10:00:00Z"
+        assert result["published_at"] == datetime(2025, 6, 15, 10, 0, tzinfo=UTC)
         assert result["theme_l1_code"] == "01"
         assert result["most_specific_theme_code"] == "01"
         mock_gql_client.query.assert_called_once()
@@ -97,3 +98,15 @@ class TestHandleUsesGraphql:
         mock_gql_client.query.assert_called_once()
         # Should have written to GCS
         mock_write_gcs.assert_called_once()
+
+    @patch("data_platform.workers.bronze_writer.handler.write_to_gcs")
+    @patch.dict("os.environ", {"GCS_BUCKET": "test-bucket"})
+    def test_handle_graphql_com_build_gcs_path_real(
+        self, mock_write_gcs, mock_gql_client, sample_graphql_response
+    ):
+        """Sem mock do build_gcs_path: publishedAt str dava AttributeError (.strftime)."""
+        mock_gql_client.query.return_value = sample_graphql_response
+
+        result = handle_bronze_write("article-456", MagicMock(), gql_client=mock_gql_client)
+
+        assert result["gcs_path"] == "bronze/news/2025/06/15/article-456.json"
