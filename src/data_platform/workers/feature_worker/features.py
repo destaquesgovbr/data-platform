@@ -54,6 +54,11 @@ def compute_publication_dow(published_at: datetime) -> int:
 
 
 def compute_readability_flesch(content: str | None) -> float | None:
+    """Flesch reading ease com a fórmula inglesa do textstat (sem set_lang).
+
+    Escala fixada por teste: pode dar negativo em português. Não chamar
+    ``textstat.set_lang`` (estado global); uma versão pt-BR deve virar chave nova.
+    """
     if not content or len(content.split()) < 10:
         return None
     try:
