@@ -127,6 +127,19 @@ _BIGQUERY_FEATURE_FIELDS: tuple[str, ...] = (
 )
 
 
+def previous_day_window(logical_date) -> tuple[str, str]:
+    """Janela de 1 dia para a execução diária: só o dia anterior ao logical_date.
+
+    Retorna (start, end) para fetch_news_for_bigquery, que trata ``end`` como
+    inclusivo (``< end + 1 dia``); com start == end a janela é exatamente
+    [D-1, D) e execuções consecutivas não se sobrepõem.
+    """
+    from datetime import timedelta
+
+    day = (logical_date - timedelta(days=1)).strftime("%Y-%m-%d")
+    return day, day
+
+
 def fetch_news_for_bigquery(
     db_url: str,
     start_date: str,
