@@ -1,5 +1,6 @@
 """Unit tests for BigQuery sync DAG and job module."""
 
+from datetime import UTC
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -537,3 +538,37 @@ class TestParquetDtypes:
             datetime(2026, 10, 5, 12, 0, tzinfo=UTC),
             datetime(2026, 10, 5, 15, 0, 0, 250000, tzinfo=UTC),
         ]
+
+
+class TestPreviousDayWindow:
+    """A execução diária carrega só o dia anterior ao logical_date (janela de 1 dia)."""
+
+    def test_janela_e_so_o_dia_anterior(self):
+        from datetime import datetime, timezone
+
+        from data_platform.jobs.bigquery.sync_to_bigquery import previous_day_window
+
+        start, end = previous_day_window(datetime(2026, 10, 6, 10, 0, tzinfo=UTC))
+        # fetch_news_for_bigquery trata end como inclusivo (< end + 1 dia):
+        # passar end == start dá exatamente [2026-10-05, 2026-10-06)
+        assert (start, end) == ("2026-10-05", "2026-10-05")
+
+    def test_execucoes_consecutivas_nao_se_sobrepoem(self):
+        from datetime import datetime, timedelta, timezone
+
+        from data_platform.jobs.bigquery.sync_to_bigquery import previous_day_window
+
+        d = datetime(2026, 10, 6, 10, 0, tzinfo=UTC)
+        dias = [previous_day_window(d + timedelta(days=i))[0] for i in range(3)]
+        assert dias == ["2026-10-05", "2026-10-06", "2026-10-07"]
+        for i in range(3):
+            s, e = previous_day_window(d + timedelta(days=i))
+            assert s == e
+
+    def test_dag_usa_previous_day_window(self):
+        from pathlib import Path
+
+        src = Path(__file__).resolve().parents[4] / "src/data_platform/dags/sync_pg_to_bigquery.py"
+        code = src.read_text()
+        assert "previous_day_window(" in code
+        assert 'end_date = logical_date.strftime("%Y-%m-%d")' not in code
