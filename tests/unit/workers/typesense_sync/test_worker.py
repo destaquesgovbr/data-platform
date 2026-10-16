@@ -264,3 +264,41 @@ class TestUpsertToTypesense:
 
         mock_pg_class.assert_called_once_with(max_connections=2)
         mock_pg_instance.close_all.assert_called_once()
+
+
+# =============================================================================
+# Caminho GraphQL: nomes de campo conforme o SDL (themeL*, não themL*)
+# =============================================================================
+
+
+class TestMapGraphqlRowThemes:
+    def test_mapeia_themeL(self):
+        from data_platform.workers.typesense_sync.handler import _map_graphql_row
+
+        mapped = _map_graphql_row(
+            {
+                "uniqueId": "mec-1",
+                "publishedAt": "2026-01-01T12:00:00Z",
+                "themeL1Code": "06",
+                "themeL1Label": "Educação",
+                "themeL2Code": "06.01",
+                "themeL2Label": "Ensino Superior",
+                "themeL3Code": "06.01.02",
+                "themeL3Label": "Bolsas",
+                "mostSpecificThemeCode": "06.01.02",
+                "mostSpecificThemeLabel": "Bolsas",
+            }
+        )
+
+        assert mapped["theme_1_level_1_code"] == "06"
+        assert mapped["theme_1_level_1_label"] == "Educação"
+        assert mapped["theme_1_level_2_code"] == "06.01"
+        assert mapped["theme_1_level_2_label"] == "Ensino Superior"
+        assert mapped["theme_1_level_3_code"] == "06.01.02"
+        assert mapped["theme_1_level_3_label"] == "Bolsas"
+        assert mapped["most_specific_theme_code"] == "06.01.02"
+
+    def test_nao_le_chaves_themL_inexistentes(self):
+        from data_platform.workers.typesense_sync.handler import _GRAPHQL_TO_SNAKE
+
+        assert not [k for k in _GRAPHQL_TO_SNAKE if k.startswith("themL")]

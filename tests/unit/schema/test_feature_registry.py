@@ -73,3 +73,17 @@ class TestFeatureRegistry:
         actual = set(registry["features"].keys())
         missing = expected - actual
         assert not missing, f"Missing AI features: {missing}"
+
+
+class TestReadabilityFleschDescription:
+    """A descrição precisa dizer a fórmula de fato usada (F0g, Fase 2.5)."""
+
+    def test_descricao_diz_formula_inglesa_do_textstat(self, registry):
+        spec = registry["features"]["readability_flesch"]
+        description = spec["description"]
+
+        assert "pt-BR" not in description, "não é a fórmula adaptada pt-BR"
+        assert "fórmula inglesa" in description
+        assert "textstat 0.7.13" in description
+        assert "set_lang" in description
+        assert "negativos" in description

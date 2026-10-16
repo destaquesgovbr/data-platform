@@ -56,7 +56,10 @@ features:
   readability_flesch:
     version: "1.0"
     type: float
-    description: "Flesch reading ease score (adaptado pt-BR)"
+    description: >-
+      Flesch reading ease (fórmula inglesa do textstat 0.7.13, sem set_lang;
+      valores negativos possíveis). Não é a adaptação para o português
+      (Martins/1996); essa versão deve entrar como chave nova.
     model: "local/textstat"
     compute: "feature-worker"
 

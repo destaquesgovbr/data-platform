@@ -1,4 +1,4 @@
-"""Tests for fetch_news_for_bigquery_via_graphql."""
+"""Tests for fetch_news_for_bigquery_via_graphql (query newsBatchForBigquery)."""
 
 from unittest.mock import MagicMock
 
@@ -10,7 +10,11 @@ from data_platform.jobs.bigquery.sync_to_bigquery import (
 
 
 def _make_article(unique_id: str) -> dict:
-    """Helper: create a single GraphQL response article."""
+    """Helper: um item de newsBatchForBigquery conforme BigQueryRecordType do SDL.
+
+    charCount, paragraphCount, publicationHour e publicationDow não existem no
+    schema; chegam dentro do blob `features`.
+    """
     return {
         "uniqueId": unique_id,
         "title": f"Title {unique_id}",
@@ -18,24 +22,26 @@ def _make_article(unique_id: str) -> dict:
         "agencyKey": "mci",
         "agencyName": "MCI",
         "publishedAt": "2025-06-01T10:00:00Z",
-        "themL1Code": "T01",
-        "themL1Label": "Economia",
-        "themL2Code": "T01.01",
-        "themL2Label": "PIB",
-        "themL3Code": None,
-        "themL3Label": None,
+        "extractedAt": "2025-06-01T11:00:00Z",
+        "themeL1Code": "T01",
+        "themeL1Label": "Economia",
+        "themeL2Code": "T01.01",
+        "themeL2Label": "PIB",
         "mostSpecificThemeCode": "T01.01",
         "mostSpecificThemeLabel": "PIB",
         "wordCount": 300,
-        "charCount": 1500,
-        "paragraphCount": 5,
         "hasImage": True,
         "hasVideo": False,
         "sentimentLabel": "positive",
         "sentimentScore": 0.8,
         "readabilityFlesch": 55.0,
-        "publicationHour": 10,
-        "publicationDow": 2,
+        "features": {
+            "word_count": 300,
+            "char_count": 1500,
+            "paragraph_count": 5,
+            "publication_hour": 10,
+            "publication_dow": 6,
+        },
     }
 
 
@@ -49,8 +55,8 @@ class TestFetchViaGraphqlPaginates:
 
         mock_client = MagicMock()
         mock_client.query.side_effect = [
-            {"newsBatchForBigQuery": page1},
-            {"newsBatchForBigQuery": page2},
+            {"newsBatchForBigquery": page1},
+            {"newsBatchForBigquery": page2},
         ]
 
         df = fetch_news_for_bigquery_via_graphql(
@@ -72,9 +78,9 @@ class TestFetchViaGraphqlPaginates:
         assert second_vars["cursor"] == "id-2"
 
     def test_columns_are_snake_case(self):
-        """Verify camelCase GraphQL fields are converted to snake_case."""
+        """camelCase do GraphQL vira as colunas do SYNC_QUERY (mesmo schema de load)."""
         mock_client = MagicMock()
-        mock_client.query.return_value = {"newsBatchForBigQuery": [_make_article("abc")]}
+        mock_client.query.return_value = {"newsBatchForBigquery": [_make_article("abc")]}
 
         df = fetch_news_for_bigquery_via_graphql(mock_client, "2025-06-01", "2025-06-02")
 
@@ -82,9 +88,12 @@ class TestFetchViaGraphqlPaginates:
             "unique_id",
             "title",
             "url",
+            "content_hash",
             "agency_key",
             "agency_name",
             "published_at",
+            "extracted_at",
+            "synced_at",
             "theme_l1_code",
             "theme_l1_label",
             "theme_l2_code",
@@ -104,6 +113,18 @@ class TestFetchViaGraphqlPaginates:
         }
         assert set(df.columns) == expected_cols
 
+    def test_features_fields_mapped(self):
+        mock_client = MagicMock()
+        mock_client.query.return_value = {"newsBatchForBigquery": [_make_article("abc")]}
+
+        row = fetch_news_for_bigquery_via_graphql(mock_client, "2025-06-01", "2025-06-02").iloc[0]
+
+        assert row["theme_l1_code"] == "T01"
+        assert row["char_count"] == 1500
+        assert row["paragraph_count"] == 5
+        assert row["publication_hour"] == 10
+        assert row["publication_dow"] == 6
+
 
 class TestFetchViaGraphqlEmptyRange:
     """Test behaviour when GraphQL returns no data."""
@@ -111,7 +132,7 @@ class TestFetchViaGraphqlEmptyRange:
     def test_fetch_via_graphql_empty_range(self):
         """Empty result from GraphQL should return empty DataFrame."""
         mock_client = MagicMock()
-        mock_client.query.return_value = {"newsBatchForBigQuery": []}
+        mock_client.query.return_value = {"newsBatchForBigquery": []}
 
         df = fetch_news_for_bigquery_via_graphql(mock_client, "2099-01-01", "2099-01-02")
 

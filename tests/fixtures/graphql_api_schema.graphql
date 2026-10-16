@@ -1,0 +1,965 @@
+type Query {
+  """Verifica se a API está funcionando"""
+  ping: String!
+
+  """Lista artigos com filtros, paginação e ordenação"""
+  articles(page: Int! = 1, limit: Int! = 10, filter: ArticleFilter = null, sort: ArticleSort = null): ArticlesResult!
+
+  """Busca artigo por ID"""
+  article(uniqueId: String!): Article
+
+  """Search articles with keyword or semantic search"""
+  search(query: String!, filter: ArticleFilter = null, page: Int! = 1, semantic: Boolean! = false, alpha: Float = null, dedup: Boolean! = false, sort: ArticleSort = null): ArticlesResult!
+
+  """Get search suggestions for autocomplete"""
+  searchSuggestions(query: String!): [SearchSuggestion!]!
+
+  """Lista de temas distintos extraidos das noticias"""
+  themes: [Theme!]!
+
+  """Lista de orgaos distintos"""
+  agencies: [Agency!]!
+
+  """Tags mais populares"""
+  popularTags(limit: Int = 20): [Tag!]!
+
+  """Key performance indicators for the given date range"""
+  analyticsKpis(range: DateRange!): AnalyticsKpis!
+
+  """Top themes by article count"""
+  topThemes(range: DateRange!, limit: Int! = 8): [ThemeStats!]!
+
+  """Top agencies by article count"""
+  topAgencies(range: DateRange!, limit: Int! = 8): [AgencyStats!]!
+
+  """
+  Contagem diária de artigos nos últimos `range.days` dias de calendário em America/Sao_Paulo (hoje incluso, parcial), em ordem crescente. Dias sem artigo vêm com count 0. `range.days` é limitado a 366.
+  """
+  articlesTimeline(range: DateRange!): [DailyCount!]!
+
+  """Métricas de publicação por agência e período"""
+  agencyAnalytics(agencies: [String!]!, dateFrom: String!, dateTo: String!, granularity: Granularity! = MONTH, metrics: [MetricType!] = null): [AgencyPeriodMetrics!]!
+
+  """Temas em crescimento comparando janela recente com baseline histórico"""
+  trendingThemes(windowDays: Int! = 7, baselineDays: Int! = 28, minArticles: Int! = 3, growthThreshold: Float! = 1.5, agencyKey: String = null, limit: Int! = 10): [TrendingThemeResult!]!
+
+  """
+  Lista todos os clippings do usuario autenticado (autorados + inscritos)
+  """
+  clippings: [Clipping!]!
+
+  """Busca um clipping por ID"""
+  clipping(id: String!): Clipping
+
+  """
+  Busca um release por ID. Autorizacao espelha `MarketplaceListing.releases`: PUBLICO se o listing fonte do clipping esta ativo; caso contrario somente autor ou subscriber. Substitui o `getReleaseById` do portal. Retorna None se o release nao existe OU o caller nao esta autorizado. Para o caller autorizado, popula `recortes` (filtros do clipping fonte) e `marketplaceListingId` (id do listing ativo, ou null).
+  """
+  release(id: String!): Release
+
+  """Estima o numero de artigos para um clipping"""
+  clippingEstimate(themes: [String!]! = [], agencies: [String!]! = [], keywords: [String!]! = []): EstimateResult!
+
+  """Lista listings do marketplace com paginacao"""
+  marketplaceListings(page: Int! = 1): MarketplaceListingsResult!
+
+  """Busca um listing do marketplace por ID"""
+  marketplaceListing(id: String!): MarketplaceListing
+
+  """
+  Listings que o usuario autenticado segue, com os campos da subscription dele (canais, emails extras, webhook, data). Substitui o `getFollows` do portal. Exclui follows cujo listing esta inativo ou ausente.
+  """
+  myFollowedListings: [FollowedListing!]!
+
+  """Preferencias de push notification do usuario autenticado"""
+  pushPreferences: PushPreferences!
+
+  """
+  Filtros disponiveis (temas e agencias) para o usuario escolher na UI de preferencias de push.
+  """
+  pushFiltersData: PushFiltersData!
+
+  """Get available widget configuration options"""
+  widgetConfig: WidgetConfig!
+
+  """Get articles for a widget"""
+  widgetArticles(config: WidgetConfigInput!, page: Int! = 1): WidgetArticlesResult!
+
+  """
+  True se o usuario autenticado tem o Telegram vinculado (`users/{id}/telegramLink/account` existe). Substitui o `getHasTelegram` do portal. Retorna False se nao logado ou sem doc.
+  """
+  currentUserHasTelegramLinked: Boolean!
+
+  """Fetch a single news record by unique_id"""
+  newsById(uniqueId: String!): NewsRecordType
+
+  """Fetch a batch of news records by unique_ids"""
+  newsBatch(uniqueIds: [String!]!): [NewsRecordType!]!
+
+  """Fetch a news record formatted for Typesense indexing"""
+  newsForTypesense(uniqueId: String!): TypesenseDocRecordType
+
+  """Fetch a batch of news records for BigQuery export"""
+  newsBatchForBigquery(startDate: String!, endDate: String!, batchSize: Int! = 100, cursor: String = null): [BigQueryRecordType!]!
+
+  """Find articles similar to a given article using embeddings"""
+  similarArticles(uniqueId: String!, threshold: Float! = 0.8, limit: Int! = 5): [SimilarArticleRecordType!]!
+
+  """Fetch a batch of articles needing integrity checks"""
+  integrityBatch(batchSize: Int! = 50): [IntegrityCandidateType!]!
+
+  """
+  Artigos relacionados a `uniqueId` por similaridade semântica (embedding pgvector via news.content_embedding). O SQL exclui o próprio artigo, aplica threshold de similaridade e ordena por similaridade desc; os vizinhos são hidratados do índice Typesense preservando essa ordem. Retorna [] se o artigo não tiver embedding ou vizinhos. PÚBLICO. (Distinto do `similarArticles` interno, que devolve apenas unique_id/score.)
+  """
+  relatedArticles(uniqueId: String!, limit: Int! = 4): [Article!]!
+
+  """
+  Sugestões de entidades (facet) para o filtro de busca e as páginas de entidade. `type` (ORG/PER/LOC/EVENT/POLICY) restringe ao campo tipado; ausente usa o campo combinado `entities`. `type: CANONICAL` ativa o modo canônico: faceta `entity_canonical` e retorna `{value/entityId = canonical_id, label = canonical_name, count}` (label resolvido do entity_registry; None se ausente). `query` filtra por prefixo. Ordenado por nº de artigos desc. PÚBLICO.
+  """
+  entitySuggestions(query: String! = "", type: String = null, limit: Int! = 10): [EntityFacet!]!
+
+  """
+  Entidade canônica do entity_registry por `id` (entity_id: QID Wikidata 'Q216330' ou 'dgb_<ulid>'). None quando não existe. PÚBLICO.
+  """
+  entity(id: String!): EntityNode
+
+  """
+  Entidades relacionadas a `id` (entity_id) por co-menção (Fase 6c). Lê a rede de co-menção materializada (`entity_edges`, 1-hop), retorna os vizinhos hidratados do entity_registry, ordenados por `weight` (nº de artigos em co-menção) desc, até `limit`. Retorna [] sem Postgres ou sem vizinhos. PÚBLICO.
+  """
+  relatedEntities(id: String!, limit: Int! = 12): [RelatedEntity!]!
+
+  """
+  Ego-network (nós + arestas) ao redor de `id` (entity_id) para a visualização de rede (Fase 6c). Travessia não-direcionada na rede de co-menção (`entity_edges`) via CTE recursiva até `depth` saltos (CLAMPado a no máx 2; profundidades maiores ficam para o Neo4j futuro). `limit` limita o nº de arestas (cap de tamanho do grafo). Retorna {nodes:[], edges:[]} sem Postgres. PÚBLICO.
+  """
+  entityNetwork(id: String!, depth: Int! = 1, limit: Int! = 50): EntityNetwork!
+
+  """
+  Contagem de artigos por code de tema (nivel `level`) nos ultimos `days` dias. `label` e None (o portal mapeia pela config). PUBLICO.
+  """
+  themeArticleCounts(days: Int! = 30, level: Int! = 1): [ThemeCount!]!
+
+  """
+  Artigos de um release (pagina de artigos do release). Autorizacao espelha `release(id)`: PUBLICO se o listing fonte do clipping esta ativo; caso contrario somente autor ou subscriber. Retorna [] se negado ou inexistente. Janela temporal [refTime - sinceHours, refTime] (default ultimas 24h). Para cada recorte: se tem keywords, uma busca por keyword (q em title,summary) + filtro (themes OR-levels + agencies + janela); senao, uma busca q=* filter-only. Une tudo, deduplica por uniqueId, ordena por publishedAt desc. PUBLICO (sujeito a auth do release).
+  """
+  releaseArticles(id: String!): [Article!]!
+
+  """
+  Estima quantos artigos um recorte capturaria nas ultimas `sinceHours` horas. Replica `lib/estimate-recorte-count.ts`: filtro = themes OR-levels + agencies OR'd + published_at >= now-sinceHours; para keywords, conta por keyword (q em title,summary) e retorna o MAX; sem keywords, uma unica contagem. Substitui o mock `clippingEstimate`. PUBLICO.
+  """
+  estimateRecorteCount(themes: [String!]!, agencies: [String!]!, keywords: [String!]!, sinceHours: Int! = 24): Int!
+
+  """Série temporal de cobertura de uma entidade por agência"""
+  entityCoverage(entityId: String!, dateFrom: String = null, dateTo: String = null, granularity: Granularity! = MONTH): [EntityCoveragePoint!]!
+
+  """Busca fuzzy de entidades por nome ou alias"""
+  entitySearch(query: String!, entityType: EntityKind = null, limit: Int! = 5): [EntitySearchResult!]!
+
+  """
+  Artigos de uma entidade canônica via news_entities (Postgres direto). Não depende do campo entityCanonical no Typesense.
+  """
+  entityArticles(entityId: String!, page: Int! = 1, limit: Int! = 10): ArticlesResult!
+
+  """Metadados de ontologia para entidades do tipo POLICY"""
+  policyDetails(entityId: String!): PolicyDetails
+
+  """
+  Lista entidades POLICY com metadados de ontologia (domain, lifecycle_phase) e contagem de artigos. Filtros opcionais por domain e lifecyclePhase. PÚBLICO.
+  """
+  policies(domain: String = null, lifecyclePhase: String = null, limit: Int! = 20, offset: Int! = 0): [PolicyListItem!]!
+
+  """Entidades NER com maior crescimento de cobertura (pré-computado)"""
+  trendingEntities(limit: Int! = 10): [TrendingEntityResult!]!
+}
+
+type ArticlesResult {
+  articles: [Article!]!
+  page: Int!
+  found: Int!
+}
+
+type Article {
+  uniqueId: String!
+  title: String!
+  url: String!
+  image: String
+  videoUrl: String
+  content: String
+  summary: String
+  subtitle: String
+  editorialLead: String
+  category: String
+  tags: [String!]!
+  agency: String
+  agencyName: String
+  publishedAt: DateTime
+  extractedAt: DateTime
+  theme1Level1Code: String
+  theme1Level1Label: String
+  theme1Level2Code: String
+  theme1Level2Label: String
+  theme1Level3Code: String
+  theme1Level3Label: String
+  mostSpecificThemeCode: String
+  mostSpecificThemeLabel: String
+
+  """Hora de publicação (0-23), derivada de publishedAt"""
+  publicationHour: Int
+
+  """
+  Features computadas da notícia (entidades, popularidade/trending, leitura/legibilidade). Carregado sob demanda do Postgres (news_features) por unique_id via DataLoader; None quando não há features. Não onera listas/busca que não selecionam este campo.
+  """
+  features: ArticleFeatures
+}
+
+"""Date with time (isoformat)"""
+scalar DateTime
+
+type ArticleFeatures {
+  entities: [EntityType!]!
+  contentAnnotations: [ContentAnnotation!]!
+  viewCount: Int
+  uniqueSessions: Int
+  trendingScore: Float
+  wordCount: Int
+  readabilityFlesch: Float
+}
+
+type EntityType {
+  text: String!
+  type: String!
+  count: Int!
+  canonicalId: String
+  salience: Float
+}
+
+type ContentAnnotation {
+  start: Int!
+  end: Int!
+  type: String!
+  text: String!
+  canonicalId: String
+}
+
+input ArticleFilter {
+  agencies: [String!] = null
+  themes: [String!] = null
+  tags: [String!] = null
+  startDate: String = null
+  endDate: String = null
+  themeLabel: String = null
+  dedup: Boolean = null
+  entities: [String!] = null
+  sentiment: [String!] = null
+  entityCanonical: [String!] = null
+}
+
+enum ArticleSort {
+  RELEVANCE
+  DATE
+  TRENDING
+  VIEWS
+}
+
+type SearchSuggestion {
+  uniqueId: String!
+  title: String!
+}
+
+type Theme {
+  code: String!
+  label: String!
+}
+
+type Agency {
+  code: String!
+  label: String!
+
+  """True para agências republicadoras (EBC, Agência Brasil, TV Brasil)"""
+  isRepublisher: Boolean!
+}
+
+type Tag {
+  label: String!
+  count: Int!
+}
+
+"""Key performance indicators for article analytics"""
+type AnalyticsKpis {
+  total: Int!
+  activeThemes: Int!
+  activeAgencies: Int!
+  dailyAverage: Float!
+}
+
+"""Date range filter specified as number of days from today"""
+input DateRange {
+  days: Int!
+}
+
+"""Theme statistics with article count"""
+type ThemeStats {
+  label: String!
+  count: Int!
+}
+
+"""Agency statistics with article count"""
+type AgencyStats {
+  name: String!
+  count: Int!
+}
+
+"""Daily article count"""
+type DailyCount {
+  date: String!
+  count: Int!
+}
+
+type AgencyPeriodMetrics {
+  period: String!
+  agencyKey: String!
+  agencyName: String
+  articleCount: Int!
+
+  """
+  Média do score de sentimento (-1 a 1) dos artigos com score. Null quando nenhum tem.
+  """
+  avgSentimentScore: Float
+
+  """
+  Fração (0 a 1) dos artigos COM rótulo de sentimento que são positivos. Null se nenhum tem.
+  """
+  pctPositive: Float
+
+  """
+  Fração (0 a 1) dos artigos COM rótulo de sentimento que são negativos. Null se nenhum tem.
+  """
+  pctNegative: Float
+  avgReadabilityFlesch: Float
+  avgWordCount: Float
+  topThemes: [ThemeStats!]!
+}
+
+enum Granularity {
+  DAY
+  WEEK
+  MONTH
+}
+
+enum MetricType {
+  VOLUME
+  SENTIMENT
+  READABILITY
+  THEMES
+}
+
+type TrendingThemeResult {
+  themeLabel: String!
+  themeCode: String
+  windowCount: Int!
+  baselineDailyAvg: Float!
+  growthScore: Float!
+  topArticles: [ArticleSummary!]!
+}
+
+type ArticleSummary {
+  uniqueId: String!
+  title: String!
+  agencyName: String
+  publishedAt: String
+  trendingScore: Float
+}
+
+type Clipping {
+  id: String!
+  name: String!
+  description: String
+  recortes: [Recorte!]!
+  prompt: String
+  schedule: String!
+  scheduleTime: String
+  nextRunAt: DateTime
+  startDate: DateTime
+  endDate: DateTime
+  extraEmails: [String!]!
+  includeHistory: Boolean!
+  deliveryChannels: DeliveryChannels
+  active: Boolean!
+  createdAt: DateTime
+  updatedAt: DateTime
+  authorUserId: String
+  publishedToMarketplace: Boolean!
+  marketplaceListingId: String
+
+  """True se o usuário autenticado é o autor deste clipping."""
+  isAuthor: Boolean!
+
+  """
+  Subscription do usuário autenticado para este clipping (None se não inscrito).
+  """
+  mySubscription: UserSubscription
+
+  """
+  Entregas historicas (releases) deste clipping. Ordenadas por createdAt desc. Apenas autor ou subscriber podem ver.
+  """
+  releases(limit: Int! = 20, before: DateTime = null): [Release!]!
+}
+
+type Recorte {
+  id: String!
+  title: String!
+  themes: [String!]!
+  agencies: [String!]!
+  keywords: [String!]!
+}
+
+type DeliveryChannels {
+  email: Boolean!
+  telegram: Boolean!
+  push: Boolean!
+  webhook: Boolean!
+}
+
+type UserSubscription {
+  id: String!
+  clippingId: String!
+  userId: String!
+  role: SubscriptionRole!
+  deliveryChannels: DeliveryChannels!
+  extraEmails: [String!]!
+  webhookUrl: String
+  active: Boolean!
+  subscribedAt: DateTime
+}
+
+enum SubscriptionRole {
+  AUTHOR
+  SUBSCRIBER
+}
+
+type Release {
+  digestPreview: String
+  recortes: [Recorte!]!
+  marketplaceListingId: String
+  id: String!
+  clippingId: String!
+  clippingName: String!
+  digestHtml: String!
+  articlesCount: Int!
+  createdAt: DateTime
+  releaseUrl: String
+  refTime: DateTime
+  sinceHours: Int
+}
+
+type EstimateResult {
+  totalEstimate: Int!
+}
+
+type MarketplaceListingsResult {
+  listings: [MarketplaceListing!]!
+  total: Int!
+}
+
+type MarketplaceListing {
+  id: String!
+  authorUserId: String!
+  authorDisplayName: String!
+  sourceClippingId: String!
+  name: String!
+  description: String
+  recortes: [MarketplaceRecorte!]!
+  prompt: String
+  schedule: String
+  likeCount: Int!
+  followerCount: Int!
+  cloneCount: Int!
+  publishedAt: DateTime
+  updatedAt: DateTime
+  active: Boolean!
+  hasLiked: Boolean
+  hasFollowed: Boolean
+
+  """
+  Entregas historicas (releases) deste listing publico. Ordenadas por createdAt desc. Conteudo PUBLICO: nao exige autenticacao, pois um listing ativo ja e publico. Listing inativo/despublicado nunca expoe releases (retorna lista vazia).
+  """
+  releases(limit: Int! = 10, before: DateTime = null): [Release!]!
+}
+
+type MarketplaceRecorte {
+  id: String!
+  title: String!
+  themes: [String!]!
+  agencies: [String!]!
+  keywords: [String!]!
+}
+
+type FollowedListing {
+  id: String!
+  authorUserId: String!
+  authorDisplayName: String!
+  sourceClippingId: String!
+  name: String!
+  description: String
+  recortes: [MarketplaceRecorte!]!
+  prompt: String
+  schedule: String
+  likeCount: Int!
+  followerCount: Int!
+  cloneCount: Int!
+  publishedAt: DateTime
+  updatedAt: DateTime
+  active: Boolean!
+  deliveryChannels: DeliveryChannels
+  extraEmails: [String!]!
+  webhookUrl: String
+  followedAt: DateTime
+}
+
+type PushPreferences {
+  agencies: [String!]!
+}
+
+type PushFiltersData {
+  themes: [Theme!]!
+  agencies: [Agency!]!
+}
+
+type WidgetConfig {
+  agencies: [String!]!
+  themes: [String!]!
+}
+
+type WidgetArticlesResult {
+  articles: [Article!]!
+  pagination: WidgetPagination!
+}
+
+type WidgetPagination {
+  page: Int!
+  limit: Int!
+  total: Int!
+  hasMore: Boolean!
+}
+
+input WidgetConfigInput {
+  agencies: [String!]! = []
+  themes: [String!]! = []
+  layout: WidgetLayout! = LIST
+  articlesPerPage: Int! = 10
+}
+
+enum WidgetLayout {
+  LIST
+  GRID_2
+  GRID_3
+  CAROUSEL
+}
+
+type NewsRecordType {
+  uniqueId: String!
+  title: String!
+  url: String!
+  imageUrl: String
+  videoUrl: String
+  content: String
+  summary: String
+  subtitle: String
+  editorialLead: String
+  category: String
+  tags: [String!]!
+  agencyKey: String
+  agencyName: String
+  publishedAt: DateTime
+  extractedAt: DateTime
+  themeL1Code: String
+  themeL1Label: String
+  themeL2Code: String
+  themeL2Label: String
+  themeL3Code: String
+  themeL3Label: String
+  mostSpecificThemeCode: String
+  mostSpecificThemeLabel: String
+  features: JSON
+}
+
+"""
+The `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf).
+"""
+scalar JSON
+
+type TypesenseDocRecordType {
+  uniqueId: String!
+  title: String!
+  url: String!
+  imageUrl: String
+  videoUrl: String
+  content: String
+  summary: String
+  subtitle: String
+  editorialLead: String
+  category: String
+  tags: [String!]!
+  agencyKey: String
+  agencyName: String
+  publishedAt: DateTime
+  extractedAt: DateTime
+  themeL1Code: String
+  themeL1Label: String
+  themeL2Code: String
+  themeL2Label: String
+  themeL3Code: String
+  themeL3Label: String
+  mostSpecificThemeCode: String
+  mostSpecificThemeLabel: String
+  features: JSON
+  contentEmbedding: [Float!]
+  sentimentLabel: String
+  sentimentScore: Float
+  trendingScore: Float
+  wordCount: Int
+  hasImage: Boolean
+  hasVideo: Boolean
+  imageBroken: Boolean
+  readabilityFlesch: Float
+}
+
+type BigQueryRecordType {
+  uniqueId: String!
+  title: String!
+  url: String!
+  imageUrl: String
+  videoUrl: String
+  content: String
+  summary: String
+  subtitle: String
+  editorialLead: String
+  category: String
+  tags: [String!]!
+  agencyKey: String
+  agencyName: String
+  publishedAt: DateTime
+  extractedAt: DateTime
+  themeL1Code: String
+  themeL1Label: String
+  themeL2Code: String
+  themeL2Label: String
+  themeL3Code: String
+  themeL3Label: String
+  mostSpecificThemeCode: String
+  mostSpecificThemeLabel: String
+  features: JSON
+  sentimentLabel: String
+  sentimentScore: Float
+  trendingScore: Float
+  wordCount: Int
+  hasImage: Boolean
+  hasVideo: Boolean
+  imageBroken: Boolean
+  readabilityFlesch: Float
+}
+
+type SimilarArticleRecordType {
+  uniqueId: String!
+  similarity: Float!
+}
+
+type IntegrityCandidateType {
+  uniqueId: String!
+  url: String!
+  imageUrl: String
+  publishedAt: DateTime
+  integrity: JSON
+}
+
+type EntityFacet {
+  value: String!
+  count: Int!
+  entityId: String
+  label: String
+}
+
+type EntityNode {
+  entityId: String!
+  canonicalName: String
+  type: String
+  aliases: [String!]!
+  wikidataId: String
+  wikidataUrl: String
+  description: String
+  agencyKey: String
+}
+
+type RelatedEntity {
+  canonicalId: String!
+  canonicalName: String
+  type: String
+  wikidataId: String
+  weight: Int!
+  kind: String!
+}
+
+type EntityNetwork {
+  nodes: [EntityNetworkNode!]!
+  edges: [EntityNetworkEdge!]!
+}
+
+type EntityNetworkNode {
+  entityId: String!
+  canonicalName: String
+  type: String
+  wikidataId: String
+}
+
+type EntityNetworkEdge {
+  src: String!
+  dst: String!
+  weight: Int!
+  kind: String!
+}
+
+type ThemeCount {
+  code: String!
+  label: String
+  count: Int!
+}
+
+type EntityCoveragePoint {
+  period: String!
+  agencyKey: String!
+  agencyName: String
+  articleCount: Int!
+  totalMentions: Int!
+  avgSentimentScore: Float
+}
+
+type EntitySearchResult {
+  entityId: String!
+  canonicalName: String!
+  type: String!
+  description: String
+  wikidataUrl: String
+  agencyKey: String
+  aliases: [String!]!
+  articleCount: Int!
+  confidence: Float!
+  matchType: String!
+}
+
+enum EntityKind {
+  ORG
+  PER
+  LOC
+  EVENT
+  POLICY
+  LAW
+}
+
+type PolicyDetails {
+  domain: String
+  lifecyclePhase: String
+  enablingLaws: [String!]!
+  responsibleAgencies: [String!]!
+  targetPopulation: [String!]!
+  firstMentionedDate: String
+  wikidataId: String
+  instanceOf: String
+}
+
+type PolicyListItem {
+  entityId: String!
+  canonicalName: String!
+  domain: String
+  lifecyclePhase: String
+  wikidataId: String
+  aliases: [String!]!
+  articleCount: Int!
+}
+
+type TrendingEntityResult {
+  entityId: String!
+  canonicalName: String!
+  type: String!
+  trendingScore: Float!
+  volumeRatio: Float!
+  windowCount: Int!
+  windowAgencies: Int!
+  computedAt: String
+
+  """
+  Artigos da entidade na janela de baseline. Null em linha gravada antes da migração 029.
+  """
+  baselineCount: Int
+
+  """
+  Agências distintas na janela de baseline. Null em linha gravada antes da migração 029.
+  """
+  baselineAgencies: Int
+
+  """
+  True quando a entidade não aparece no baseline (baselineCount = 0). Null se o baseline é nulo.
+  """
+  isNew: Boolean
+}
+
+type Mutation {
+  """Cria um novo clipping"""
+  createClipping(input: ClippingInput!): Clipping!
+
+  """Atualiza um clipping existente"""
+  updateClipping(id: String!, input: ClippingInput!): Clipping!
+
+  """Liga/desliga um clipping (campo `active`; somente o autor)"""
+  setClippingActive(id: String!, active: Boolean!): Clipping!
+
+  """Deleta um clipping"""
+  deleteClipping(id: String!): Boolean!
+
+  """Envia um clipping manualmente"""
+  sendClipping(id: String!): Boolean!
+
+  """Inscreve o usuário autenticado em um clipping (role=subscriber)"""
+  subscribeToClipping(input: SubscribeInput!): UserSubscription!
+
+  """Remove a inscrição do usuário em um clipping"""
+  unsubscribeFromClipping(clippingId: String!): Boolean!
+
+  """Atualiza canais de entrega da inscrição do usuário"""
+  updateMySubscription(clippingId: String!, channels: DeliveryChannelsInput!, extraEmails: [String!] = null, webhookUrl: String = null): UserSubscription
+
+  """Publica um clipping no marketplace"""
+  publishToMarketplace(clippingId: String!, input: PublishInput!): MarketplaceListing!
+
+  """Remove um listing do marketplace (somente o dono)"""
+  unpublishFromMarketplace(listingId: String!): Boolean!
+
+  """Curte/descurte um listing do marketplace"""
+  likeMarketplaceListing(listingId: String!): Boolean!
+
+  """Segue/deixa de seguir um listing do marketplace"""
+  followMarketplaceListing(listingId: String!): Boolean! @deprecated(reason: "Use `subscribeToClipping(input)` passando `sourceClippingId` do listing. Esta mutation continua funcional para retro-compat e será removida em R1.")
+
+  """
+  Clona um listing do marketplace para os clippings do usuario. Retorna o Clipping recem-criado (gap-fix pre-rollout: era Boolean! antes; portal B3 precisa do `id` para redirecionar para /minha-conta/clipping/[id]).
+  """
+  cloneMarketplaceListing(listingId: String!): Clipping!
+
+  """Sync a push notification subscription"""
+  syncPushSubscription(subscription: PushSubscriptionInput!): Boolean!
+
+  """Update push notification preferences"""
+  updatePushPreferences(preferences: PushPreferencesInput!): Boolean!
+
+  """Upsert features for a news item (merges JSONB)"""
+  upsertFeatures(uniqueId: String!, features: JSON!): Boolean!
+
+  """Batch upsert features for multiple news items"""
+  batchUpsertFeatures(items: [FeatureUpsertInput!]!): BatchResult!
+
+  """Update a single field in a Typesense document"""
+  updateTypesenseField(uniqueId: String!, field: String!, value: JSON!): Boolean!
+}
+
+input ClippingInput {
+  name: String!
+  schedule: String!
+  description: String = null
+  recortes: [RecorteInput!]! = []
+  prompt: String = null
+  scheduleTime: String = null
+  startDate: DateTime = null
+  endDate: DateTime = null
+  extraEmails: [String!] = null
+  includeHistory: Boolean = null
+  deliveryChannels: DeliveryChannelsInput = null
+}
+
+input RecorteInput {
+  title: String!
+  themes: [String!]! = []
+  agencies: [String!]! = []
+  keywords: [String!]! = []
+}
+
+input DeliveryChannelsInput {
+  email: Boolean! = false
+  telegram: Boolean! = false
+  push: Boolean! = false
+  webhook: Boolean! = false
+}
+
+input SubscribeInput {
+  clippingId: String!
+  deliveryChannels: DeliveryChannelsInput!
+  extraEmails: [String!] = null
+  webhookUrl: String = null
+}
+
+input PublishInput {
+  name: String!
+  description: String = null
+}
+
+input PushSubscriptionInput {
+  endpoint: String!
+  keysP256dh: String!
+  keysAuth: String!
+}
+
+input PushPreferencesInput {
+  agencies: [String!]! = []
+  themes: [String!]! = []
+  enabled: Boolean! = true
+}
+
+type BatchResult {
+  processed: Int!
+  failed: Int!
+}
+
+input FeatureUpsertInput {
+  uniqueId: String!
+  features: JSON!
+}
+
+type Subscription {
+  """
+  Gera recortes em tempo real via agente LLM. Passthrough do SSE do worker clipping. Requer autenticacao.
+  """
+  generateRecortes(prompt: String!): AgentEvent!
+}
+
+union AgentEvent = AgentEventThinking | AgentEventToolCall | AgentEventToolResult | AgentEventSampleResult | AgentEventAdjusting | AgentEventDone | AgentEventError
+
+type AgentEventThinking {
+  message: String!
+}
+
+type AgentEventToolCall {
+  tool: String!
+  argsJson: String!
+}
+
+type AgentEventToolResult {
+  tool: String!
+  resultJson: String!
+}
+
+type AgentEventSampleResult {
+  payloadJson: String!
+}
+
+type AgentEventAdjusting {
+  message: String!
+}
+
+type AgentEventDone {
+  recortes: [Recorte!]!
+  explanation: String!
+  description: String!
+  suggestedName: String!
+  iterations: Int!
+  converged: Boolean!
+}
+
+type AgentEventError {
+  message: String!
+}

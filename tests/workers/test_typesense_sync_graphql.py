@@ -36,12 +36,12 @@ SAMPLE_GRAPHQL_RESPONSE = {
     "agencyName": "Ministério da Saúde",
     "publishedAt": "2025-06-15T10:30:00+00:00",
     "extractedAt": "2025-06-15T12:00:00+00:00",
-    "themL1Code": "SAUDE",
-    "themL1Label": "Saúde",
-    "themL2Code": "SAUDE_PUBLICA",
-    "themL2Label": "Saúde Pública",
-    "themL3Code": None,
-    "themL3Label": None,
+    "themeL1Code": "SAUDE",
+    "themeL1Label": "Saúde",
+    "themeL2Code": "SAUDE_PUBLICA",
+    "themeL2Label": "Saúde Pública",
+    "themeL3Code": None,
+    "themeL3Label": None,
     "mostSpecificThemeCode": "SAUDE_PUBLICA",
     "mostSpecificThemeLabel": "Saúde Pública",
     "contentEmbedding": [0.1, 0.2, 0.3],
@@ -96,7 +96,7 @@ class TestMapGraphqlRow:
 
     def test_none_values_omitted(self):
         mapped = _map_graphql_row(SAMPLE_GRAPHQL_RESPONSE)
-        # videoUrl and themL3Code are None in the fixture
+        # videoUrl and themeL3Code are None in the fixture
         assert "video_url" not in mapped
         assert "theme_1_level_3_code" not in mapped
 
@@ -123,6 +123,18 @@ class TestMapGraphqlRow:
         """The raw `features` blob is not forwarded to prepare_document."""
         mapped = _map_graphql_row(SAMPLE_GRAPHQL_RESPONSE)
         assert "features" not in mapped
+
+    def test_features_como_string_json(self):
+        """`features` como str JSON (asyncpg sem codec de JSONB) ainda entrega entities."""
+        import json
+
+        row = {
+            **SAMPLE_GRAPHQL_RESPONSE,
+            "features": json.dumps(SAMPLE_GRAPHQL_RESPONSE["features"]),
+        }
+        mapped = _map_graphql_row(row)
+        assert mapped["entities"] == SAMPLE_GRAPHQL_RESPONSE["features"]["entities"]
+        assert mapped["view_count"] == 1234
 
     def test_missing_features_is_safe(self):
         """A response with no `features` key omits entities/view_count."""

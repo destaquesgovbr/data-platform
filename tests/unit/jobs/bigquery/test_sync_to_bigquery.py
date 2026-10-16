@@ -1,5 +1,6 @@
 """Unit tests for BigQuery sync DAG and job module."""
 
+from datetime import UTC
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -84,15 +85,11 @@ class TestSchemaConsistency:
     """Ensure BigQuery schema in code stays in sync with create_tables.sql."""
 
     def test_load_schema_matches_create_tables_ddl(self):
-        """LoadJobConfig schema fields must match fato_noticias DDL columns."""
-        import inspect
+        """FATO_NOTICIAS_SCHEMA (nomes, tipos e NOT NULL) must match fato_noticias DDL."""
         import re
         from pathlib import Path
 
-        from data_platform.jobs.bigquery.sync_to_bigquery import load_parquet_to_bigquery
-
-        source = inspect.getsource(load_parquet_to_bigquery)
-        code_columns = re.findall(r'SchemaField\("(\w+)"', source)
+        from data_platform.jobs.bigquery.sync_to_bigquery import FATO_NOTICIAS_SCHEMA
 
         ddl_path = Path(__file__).parents[4] / "scripts" / "bigquery" / "create_tables.sql"
         ddl_text = ddl_path.read_text()
@@ -102,22 +99,28 @@ class TestSchemaConsistency:
             re.DOTALL | re.IGNORECASE,
         )
         assert match, "Could not parse fato_noticias from create_tables.sql"
-        ddl_columns = re.findall(r"^\s*(\w+)\s+\w+", match.group(1), re.MULTILINE)
+        ddl = re.findall(r"^\s*(\w+)\s+(\w+)(\s+NOT NULL)?", match.group(1), re.MULTILINE)
 
-        assert code_columns == ddl_columns, (
-            f"Schema mismatch between code and DDL!\n"
-            f"Code ({len(code_columns)}): {code_columns}\n"
-            f"DDL  ({len(ddl_columns)}): {ddl_columns}"
-        )
+        legacy_to_standard = {
+            "STRING": "STRING",
+            "INTEGER": "INT64",
+            "FLOAT": "FLOAT64",
+            "BOOLEAN": "BOOL",
+            "TIMESTAMP": "TIMESTAMP",
+        }
+        code = [
+            (name, legacy_to_standard[bq_type], " NOT NULL" if mode == "REQUIRED" else "")
+            for name, bq_type, mode in FATO_NOTICIAS_SCHEMA
+        ]
+        assert code == ddl, f"Schema mismatch between code and DDL!\nCode: {code}\nDDL:  {ddl}"
 
     def test_sync_query_columns_match_load_schema(self):
-        """SYNC_QUERY SELECT aliases must match LoadJobConfig schema fields."""
-        import inspect
+        """SYNC_QUERY SELECT aliases must match FATO_NOTICIAS_SCHEMA."""
         import re
 
         from data_platform.jobs.bigquery.sync_to_bigquery import (
+            FATO_NOTICIAS_SCHEMA,
             SYNC_QUERY,
-            load_parquet_to_bigquery,
         )
 
         select_match = re.search(r"SELECT\s+(.*?)\s+FROM\s+news", SYNC_QUERY, re.DOTALL)
@@ -135,14 +138,30 @@ class TestSchemaConsistency:
                 if col_match:
                     query_columns.append(col_match.group(1))
 
-        source = inspect.getsource(load_parquet_to_bigquery)
-        schema_columns = re.findall(r'SchemaField\("(\w+)"', source)
+        schema_columns = [name for name, _, _ in FATO_NOTICIAS_SCHEMA]
 
         assert query_columns == schema_columns, (
-            f"SYNC_QUERY columns don't match LoadJobConfig schema!\n"
+            f"SYNC_QUERY columns don't match FATO_NOTICIAS_SCHEMA!\n"
             f"Query  ({len(query_columns)}): {query_columns}\n"
             f"Schema ({len(schema_columns)}): {schema_columns}"
         )
+
+    @patch("google.cloud.bigquery.Client")
+    def test_load_job_usa_o_schema_unico(self, mock_client_cls):
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            FATO_NOTICIAS_SCHEMA,
+            load_parquet_to_bigquery,
+        )
+
+        mock_client = mock_client_cls.return_value
+        mock_client.load_table_from_uri.return_value.output_rows = 3
+
+        rows = load_parquet_to_bigquery("gs://b/silver/analytics/2026-10-05.parquet", "proj")
+
+        job_config = mock_client.load_table_from_uri.call_args[1]["job_config"]
+        loaded = [(f.name, f.field_type, f.mode) for f in job_config.schema]
+        assert loaded == list(FATO_NOTICIAS_SCHEMA)
+        assert rows == 3
 
 
 class TestDagStructure:
@@ -193,3 +212,363 @@ class TestDagStructure:
 
         for task in dag_instance.tasks:
             assert len(task.upstream_list) == 0
+
+
+# =============================================================================
+# Caminho GraphQL (newsBatchForBigquery), inerte enquanto GRAPHQL_API_URL faltar
+# =============================================================================
+
+# Colunas do SYNC_QUERY (caminho PG), na ordem do schema de load.
+_FATO_COLUMNS = [
+    "unique_id",
+    "title",
+    "url",
+    "content_hash",
+    "agency_key",
+    "agency_name",
+    "theme_l1_code",
+    "theme_l1_label",
+    "theme_l2_code",
+    "theme_l2_label",
+    "most_specific_theme_code",
+    "most_specific_theme_label",
+    "published_at",
+    "extracted_at",
+    "synced_at",
+    "word_count",
+    "char_count",
+    "paragraph_count",
+    "has_image",
+    "has_video",
+    "sentiment_score",
+    "sentiment_label",
+    "publication_hour",
+    "publication_dow",
+    "readability_flesch",
+]
+
+
+def _bq_record(unique_id: str = "mec-1", **overrides) -> dict:
+    """Item de newsBatchForBigquery com os campos que existem em BigQueryRecordType."""
+    record = {
+        "uniqueId": unique_id,
+        "title": f"Título {unique_id}",
+        "url": f"https://gov.br/{unique_id}",
+        "agencyKey": "mec",
+        "agencyName": "Ministério da Educação",
+        "publishedAt": "2025-06-01T10:00:00+00:00",
+        "extractedAt": "2025-06-01T11:00:00+00:00",
+        "themeL1Code": "06",
+        "themeL1Label": "Educação",
+        "themeL2Code": "06.01",
+        "themeL2Label": "Ensino Superior",
+        "mostSpecificThemeCode": "06.01",
+        "mostSpecificThemeLabel": "Ensino Superior",
+        "wordCount": 300,
+        "hasImage": True,
+        "hasVideo": False,
+        "sentimentLabel": "positive",
+        "sentimentScore": 0.8,
+        "readabilityFlesch": 35.5,
+        "features": {
+            "word_count": 300,
+            "char_count": 1500,
+            "paragraph_count": 5,
+            "publication_hour": 10,
+            "publication_dow": 6,
+            "has_image": True,
+        },
+    }
+    record.update(overrides)
+    return record
+
+
+class TestFetchNewsForBigqueryViaGraphql:
+    def test_le_o_campo_newsBatchForBigquery(self):
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {"newsBatchForBigquery": [_bq_record("a"), _bq_record("b")]}
+
+        df = fetch_news_for_bigquery_via_graphql(gql, "2025-06-01", "2025-06-02")
+
+        assert list(df["unique_id"]) == ["a", "b"]
+
+    def test_datas_enviadas_como_string(self):
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {"newsBatchForBigquery": []}
+
+        fetch_news_for_bigquery_via_graphql(gql, "2025-06-01", "2025-06-02")
+
+        variables = gql.query.call_args[0][1]
+        assert variables["startDate"] == "2025-06-01"
+        assert variables["endDate"] == "2025-06-02"
+
+    def test_mapeia_themeL(self):
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {"newsBatchForBigquery": [_bq_record()]}
+
+        row = fetch_news_for_bigquery_via_graphql(gql, "2025-06-01", "2025-06-02").iloc[0]
+
+        assert row["theme_l1_code"] == "06"
+        assert row["theme_l1_label"] == "Educação"
+        assert row["theme_l2_code"] == "06.01"
+        assert row["theme_l2_label"] == "Ensino Superior"
+        assert row["most_specific_theme_code"] == "06.01"
+
+    def test_campos_ausentes_no_schema_saem_de_features(self):
+        """charCount/paragraphCount/publicationHour/publicationDow não existem no SDL."""
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {"newsBatchForBigquery": [_bq_record()]}
+
+        row = fetch_news_for_bigquery_via_graphql(gql, "2025-06-01", "2025-06-02").iloc[0]
+
+        assert row["char_count"] == 1500
+        assert row["paragraph_count"] == 5
+        assert row["publication_hour"] == 10
+        assert row["publication_dow"] == 6
+        assert row["word_count"] == 300
+        assert row["readability_flesch"] == 35.5
+
+    def test_features_nulo_vira_colunas_nulas(self):
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {"newsBatchForBigquery": [_bq_record(features=None)]}
+
+        row = fetch_news_for_bigquery_via_graphql(gql, "2025-06-01", "2025-06-02").iloc[0]
+
+        assert pd.isna(row["char_count"])
+        assert pd.isna(row["publication_hour"])
+
+    def test_mesmas_colunas_do_caminho_pg(self):
+        """Mesmo shape do SYNC_QUERY: o parquet carrega no mesmo schema (synced_at é REQUIRED)."""
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {"newsBatchForBigquery": [_bq_record()]}
+
+        df = fetch_news_for_bigquery_via_graphql(gql, "2025-06-01", "2025-06-02")
+
+        assert list(df.columns) == _FATO_COLUMNS
+        assert df.iloc[0]["synced_at"] is not None
+        assert pd.isna(df.iloc[0]["content_hash"])  # não exposto em BigQueryRecordType
+        assert df.iloc[0]["extracted_at"] == "2025-06-01T11:00:00+00:00"
+
+
+# =============================================================================
+# Parquet com os tipos do schema de load (incidente has_image INT32, out/2026)
+# =============================================================================
+#
+# O sync_facts falhou >=30 dias com "Parquet column 'has_image' has type INT32
+# which does not match the target cpp_type BOOL": sem features desde ~26/05, a
+# coluna veio inteira NULL do read_sql (dtype object) e o pyarrow a gravou como
+# tipo null (INT32 físico).
+
+
+def _pg_like_frame(n: int = 2, **columns) -> pd.DataFrame:
+    """DataFrame como o read_sql devolve: colunas object com None onde não há dado."""
+    from datetime import UTC, datetime
+
+    base = {name: [None] * n for name in _FATO_COLUMNS}
+    base["unique_id"] = [f"mec-{i}" for i in range(n)]
+    base["published_at"] = [datetime(2026, 10, 5, 12, 0, tzinfo=UTC)] * n
+    base["synced_at"] = [datetime(2026, 10, 6, 7, 0, tzinfo=UTC)] * n
+    base.update(columns)
+    return pd.DataFrame(base).astype(object)
+
+
+def _write_and_capture(df: pd.DataFrame):
+    """Roda write_to_parquet_gcs com o GCS mockado e devolve o ParquetFile gravado."""
+    import io
+
+    import pyarrow.parquet as pq
+
+    from data_platform.jobs.bigquery.sync_to_bigquery import write_to_parquet_gcs
+
+    captured: dict = {}
+
+    def _upload(path):
+        with open(path, "rb") as fh:
+            captured["bytes"] = fh.read()
+
+    with patch("google.cloud.storage.Client") as mock_client:
+        blob = mock_client.return_value.bucket.return_value.blob.return_value
+        blob.upload_from_filename.side_effect = _upload
+        uri = write_to_parquet_gcs(df, "bucket-x", "2026-10-05")
+
+    assert uri == "gs://bucket-x/silver/analytics/2026-10-05.parquet"
+    return pq.ParquetFile(io.BytesIO(captured["bytes"]))
+
+
+class TestParquetDtypes:
+    def test_coluna_bool_toda_nula_sai_como_boolean(self):
+        parquet = _write_and_capture(_pg_like_frame())
+
+        physical = {c.name: c.physical_type for c in parquet.schema}
+        assert physical["has_image"] == "BOOLEAN"
+        assert physical["has_video"] == "BOOLEAN"
+
+    def test_todas_as_colunas_seguem_o_schema_de_load_mesmo_todo_nulas(self):
+        import pyarrow as pa
+
+        from data_platform.jobs.bigquery.sync_to_bigquery import FATO_NOTICIAS_SCHEMA
+
+        arrow = _write_and_capture(_pg_like_frame()).schema_arrow
+
+        expected = {
+            "STRING": pa.string(),
+            "INTEGER": pa.int64(),
+            "FLOAT": pa.float64(),
+            "BOOLEAN": pa.bool_(),
+            "TIMESTAMP": pa.timestamp("us", tz="UTC"),
+        }
+        assert arrow.names == [name for name, _, _ in FATO_NOTICIAS_SCHEMA]
+        for name, bq_type, _ in FATO_NOTICIAS_SCHEMA:
+            assert arrow.field(name).type == expected[bq_type], name
+
+    def test_valores_preservados(self):
+        import math
+        from datetime import UTC, datetime
+
+        df = _pg_like_frame(
+            n=3,
+            title=["a", None, "c"],
+            word_count=[300, None, 5],
+            has_image=[True, None, False],
+            sentiment_score=[0.25, None, -0.5],
+            readability_flesch=[None, None, 33.5],
+            extracted_at=[datetime(2026, 10, 5, 13, 0, tzinfo=UTC), None, None],
+        )
+
+        table = _write_and_capture(df).read()
+
+        assert table.column("title").to_pylist() == ["a", None, "c"]
+        assert table.column("word_count").to_pylist() == [300, None, 5]
+        assert table.column("has_image").to_pylist() == [True, None, False]
+        assert table.column("sentiment_score").to_pylist() == [0.25, None, -0.5]
+        assert table.column("readability_flesch").to_pylist() == [None, None, 33.5]
+        assert table.column("extracted_at").to_pylist()[0] == datetime(
+            2026, 10, 5, 13, 0, tzinfo=UTC
+        )
+        assert not any(
+            isinstance(v, float) and math.isnan(v)
+            for v in table.column("sentiment_score").to_pylist()
+        )
+
+    def test_float_com_nan_vira_int64_nulavel(self):
+        """read_sql devolve float64 com NaN quando a coluna inteira tem nulos parciais."""
+        df = _pg_like_frame(n=2)
+        df["word_count"] = pd.Series([300.0, float("nan")])
+
+        table = _write_and_capture(df).read()
+
+        assert table.column("word_count").to_pylist() == [300, None]
+
+    def test_coerce_devolve_dtypes_nulaveis_do_pandas(self):
+        from data_platform.jobs.bigquery.sync_to_bigquery import coerce_to_load_schema
+
+        out = coerce_to_load_schema(_pg_like_frame())
+
+        assert str(out["has_image"].dtype) == "boolean"
+        assert str(out["word_count"].dtype) == "Int64"
+        assert str(out["sentiment_score"].dtype) == "Float64"
+        assert str(out["title"].dtype) == "string"
+        assert str(out["published_at"].dtype) == "datetime64[ns, UTC]"
+
+    def test_coluna_faltando_falha_cedo(self):
+        from data_platform.jobs.bigquery.sync_to_bigquery import coerce_to_load_schema
+
+        with pytest.raises(ValueError, match="has_image"):
+            coerce_to_load_schema(_pg_like_frame().drop(columns=["has_image"]))
+
+    def test_caminho_graphql_gera_parquet_no_schema(self):
+        """Datas ISO (str) do GraphQL viram TIMESTAMP; features ausentes, nulos tipados."""
+        import pyarrow as pa
+
+        from data_platform.jobs.bigquery.sync_to_bigquery import (
+            fetch_news_for_bigquery_via_graphql,
+        )
+
+        gql = MagicMock()
+        gql.query.return_value = {
+            "newsBatchForBigquery": [_bq_record("a", features=None, hasImage=None, hasVideo=None)]
+        }
+        df = fetch_news_for_bigquery_via_graphql(gql, "2026-10-05", "2026-10-06")
+
+        arrow = _write_and_capture(df).schema_arrow
+
+        assert arrow.field("published_at").type == pa.timestamp("us", tz="UTC")
+        assert arrow.field("synced_at").type == pa.timestamp("us", tz="UTC")
+        assert arrow.field("has_image").type == pa.bool_()
+        assert arrow.field("char_count").type == pa.int64()
+
+    def test_datas_iso_com_e_sem_microssegundos(self):
+        """O DateTime do GraphQL sai com isoformat(): microssegundos só quando != 0."""
+        from datetime import UTC, datetime
+
+        from data_platform.jobs.bigquery.sync_to_bigquery import coerce_to_load_schema
+
+        df = _pg_like_frame(
+            n=2,
+            published_at=["2026-10-05T12:00:00+00:00", "2026-10-05T12:00:00.250000-03:00"],
+        )
+
+        out = coerce_to_load_schema(df)
+
+        assert out["published_at"].tolist() == [
+            datetime(2026, 10, 5, 12, 0, tzinfo=UTC),
+            datetime(2026, 10, 5, 15, 0, 0, 250000, tzinfo=UTC),
+        ]
+
+
+class TestPreviousDayWindow:
+    """A execução diária carrega só o dia anterior ao logical_date (janela de 1 dia)."""
+
+    def test_janela_e_so_o_dia_anterior(self):
+        from datetime import datetime, timezone
+
+        from data_platform.jobs.bigquery.sync_to_bigquery import previous_day_window
+
+        start, end = previous_day_window(datetime(2026, 10, 6, 10, 0, tzinfo=UTC))
+        # fetch_news_for_bigquery trata end como inclusivo (< end + 1 dia):
+        # passar end == start dá exatamente [2026-10-05, 2026-10-06)
+        assert (start, end) == ("2026-10-05", "2026-10-05")
+
+    def test_execucoes_consecutivas_nao_se_sobrepoem(self):
+        from datetime import datetime, timedelta, timezone
+
+        from data_platform.jobs.bigquery.sync_to_bigquery import previous_day_window
+
+        d = datetime(2026, 10, 6, 10, 0, tzinfo=UTC)
+        dias = [previous_day_window(d + timedelta(days=i))[0] for i in range(3)]
+        assert dias == ["2026-10-05", "2026-10-06", "2026-10-07"]
+        for i in range(3):
+            s, e = previous_day_window(d + timedelta(days=i))
+            assert s == e
+
+    def test_dag_usa_previous_day_window(self):
+        from pathlib import Path
+
+        src = Path(__file__).resolve().parents[4] / "src/data_platform/dags/sync_pg_to_bigquery.py"
+        code = src.read_text()
+        assert "previous_day_window(" in code
+        assert 'end_date = logical_date.strftime("%Y-%m-%d")' not in code

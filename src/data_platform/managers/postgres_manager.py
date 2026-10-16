@@ -30,6 +30,23 @@ class PostgresManager:
     - Batch insert/update operations
     """
 
+    # Colunas gravadas pelo enrichment-worker (resumo e temas), não por quem insere.
+    # No ON CONFLICT do insert(allow_update=True) usam COALESCE: o NULL do chamador
+    # não apaga o valor gravado; um valor não nulo explícito prevalece (scraper#64).
+    _ENRICHED_COLUMNS = frozenset(
+        {
+            "summary",
+            "theme_l1_id",
+            "theme_l2_id",
+            "theme_l3_id",
+            "most_specific_theme_id",
+        }
+    )
+
+    # Colunas que chegam vazias ('' ou NULL) e um worker downstream preenche:
+    # image_url recebe a miniatura do thumbnail-worker em vídeos sem imagem.
+    _DOWNSTREAM_FILLED_COLUMNS = frozenset({"image_url"})
+
     def __init__(
         self,
         connection_string: str | None = None,
@@ -242,7 +259,9 @@ class PostgresManager:
 
         Args:
             news: List of news to insert
-            allow_update: If True, update existing records (ON CONFLICT UPDATE)
+            allow_update: If True, update existing records (ON CONFLICT UPDATE).
+                Resumo, temas e image_url preenchidos downstream não são apagados
+                por NULL (ou '' no caso de image_url); ver _on_conflict_assignment.
 
         Returns:
             Number of records inserted/updated
@@ -327,7 +346,7 @@ class PostgresManager:
                 update_cols = [
                     c for c in columns if c not in ["unique_id", "agency_id", "published_at"]
                 ]
-                update_set = ", ".join([f"{c} = EXCLUDED.{c}" for c in update_cols])
+                update_set = ", ".join(self._on_conflict_assignment(c) for c in update_cols)
                 insert_query += f"""
                     ON CONFLICT (unique_id)
                     DO UPDATE SET {update_set}, updated_at = NOW()
@@ -352,6 +371,14 @@ class PostgresManager:
         finally:
             cursor.close()
             self.put_connection(conn)
+
+    def _on_conflict_assignment(self, column: str) -> str:
+        """SET de uma coluna no ON CONFLICT (unique_id) DO UPDATE do allow_update=True."""
+        if column in self._ENRICHED_COLUMNS:
+            return f"{column} = COALESCE(EXCLUDED.{column}, news.{column})"
+        if column in self._DOWNSTREAM_FILLED_COLUMNS:
+            return f"{column} = COALESCE(NULLIF(EXCLUDED.{column}, ''), news.{column})"
+        return f"{column} = EXCLUDED.{column}"
 
     def update(self, unique_id: str, updates: dict[str, Any]) -> bool:
         """

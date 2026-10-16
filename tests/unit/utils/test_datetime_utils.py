@@ -291,3 +291,43 @@ class TestHelperFunctions:
         assert len(today) == 10
         assert today[4] == "-"
         assert today[7] == "-"
+
+
+class TestParseIsoDatetime:
+    """parse_iso_datetime: DateTime do GraphQL (str ISO) → datetime em UTC."""
+
+    def test_sufixo_z(self):
+        from data_platform.utils.datetime_utils import parse_iso_datetime
+
+        assert parse_iso_datetime("2024-06-17T14:30:00Z") == datetime(
+            2024, 6, 17, 14, 30, tzinfo=UTC
+        )
+
+    def test_offset_convertido_para_utc(self):
+        from data_platform.utils.datetime_utils import parse_iso_datetime
+
+        result = parse_iso_datetime("2024-06-17T11:30:00.123456-03:00")
+        assert result == datetime(2024, 6, 17, 14, 30, 0, 123456, tzinfo=UTC)
+        assert result.utcoffset().total_seconds() == 0
+
+    def test_datetime_passa_e_normaliza(self):
+        from datetime import timedelta, timezone
+
+        from data_platform.utils.datetime_utils import parse_iso_datetime
+
+        brt = timezone(timedelta(hours=-3))
+        assert parse_iso_datetime(datetime(2024, 6, 17, 11, 30, tzinfo=brt)) == datetime(
+            2024, 6, 17, 14, 30, tzinfo=UTC
+        )
+
+    def test_naive_mantido(self):
+        from data_platform.utils.datetime_utils import parse_iso_datetime
+
+        assert parse_iso_datetime("2024-06-17T14:30:00") == datetime(2024, 6, 17, 14, 30)
+
+    def test_vazio_ou_invalido_vira_none(self):
+        from data_platform.utils.datetime_utils import parse_iso_datetime
+
+        assert parse_iso_datetime(None) is None
+        assert parse_iso_datetime("") is None
+        assert parse_iso_datetime("ontem") is None

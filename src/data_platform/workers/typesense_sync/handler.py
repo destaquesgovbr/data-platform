@@ -12,7 +12,11 @@ from datetime import UTC
 import pandas as pd
 from loguru import logger
 
-from data_platform.clients.graphql_client import NEWS_FOR_TYPESENSE_QUERY, GraphQLClient
+from data_platform.clients.graphql_client import (
+    NEWS_FOR_TYPESENSE_QUERY,
+    GraphQLClient,
+    coerce_json_object,
+)
 from data_platform.managers.postgres_manager import PostgresManager
 from data_platform.typesense.client import get_client
 from data_platform.typesense.collection import COLLECTION_NAME, create_collection
@@ -21,6 +25,7 @@ from data_platform.utils.datetime_utils import calculate_published_week
 
 # Mapping from GraphQL camelCase field names to snake_case names expected by prepare_document.
 # The left side is the GraphQL response key; the right side is the dict key for prepare_document.
+# Toda chave precisa estar selecionada em NEWS_FOR_TYPESENSE_QUERY (teste de contrato).
 _GRAPHQL_TO_SNAKE: dict[str, str] = {
     "uniqueId": "unique_id",
     "title": "title",
@@ -37,12 +42,12 @@ _GRAPHQL_TO_SNAKE: dict[str, str] = {
     "agencyName": "agency_name",
     "publishedAt": "published_at",
     "extractedAt": "extracted_at",
-    "themL1Code": "theme_1_level_1_code",
-    "themL1Label": "theme_1_level_1_label",
-    "themL2Code": "theme_1_level_2_code",
-    "themL2Label": "theme_1_level_2_label",
-    "themL3Code": "theme_1_level_3_code",
-    "themL3Label": "theme_1_level_3_label",
+    "themeL1Code": "theme_1_level_1_code",
+    "themeL1Label": "theme_1_level_1_label",
+    "themeL2Code": "theme_1_level_2_code",
+    "themeL2Label": "theme_1_level_2_label",
+    "themeL3Code": "theme_1_level_3_code",
+    "themeL3Label": "theme_1_level_3_label",
     "mostSpecificThemeCode": "most_specific_theme_code",
     "mostSpecificThemeLabel": "most_specific_theme_label",
     "contentEmbedding": "content_embedding",
@@ -88,13 +93,13 @@ def _map_graphql_row(gql_row: dict) -> dict:
             mapped[snake_key] = gql_row[gql_key]
 
     # Extrai entidades e view_count do JSON `features` (não expostos como campos
-    # escalares pelo schema graphql; chegam dentro do blob `features`).
-    features = gql_row.get("features")
-    if isinstance(features, dict):
-        for key in _FEATURES_PASSTHROUGH:
-            value = features.get(key)
-            if value is not None:
-                mapped[key] = value
+    # escalares pelo schema graphql; chegam dentro do blob `features`). O blob pode
+    # vir como str JSON (asyncpg sem codec de JSONB na API).
+    features = coerce_json_object(gql_row.get("features"))
+    for key in _FEATURES_PASSTHROUGH:
+        value = features.get(key)
+        if value is not None:
+            mapped[key] = value
 
     # Convert ISO datetime strings to epoch timestamps (prepare_document expects these)
     if "published_at" in mapped:

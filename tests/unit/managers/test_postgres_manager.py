@@ -726,3 +726,81 @@ class TestCount:
         pg.count()
 
         pg.pool.putconn.assert_called_once_with(mock_conn)
+
+
+# ---------------------------------------------------------------------------
+# insert(allow_update=True): colunas preenchidas downstream (mesma classe do
+# bug do scraper#64: o re-insert com NULL apagava resumo, temas e imagem)
+# ---------------------------------------------------------------------------
+
+
+class TestInsertAllowUpdate:
+    DOWNSTREAM = (
+        "summary",
+        "theme_l1_id",
+        "theme_l2_id",
+        "theme_l3_id",
+        "most_specific_theme_id",
+    )
+
+    def _insert_sql(self, pg, mock_conn, allow_update: bool) -> str:
+        news = [
+            NewsInsert(
+                unique_id="mec-1",
+                agency_id=1,
+                title="Título",
+                published_at=datetime(2026, 10, 5, 12, 0),
+            )
+        ]
+        with patch("data_platform.managers.postgres_manager.execute_values") as mock_exec:
+            pg.insert(news, allow_update=allow_update)
+        return " ".join(mock_exec.call_args[0][1].split())
+
+    @staticmethod
+    def _set_clause(sql: str) -> dict[str, str]:
+        """{coluna: expressão} do DO UPDATE SET."""
+        set_part = sql.split("DO UPDATE SET", 1)[1]
+        assignments: dict[str, str] = {}
+        depth = 0
+        current = ""
+        for ch in set_part:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            if ch == "," and depth == 0:
+                col, expr = current.split("=", 1)
+                assignments[col.strip()] = expr.strip()
+                current = ""
+            else:
+                current += ch
+        col, expr = current.split("=", 1)
+        assignments[col.strip()] = expr.strip()
+        return assignments
+
+    @pytest.mark.parametrize("column", DOWNSTREAM)
+    def test_coluna_do_enriquecimento_usa_coalesce(self, pg, mock_conn, column):
+        assignments = self._set_clause(self._insert_sql(pg, mock_conn, allow_update=True))
+        assert assignments[column] == f"COALESCE(EXCLUDED.{column}, news.{column})"
+
+    def test_image_url_vazia_ou_nula_nao_apaga(self, pg, mock_conn):
+        """O thumbnail-worker preenche image_url; '' ou NULL do re-insert não apaga."""
+        assignments = self._set_clause(self._insert_sql(pg, mock_conn, allow_update=True))
+        assert (
+            assignments["image_url"] == "COALESCE(NULLIF(EXCLUDED.image_url, ''), news.image_url)"
+        )
+
+    def test_demais_colunas_sobrescrevem(self, pg, mock_conn):
+        assignments = self._set_clause(self._insert_sql(pg, mock_conn, allow_update=True))
+        for column in ("title", "url", "content", "tags", "extracted_at", "agency_key"):
+            assert assignments[column] == f"EXCLUDED.{column}", column
+        assert assignments["updated_at"] == "NOW()"
+
+    def test_chave_agencia_e_publicacao_nao_sao_atualizadas(self, pg, mock_conn):
+        assignments = self._set_clause(self._insert_sql(pg, mock_conn, allow_update=True))
+        assert not {"unique_id", "agency_id", "published_at"} & set(assignments)
+
+    def test_sem_allow_update_nao_atualiza(self, pg, mock_conn):
+        sql = self._insert_sql(pg, mock_conn, allow_update=False)
+        assert "ON CONFLICT (unique_id) DO NOTHING" in sql
+        assert "DO UPDATE" not in sql
