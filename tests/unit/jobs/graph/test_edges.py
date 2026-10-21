@@ -4,6 +4,7 @@ Sem banco real: validamos os invariantes do SQL (threshold, ordem canonica, filt
 canonical_id nulo) e a orquestracao das funcoes via um cursor mockado.
 """
 
+import inspect
 import re
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +12,7 @@ import pytest
 
 from data_platform.jobs.graph import edges
 from data_platform.jobs.graph.edges import (
+    ARTICLE_CONTENT_KEY_SQL,
     CO_MENTION_MIN_WEIGHT,
     DELETE_CO_MENTION_EDGES_SQL,
     DELETE_STALE_ENTITY_STATS_SQL,
@@ -73,13 +75,13 @@ class TestCoMentionSQLInvariants:
         assert "{" not in RECOMPUTE_CO_MENTION_EDGES_SQL
         assert "}" not in RECOMPUTE_CO_MENTION_EDGES_SQL
 
-    def test_unique_content_count_colapsa_republicacoes_por_content_hash(self):
-        """Mesmo content_hash (republicacao entre orgaos) conta 1; sem hash, conta o artigo."""
+    def test_unique_content_count_conta_chaves_de_conteudo_distintas(self):
+        """Artigos com a mesma content_key (republicacao) contam 1."""
         norm = _normalize(RECOMPUTE_CO_MENTION_EDGES_SQL)
-        assert "join news n on n.unique_id = a.unique_id" in norm
         assert (
-            "count(distinct coalesce(n.content_hash, a.unique_id)) as unique_content_count" in norm
+            f"join ({_normalize(ARTICLE_CONTENT_KEY_SQL)}) ck on ck.unique_id = a.unique_id" in norm
         )
+        assert "count(distinct ck.content_key) as unique_content_count" in norm
 
     def test_insert_lista_unique_content_count(self):
         norm = _normalize(RECOMPUTE_CO_MENTION_EDGES_SQL)
@@ -92,7 +94,7 @@ class TestCoMentionSQLInvariants:
         """O conjunto de arestas nao muda (portal/Neo4j): HAVING so na contagem bruta."""
         norm = _normalize(RECOMPUTE_CO_MENTION_EDGES_SQL)
         having = norm.split(" having ", 1)[1]
-        assert "content_hash" not in having
+        assert "content_key" not in having
         assert "unique_content_count" not in having
 
 
@@ -127,16 +129,42 @@ class TestRebuildNewsEntitiesSQLInvariants:
 
 
 # ---------------------------------------------------------------------------
+# Chave de deduplicacao de conteudo: um unico ponto a trocar
+# ---------------------------------------------------------------------------
+class TestArticleContentKey:
+    def test_uma_linha_por_artigo_de_news(self):
+        norm = _normalize(ARTICLE_CONTENT_KEY_SQL)
+        assert norm.startswith("select n.unique_id,")
+        assert norm.endswith("as content_key from news n")
+
+    def test_hoje_e_o_content_hash_ou_o_proprio_artigo(self):
+        norm = _normalize(ARTICLE_CONTENT_KEY_SQL)
+        assert "coalesce(n.content_hash, n.unique_id) as content_key" in norm
+
+    def test_regra_de_dedup_definida_num_lugar_so(self):
+        """Arestas, entity_stats e meta usam o mesmo fragmento; content_hash so aparece nele."""
+        for sql in (
+            RECOMPUTE_CO_MENTION_EDGES_SQL,
+            UPSERT_ENTITY_STATS_SQL,
+            UPSERT_ENTITY_GRAPH_META_SQL,
+        ):
+            assert ARTICLE_CONTENT_KEY_SQL in sql
+        code = inspect.getsource(edges)
+        assert code.count("content_hash, n.unique_id") == 1
+
+
+# ---------------------------------------------------------------------------
 # Invariantes do SQL de entity_stats / entity_graph_meta
 # ---------------------------------------------------------------------------
 class TestEntityStatsSQLInvariants:
     def test_article_count_e_unique_content_count_por_entidade(self):
         norm = _normalize(UPSERT_ENTITY_STATS_SQL)
-        assert "from news_entities ne join news n on n.unique_id = ne.unique_id" in norm
-        assert "count(distinct ne.unique_id) as article_count" in norm
         assert (
-            "count(distinct coalesce(n.content_hash, ne.unique_id)) as unique_content_count" in norm
+            f"from news_entities ne join ({_normalize(ARTICLE_CONTENT_KEY_SQL)}) ck "
+            "on ck.unique_id = ne.unique_id" in norm
         )
+        assert "count(distinct ne.unique_id) as article_count" in norm
+        assert "count(distinct ck.content_key) as unique_content_count" in norm
         assert "group by ne.entity_id" in norm
 
     def test_first_last_seen_sao_min_max_published_at(self):
@@ -171,8 +199,11 @@ class TestEntityStatsSQLInvariants:
         norm = _normalize(UPSERT_ENTITY_GRAPH_META_SQL)
         assert "insert into entity_graph_meta (id, total_articles, total_unique_content" in norm
         assert "count(distinct ne.unique_id)" in norm
-        assert "count(distinct coalesce(n.content_hash, ne.unique_id))" in norm
-        assert "from news_entities ne join news n on n.unique_id = ne.unique_id" in norm
+        assert "count(distinct ck.content_key)" in norm
+        assert (
+            f"from news_entities ne join ({_normalize(ARTICLE_CONTENT_KEY_SQL)}) ck "
+            "on ck.unique_id = ne.unique_id" in norm
+        )
         assert "on conflict (id) do update set" in norm
         assert "returning total_articles, total_unique_content" in norm
 
