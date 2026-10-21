@@ -79,7 +79,8 @@ class TestCoMentionSQLInvariants:
         """Artigos com a mesma content_key (republicacao) contam 1."""
         norm = _normalize(RECOMPUTE_CO_MENTION_EDGES_SQL)
         assert (
-            f"join ({_normalize(ARTICLE_CONTENT_KEY_SQL)}) ck on ck.unique_id = a.unique_id" in norm
+            f"join ( {_normalize(ARTICLE_CONTENT_KEY_SQL)} ) ck on ck.unique_id = a.unique_id"
+            in norm
         )
         assert "count(distinct ck.content_key) as unique_content_count" in norm
 
@@ -160,7 +161,7 @@ class TestEntityStatsSQLInvariants:
     def test_article_count_e_unique_content_count_por_entidade(self):
         norm = _normalize(UPSERT_ENTITY_STATS_SQL)
         assert (
-            f"from news_entities ne join ({_normalize(ARTICLE_CONTENT_KEY_SQL)}) ck "
+            f"from news_entities ne join ( {_normalize(ARTICLE_CONTENT_KEY_SQL)} ) ck "
             "on ck.unique_id = ne.unique_id" in norm
         )
         assert "count(distinct ne.unique_id) as article_count" in norm
@@ -201,7 +202,7 @@ class TestEntityStatsSQLInvariants:
         assert "count(distinct ne.unique_id)" in norm
         assert "count(distinct ck.content_key)" in norm
         assert (
-            f"from news_entities ne join ({_normalize(ARTICLE_CONTENT_KEY_SQL)}) ck "
+            f"from news_entities ne join ( {_normalize(ARTICLE_CONTENT_KEY_SQL)} ) ck "
             "on ck.unique_id = ne.unique_id" in norm
         )
         assert "on conflict (id) do update set" in norm

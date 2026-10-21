@@ -1,7 +1,8 @@
 -- 032_entity_stats.sql
 -- Estatisticas por entidade e totais do corpus para o grafo de co-mencao (DP-1).
--- Republicacoes da mesma materia por varios orgaos (mesmo news.content_hash) inflam as
--- contagens; unique_content_count conta conteudos distintos: COALESCE(content_hash, unique_id).
+-- Republicacoes da mesma materia por varios orgaos inflam as contagens; unique_content_count
+-- conta conteudos distintos pela chave de ARTICLE_CONTENT_KEY_SQL (jobs/graph/edges.py; hoje
+-- COALESCE(content_hash, unique_id)). Trocar a chave nao exige migracao.
 -- Recomputadas pela DAG project_entity_graph na mesma transacao do rebuild de entity_edges.
 -- A graphql-api le estas tabelas via LEFT JOIN (lift/PMI, contagens deduplicadas): antes do
 -- 1o run pos-migracao as colunas/linhas novas vem NULL.
