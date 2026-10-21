@@ -19,6 +19,7 @@ import os
 import re
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC
 from pathlib import Path
@@ -33,6 +34,13 @@ MIGRATION_PATTERN = re.compile(r"^(\d{3})_(.+)\.(sql|py)$")
 ROLLBACK_SUFFIX = "_rollback.sql"
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+
+# Versions held for PRs still open: not a sequence gap for `validate`.
+# Remove the entry once the PR lands with its migration file.
+RESERVED_VERSIONS = {
+    "030": "data-platform#189 (summary moderation)",
+    "031": "data-platform#184 (BGE-M3)",
+}
 
 CREATE_MIGRATION_HISTORY_SQL = """
 CREATE TABLE IF NOT EXISTS migration_history (
@@ -593,17 +601,21 @@ def execute_rollback(
 # ---------------------------------------------------------------------------
 
 
-def validate_migrations(migrations: list[MigrationInfo]) -> list[str]:
-    """Check for sequence gaps and other issues."""
+def validate_migrations(
+    migrations: list[MigrationInfo], reserved: Iterable[str] = RESERVED_VERSIONS
+) -> list[str]:
+    """Check for sequence gaps (other than reserved versions) and other issues."""
     issues = []
     if not migrations:
         return issues
 
+    reserved = set(reserved)
     versions = [int(m.version) for m in migrations]
     for i in range(len(versions) - 1):
         if versions[i + 1] - versions[i] > 1:
             for gap in range(versions[i] + 1, versions[i + 1]):
-                issues.append(f"Sequence gap: migration {gap:03d} is missing")
+                if f"{gap:03d}" not in reserved:
+                    issues.append(f"Sequence gap: migration {gap:03d} is missing")
 
     return issues
 
