@@ -120,7 +120,7 @@ def migrate(conn, dry_run: bool = False) -> dict:
             t0 = time.perf_counter()
             _, sample_too_short = build_batch(sample)
             sample_seconds = time.perf_counter() - t0
-            return {
+            preview = {
                 "preview": True,
                 "pending": pending,
                 "batches": math.ceil(pending / BATCH_SIZE),
@@ -131,6 +131,9 @@ def migrate(conn, dry_run: bool = False) -> dict:
                     project_seconds(sample_seconds, len(sample), pending), 1
                 ),
             }
+            # O runner descarta o histórico do dry-run (rollback): o log é onde a projeção fica.
+            logger.info("033 dry-run: " + " ".join(f"{k}={v}" for k, v in preview.items()))
+            return preview
 
         if pending == 0:
             return {"rows_updated": 0, "message": f"Nenhum artigo pendente sem {FEATURE_KEY}"}
