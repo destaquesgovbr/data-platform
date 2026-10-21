@@ -453,3 +453,93 @@ class TestEntityTrendingBaselineMigration:
         result = _run_migrate("migrate", "--yes")
         assert result.returncode == 0, f"Re-apply failed:\n{result.stdout}\n{result.stderr}"
         assert {"baseline_count", "baseline_agencies"} <= set(_columns("entity_trending_scores"))
+
+
+@pytest.mark.integration
+class TestEntityStatsMigration:
+    """032: entity_stats, entity_graph_meta e entity_edges.unique_content_count (DP-1).
+
+    Contrato lido pela graphql-api (GQL-1) via LEFT JOIN: nomes e tipos fixos.
+    """
+
+    def test_032_adiciona_unique_content_count_nulo_em_entity_edges(self):
+        _apply_all_migrations()
+
+        assert _columns("entity_edges")["unique_content_count"] == ("integer", "YES")
+
+    def test_032_cria_entity_stats_com_o_contrato(self):
+        _apply_all_migrations()
+
+        assert _columns("entity_stats") == {
+            "entity_id": ("character varying", "NO"),
+            "article_count": ("integer", "NO"),
+            "unique_content_count": ("integer", "NO"),
+            "first_seen": ("timestamp with time zone", "YES"),
+            "last_seen": ("timestamp with time zone", "YES"),
+            "is_generic": ("boolean", "NO"),
+            "generic_reason": ("text", "YES"),
+            "computed_at": ("timestamp with time zone", "NO"),
+        }
+
+    def test_032_cria_entity_graph_meta_com_o_contrato(self):
+        _apply_all_migrations()
+
+        assert _columns("entity_graph_meta") == {
+            "id": ("smallint", "NO"),
+            "total_articles": ("integer", "NO"),
+            "total_unique_content": ("integer", "NO"),
+            "computed_at": ("timestamp with time zone", "NO"),
+        }
+
+    def test_032_entity_graph_meta_so_aceita_id_1(self):
+        _apply_all_migrations()
+        _execute(
+            "INSERT INTO entity_graph_meta (id, total_articles, total_unique_content) VALUES (1, 0, 0)"
+        )
+
+        with pytest.raises(psycopg2.errors.CheckViolation):
+            _execute(
+                "INSERT INTO entity_graph_meta (id, total_articles, total_unique_content) "
+                "VALUES (2, 0, 0)"
+            )
+
+    def test_032_defaults_de_entity_stats_e_cascade_do_registry(self):
+        _apply_all_migrations()
+        _execute(
+            "INSERT INTO entity_registry (entity_id, canonical_name, type, provenance) "
+            "VALUES ('Q1', 'Org', 'ORG', 'llm')"
+        )
+        _execute(
+            "INSERT INTO entity_stats (entity_id, article_count, unique_content_count) "
+            "VALUES ('Q1', 3, 2)"
+        )
+        rows = _execute(
+            "SELECT is_generic, generic_reason, computed_at IS NOT NULL FROM entity_stats"
+        )
+        assert rows == [(False, None, True)]
+
+        _execute("DELETE FROM entity_registry WHERE entity_id = 'Q1'")
+        assert _execute("SELECT count(*) FROM entity_stats") == [(0,)]
+
+    def test_032_entity_stats_exige_entidade_do_registry(self):
+        _apply_all_migrations()
+
+        with pytest.raises(psycopg2.errors.ForeignKeyViolation):
+            _execute(
+                "INSERT INTO entity_stats (entity_id, article_count, unique_content_count) "
+                "VALUES ('Q_inexistente', 1, 1)"
+            )
+
+    def test_032_rollback_remove_tudo_e_reaplica(self):
+        _apply_all_migrations()
+
+        result = _run_migrate("rollback", "032", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+        assert _columns("entity_stats") == {}
+        assert _columns("entity_graph_meta") == {}
+        assert "unique_content_count" not in _columns("entity_edges")
+
+        result = _run_migrate("migrate", "--yes")
+        assert result.returncode == 0, f"Re-apply failed:\n{result.stdout}\n{result.stderr}"
+        assert "unique_content_count" in _columns("entity_edges")
+        assert "is_generic" in _columns("entity_stats")
