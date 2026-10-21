@@ -175,6 +175,21 @@ class TestMigrateDryRun:
         assert result["sample_compute_seconds"] >= 0
         assert result["projected_compute_seconds"] >= 0
 
+    def test_projecao_vai_para_o_log(self):
+        """O runner grava o dict do dry-run no migration_history e dá rollback: só o log
+        do workflow db-migrate mostra a projeção."""
+        mod = _import_migration_033()
+        conn, cursor = _conn_with_cursor()
+        cursor.fetchone.return_value = (10,)
+        cursor.fetchall.return_value = [("a", LONG)]
+
+        with patch.object(mod, "logger") as log:
+            result = mod.migrate(conn, dry_run=True)
+
+        logged = " ".join(str(c.args[0]) for c in log.info.call_args_list)
+        assert "pending=10" in logged
+        assert f"projected_compute_seconds={result['projected_compute_seconds']}" in logged
+
 
 class TestMigrateExecution:
     def test_pagina_por_unique_id_e_commita_por_lote(self):
