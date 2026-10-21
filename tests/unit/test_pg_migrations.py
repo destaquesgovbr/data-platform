@@ -4,13 +4,23 @@ scripts/migrate.py keys migration history by the 3-digit version, so two files
 with the same number make one of them invisible to the runner.
 """
 
+import importlib.util
 import re
 from collections import defaultdict
 from pathlib import Path
 
 MIGRATIONS_DIR = Path(__file__).parents[2] / "scripts" / "migrations"
+MIGRATE_SCRIPT = MIGRATIONS_DIR.parent / "migrate.py"
 MIGRATION_PATTERN = re.compile(r"^(\d{3})_(.+)\.(sql|py)$")
 ROLLBACK_SUFFIX = "_rollback.sql"
+
+
+def _reserved_versions() -> set[int]:
+    """RESERVED_VERSIONS do runner (fonte única, a mesma do `migrate.py validate`)."""
+    spec = importlib.util.spec_from_file_location("migrate_runner", MIGRATE_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return {int(v) for v in module.RESERVED_VERSIONS}
 
 
 def _files_by_version(rollback: bool) -> dict[str, list[str]]:
@@ -42,5 +52,7 @@ class TestPgMigrationFiles:
                 assert expected in stems, f"{name} has no matching migration {expected}.*"
 
     def test_versions_have_no_gaps(self):
-        versions = sorted(int(v) for v in _files_by_version(False))
-        assert versions == list(range(1, len(versions) + 1)), f"Sequence gap in {versions}"
+        """Só as versões reservadas a PRs abertos (RESERVED_VERSIONS) podem faltar."""
+        versions = {int(v) for v in _files_by_version(False)}
+        missing = set(range(1, max(versions) + 1)) - versions - _reserved_versions()
+        assert missing == set(), f"Sequence gap: {sorted(missing)}"
