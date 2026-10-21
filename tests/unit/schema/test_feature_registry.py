@@ -62,6 +62,7 @@ class TestFeatureRegistry:
             "publication_hour",
             "publication_dow",
             "readability_flesch",
+            "readability_flesch_ptbr",
         }
         actual = set(registry["features"].keys())
         missing = expected - actual
@@ -87,3 +88,25 @@ class TestReadabilityFleschDescription:
         assert "textstat 0.7.13" in description
         assert "set_lang" in description
         assert "negativos" in description
+
+
+class TestReadabilityFleschPtbrDescription:
+    """Chave nova da adaptação pt-BR: fórmula, sílabas e faixas documentadas."""
+
+    def test_spec_da_chave_ptbr(self, registry):
+        spec = registry["features"]["readability_flesch_ptbr"]
+
+        assert spec["version"] == "1.0"
+        assert spec["type"] == "float"
+        assert spec["model"] == "local/pyphen-pt_BR"
+        assert spec["compute"] == "feature-worker"
+
+    def test_descricao_diz_formula_silabas_e_faixas(self, registry):
+        description = registry["features"]["readability_flesch_ptbr"]["description"]
+
+        assert "Martins" in description
+        assert "248,835" in description
+        assert "pyphen" in description
+        for faixa in ("75–100 muito fácil", "50–75 fácil", "25–50 difícil", "0–25 muito difícil"):
+            assert faixa in description
+        assert "sem clamp" in description

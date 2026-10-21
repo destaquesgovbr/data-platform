@@ -3,6 +3,7 @@
 import unicodedata
 from datetime import UTC, datetime
 
+import pyphen
 import pytest
 
 from data_platform.workers.feature_worker.features import (
@@ -15,7 +16,10 @@ from data_platform.workers.feature_worker.features import (
     compute_publication_dow,
     compute_publication_hour,
     compute_readability_flesch,
+    compute_readability_flesch_ptbr,
     compute_word_count,
+    count_syllables_ptbr,
+    readability_counts_ptbr,
 )
 
 
@@ -141,6 +145,182 @@ class TestComputeReadabilityFlesch:
         assert compute_readability_flesch(self._FRASE_LONGA) == -15.93
 
 
+class TestComputeReadabilityFleschPtbr:
+    """Adaptação de Martins et al. (1996): 248,835 − 1,015·ASL − 84,6·ASW.
+
+    Sílabas pelo pyphen pt_BR (left=1, right=1): pontos de hifenização + 1. Mesmas
+    frases do teste inglês, para comparar as escalas: a contagem pt_BR acha mais
+    sílabas que a inglesa (50 vs 38 na frase curta), o que anula boa parte dos +42
+    da constante. Se um valor fixado mudar (troca de versão do pyphen/dicionário),
+    a série histórica deixa de ser comparável: suba a versão no feature_registry.
+    """
+
+    _FRASE_CURTA = TestComputeReadabilityFlesch._FRASE_CURTA
+    _FRASE_LONGA = TestComputeReadabilityFlesch._FRASE_LONGA
+
+    def test_dicionario_pt_br_disponivel_no_pyphen(self):
+        assert "pt_BR" in pyphen.LANGUAGES
+
+    def test_contagens_da_frase_curta(self):
+        # 22 palavras (segunda-feira conta 1), 1 frase, 50 sílabas
+        assert readability_counts_ptbr(self._FRASE_CURTA) == (22, 1, 50)
+
+    def test_contagens_da_frase_longa(self):
+        assert readability_counts_ptbr(self._FRASE_LONGA) == (37, 1, 103)
+
+    def test_flesch_ptbr_fixado_frase_curta(self):
+        assert compute_readability_flesch_ptbr(self._FRASE_CURTA) == 34.23
+        assert compute_readability_flesch_ptbr(self._FRASE_CURTA) == round(
+            248.835 - 1.015 * 22 / 1 - 84.6 * 50 / 22, 2
+        )
+
+    def test_flesch_ptbr_fixado_frase_longa_sem_clamp(self):
+        """Valor cru: pode sair de [0, 100] (aqui, negativo)."""
+        assert compute_readability_flesch_ptbr(self._FRASE_LONGA) == -24.23
+
+    def test_pode_passar_de_100(self):
+        texto = "O sol é bom. A paz é boa. O mar é azul. A luz é bela."
+        assert compute_readability_flesch_ptbr(texto) > 100
+
+    def test_vazio_e_curto_retornam_none(self):
+        assert compute_readability_flesch_ptbr(None) is None
+        assert compute_readability_flesch_ptbr("") is None
+        assert compute_readability_flesch_ptbr("Curto") is None
+
+    def test_limite_de_10_palavras(self):
+        nove = "um dois três quatro cinco seis sete oito nove."
+        assert compute_readability_flesch_ptbr(nove) is None
+        assert isinstance(compute_readability_flesch_ptbr(nove + " dez"), float)
+
+    def test_numeros_nao_contam_como_palavras(self):
+        """10 tokens, mas só 9 palavras alfabéticas: None."""
+        texto = "Foram 2026 vagas para estudantes de baixa renda no país."
+        assert compute_readability_flesch_ptbr(texto) is None
+
+
+class TestReadabilityCountsPtbr:
+    """Tokenização da versão pt-BR: (palavras, frases, sílabas)."""
+
+    def test_palavra_composta_com_hifen_conta_uma_e_soma_silabas(self):
+        assert readability_counts_ptbr("segunda-feira") == (1, 1, 5)
+
+    def test_palavras_acentuadas_sao_alfabeticas(self):
+        assert readability_counts_ptbr("ação é já")[0] == 3
+
+    def test_frases_por_pontuacao_seguida_de_espaco_ou_fim(self):
+        texto = "Primeira frase. Segunda frase! Terceira frase? Quarta… Quinta"
+        assert readability_counts_ptbr(texto)[1] == 5
+
+    def test_ponto_dentro_de_numero_nao_quebra_frase(self):
+        texto = "Foram R$ 259.973,41 e 1.500 vagas em 2,5 meses."
+        assert readability_counts_ptbr(texto)[1] == 1
+
+    def test_aspas_e_parenteses_de_fechamento_apos_o_ponto(self):
+        texto = 'Ele disse: "Vamos." Depois saiu (sem pressa.) E voltou.'
+        assert readability_counts_ptbr(texto)[1] == 3
+
+    def test_linha_em_branco_separa_titulo_sem_ponto(self):
+        texto = "Título sem ponto\n\nPrimeira frase aqui. Segunda frase"
+        assert readability_counts_ptbr(texto)[1] == 3
+
+    def test_linha_so_com_espacos_conta_como_branca(self):
+        assert readability_counts_ptbr("Linha um  \n  \nLinha dois")[1] == 2
+
+    def test_itens_de_lista_e_titulos_markdown_separam_frases(self):
+        texto = "Itens do edital\n- primeiro item\n* segundo item\n1. terceiro item\n## Serviço\nDetalhes"
+        assert readability_counts_ptbr(texto)[1] == 6
+
+    def test_quebra_de_linha_simples_nao_separa_frase(self):
+        assert readability_counts_ptbr("uma frase que\ncontinua aqui")[1] == 1
+
+    def test_link_markdown_conta_so_o_texto(self):
+        texto = "[Leia o edital](https://www.gov.br/mec/pt-br/edital-final.pdf) agora."
+        assert readability_counts_ptbr(texto)[:2] == (4, 1)
+
+    def test_imagem_markdown_e_ignorada(self):
+        texto = "![Foto do ministro durante o evento](https://www.gov.br/foto.jpg)\n\nTexto."
+        assert readability_counts_ptbr(texto)[:2] == (1, 1)
+
+    def test_url_solta_e_ignorada_e_preserva_o_ponto_final(self):
+        texto = "Acesse https://www.gov.br/mec/pt-br. Depois www.inep.gov.br/enem, hoje."
+        assert readability_counts_ptbr(texto)[:2] == (3, 2)
+
+    def test_texto_sem_palavras(self):
+        assert readability_counts_ptbr("2026 — 10/10.") == (0, 0, 0)
+
+
+class TestCountSyllablesPtbr:
+    """Gold list do método (pyphen pt_BR, left=1, right=1; pontos + 1).
+
+    Reflete o que o método produz. Desvios conhecidos da divisão silábica
+    gramatical estão anotados (gramática entre parênteses): hiatos que o
+    dicionário não separa (saúde, baú, juiz, rainha), ditongos finais tratados
+    como hiato (anunciou) e encontro consonantal inicial separado por left=1 (pneu).
+    """
+
+    GOLD = {
+        "a": 1,
+        "é": 1,
+        "de": 1,
+        "mãe": 1,
+        "pão": 1,
+        "país": 2,
+        "água": 2,
+        "dia": 2,
+        "guerra": 2,
+        "quatro": 2,
+        "também": 2,
+        "leão": 2,
+        "voo": 2,
+        "saúde": 2,  # desvio (sa-ú-de = 3)
+        "baú": 1,  # desvio (ba-ú = 2)
+        "juiz": 1,  # desvio (ju-iz = 2)
+        "rainha": 2,  # desvio (ra-i-nha = 3)
+        "ciência": 2,  # desvio (ci-ên-cia = 3)
+        "pneu": 2,  # desvio (pneu = 1)
+        "países": 3,
+        "saída": 3,
+        "juízes": 3,
+        "teatro": 3,
+        "poeta": 3,
+        "coração": 3,
+        "eleição": 3,
+        "frequência": 3,
+        "ônibus": 3,
+        "Brasília": 3,
+        "enjoo": 3,
+        "ministério": 4,
+        "educação": 4,
+        "violência": 4,
+        "caatinga": 4,
+        "qualidade": 4,
+        "anunciou": 4,  # desvio (a-nun-ciou = 3)
+        "cooperação": 5,
+        "psicologia": 5,
+        "profissionais": 5,
+        "Secretaria": 5,
+        "especializados": 7,
+        "sustentabilidade": 7,
+    }
+
+    @pytest.mark.parametrize(("word", "expected"), sorted(GOLD.items()))
+    def test_gold(self, word, expected):
+        assert count_syllables_ptbr(word) == expected
+
+    @pytest.mark.parametrize(
+        ("word", "expected"),
+        [("segunda-feira", 5), ("pós-graduação", 5), ("bem-estar", 3), ("guarda-chuva", 4)],
+    )
+    def test_hifenizada_soma_as_partes(self, word, expected):
+        assert count_syllables_ptbr(word) == expected
+
+    def test_maiusculas_contam_igual(self):
+        assert count_syllables_ptbr("EDUCAÇÃO") == count_syllables_ptbr("educação") == 4
+
+    def test_minimo_uma_silaba_por_palavra(self):
+        assert count_syllables_ptbr("x") == 1
+
+
 class TestComputeAll:
     def test_complete_article(self):
         article = {
@@ -167,6 +347,15 @@ class TestComputeAll:
         assert features["has_image"] is False
         assert "publication_hour" not in features
         assert "readability_flesch" not in features
+        assert "readability_flesch_ptbr" not in features
+
+    def test_flesch_ptbr_ao_lado_do_ingles(self):
+        """Chave nova; readability_flesch (inglês) segue com o mesmo valor."""
+        content = TestComputeReadabilityFlesch._FRASE_CURTA
+        features = compute_all({"content": content, "image_url": None, "video_url": None})
+
+        assert features["readability_flesch"] == 38.38
+        assert features["readability_flesch_ptbr"] == 34.23
 
     def test_explicit_none_published_at(self):
         """Explicit published_at=None behaves same as missing key."""
