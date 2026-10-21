@@ -543,3 +543,127 @@ class TestEntityStatsMigration:
         assert result.returncode == 0, f"Re-apply failed:\n{result.stdout}\n{result.stderr}"
         assert "unique_content_count" in _columns("entity_edges")
         assert "is_generic" in _columns("entity_stats")
+
+
+_TEXTO_LONGO = (
+    "O Ministério da Educação anunciou nesta segunda-feira a ampliação do "
+    "programa de bolsas para estudantes de baixa renda em todo o país."
+)
+
+
+def _load_migration_033():
+    import importlib.util
+
+    path = MIGRATIONS_DIR / "033_backfill_readability_flesch_ptbr.py"
+    spec = importlib.util.spec_from_file_location("migration_033", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _insert_news(unique_id: str, content: str | None) -> None:
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO news (unique_id, agency_id, title, content, published_at) "
+                "SELECT %s, id, 'Título', %s, NOW() FROM agencies WHERE key = 'mec'",
+                (unique_id, content),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _features() -> dict[str, dict]:
+    return dict(_execute("SELECT unique_id, features FROM news_features") or [])
+
+
+def _run_033(dry_run: bool = False, batch_size: int | None = None) -> dict:
+    module = _load_migration_033()
+    if batch_size:
+        module.BATCH_SIZE = batch_size
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        result = module.migrate(conn, dry_run=dry_run)
+        conn.commit()
+        return result
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+class TestBackfillFleschPtbrMigration:
+    """033: backfill de readability_flesch_ptbr em news_features (DP-1)."""
+
+    @pytest.fixture(autouse=True)
+    def _corpus(self):
+        from data_platform.workers.feature_worker.features import (
+            compute_readability_flesch_ptbr,
+        )
+
+        _apply_all_migrations()
+        _execute("INSERT INTO agencies (key, name) VALUES ('mec', 'MEC')")
+        _insert_news("a_com_features", _TEXTO_LONGO)
+        _insert_news("b_sem_linha", _TEXTO_LONGO + " Segunda frase do texto.")
+        _insert_news("c_curto", "Texto curto.")
+        _insert_news("d_ja_tem", _TEXTO_LONGO)
+        _insert_news("e_sem_content", None)
+        _execute(
+            "INSERT INTO news_features (unique_id, features) VALUES "
+            """('a_com_features', '{"word_count": 22, "readability_flesch": 38.38}'), """
+            """('d_ja_tem', '{"readability_flesch_ptbr": 999}')"""
+        )
+        self.expected_a = compute_readability_flesch_ptbr(_TEXTO_LONGO)
+        self.expected_b = compute_readability_flesch_ptbr(_TEXTO_LONGO + " Segunda frase do texto.")
+
+    def test_033_grava_a_chave_preservando_as_demais(self):
+        result = _run_033()
+
+        features = _features()
+        assert features["a_com_features"] == {
+            "word_count": 22,
+            "readability_flesch": 38.38,
+            "readability_flesch_ptbr": self.expected_a,
+        }
+        assert features["b_sem_linha"] == {"readability_flesch_ptbr": self.expected_b}
+        assert "c_curto" not in features
+        assert "e_sem_content" not in features
+        assert features["d_ja_tem"] == {"readability_flesch_ptbr": 999}
+        assert result["rows_updated"] == 2
+        assert result["too_short"] == 1
+
+    def test_033_pagina_em_lotes_pequenos(self):
+        result = _run_033(batch_size=1)
+
+        features = _features()
+        assert features["a_com_features"]["readability_flesch_ptbr"] == self.expected_a
+        assert features["b_sem_linha"]["readability_flesch_ptbr"] == self.expected_b
+        assert result["scanned"] == 3
+
+    def test_033_retomavel(self):
+        _run_033()
+        second = _run_033()
+
+        # só o texto curto volta a ser lido (nunca ganha a chave)
+        assert second["rows_updated"] == 0
+        assert second["scanned"] == 1
+
+    def test_033_dry_run_projeta_sem_gravar(self):
+        result = _run_033(dry_run=True)
+
+        assert result["preview"] is True
+        assert result["pending"] == 3
+        assert result["sample_size"] == 3
+        assert "readability_flesch_ptbr" not in _features()["a_com_features"]
+
+    def test_033_rollback_remove_so_a_chave(self):
+        _run_033()
+
+        result = _run_migrate("rollback", "033", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+
+        features = _features()
+        assert features["a_com_features"] == {"word_count": 22, "readability_flesch": 38.38}
+        assert features["b_sem_linha"] == {}
+        assert features["d_ja_tem"] == {}
