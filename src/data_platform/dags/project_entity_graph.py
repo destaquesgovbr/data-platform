@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
        ordem canonica, nao-direcionada), threshold `weight >= 2`.
     3. **Arestas estruturais** `subordinate_to` (agencies.parent_key + extra.parent_qid)
        e `is_agency` (ORG -> agencia).
+    4. **`entity_stats` + `entity_graph_meta`**: artigos e conteudos distintos
+       (dedup por `content_hash`) por entidade e no corpus (lift/PMI na graphql-api).
 
     Tudo numa transacao, idempotente (reconstroi do zero a cada run).
     """,
