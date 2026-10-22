@@ -6,10 +6,11 @@ Banco descartável de test_migrate_integration.py (MIGRATION_TEST_DATABASE_URL):
 produção de 21/10 (contagens de base, seção C): hierarquias coerentes em 19.03/19.04,
 só-L2, as 4 incoerentes que envolvem o 19 e artigos fora do escopo.
 
-Contrato da auditoria com o DS-1 (data-science#49, scripts/reenrich_combined_window.py):
+Contrato da auditoria (plano, 22/10) com o DS-1 (data-science#49): as colunas do contrato,
 UNIQUE (campaign, unique_id), campanha `tema26-034` (source `migration-034`) para a 034 e
-`tema26-llm-d1` (source `llm:<modelo>`) para a reclassificação por LLM da D1. O preflight
-do DS-1 está copiado abaixo (DS1_*) e roda contra a tabela que a 034 cria.
+`tema26-llm-d1` (source `llm:<modelo>`) para a reclassificação por LLM da D1. O rollback lê
+só essas duas, do changed_at mais recente para o mais antigo, e só marca reverted_at. O
+preflight do DS-1 está copiado abaixo (DS1_*) e roda contra a tabela que a 034 cria.
 """
 
 import importlib.util
@@ -247,6 +248,12 @@ def _audit(campaign: str = "tema26-034") -> list[tuple]:
     )
 
 
+def _campanhas() -> set[str]:
+    return {
+        campaign for (campaign,) in _execute("SELECT DISTINCT campaign FROM news_theme_changes")
+    }
+
+
 def _log_audit(
     unique_id: str,
     old: tuple,
@@ -441,13 +448,14 @@ class TestRollback:
         )
         assert {(c, lbl, p) for c, lbl, _lv, p in THEMES if c in LEGADO} == set(legado)
 
-    def test_rollback_marca_a_campanha_e_registra_o_que_desfez(self):
+    def test_rollback_so_marca_reverted_at_sem_campanha_nova(self):
+        """O contrato tem duas campanhas: o rollback marca as linhas que desfez e só."""
         _run_migrate("migrate", "--yes")
         _run_migrate("rollback", "034", "--yes")
-        assert all(row[-1] for row in _audit())
-        desfeito = _audit("tema26-rollback")
-        assert {row[0] for row in desfeito} == TOCADOS
-        assert {row[9] for row in desfeito} == {"migration-034-rollback"}
+        audit = _audit()
+        assert {row[0] for row in audit} == TOCADOS
+        assert all(row[-1] for row in audit)
+        assert _campanhas() == {"tema26-034"}
 
     def test_rollback_desfaz_tambem_a_reclassificacao_por_llm(self, mod):
         _run_migrate("migrate", "--yes")
@@ -459,6 +467,20 @@ class TestRollback:
         assert stats["by_reason"] == {"revertido": len(TOCADOS) + 2}
         assert stats["campaign_rows_reverted"] == {"tema26-034": len(TOCADOS), LLM_CAMPAIGN: 3}
         assert all(row[-1] for row in _audit(LLM_CAMPAIGN))
+        assert _campanhas() == {"tema26-034", LLM_CAMPAIGN}
+
+    def test_campanha_fora_do_contrato_nao_e_lida(self, mod):
+        """Só tema26-llm-d1 e tema26-034: outra campanha, mesmo tema26-*, fica intacta."""
+        _run_migrate("migrate", "--yes")
+        novo = ("19", "19.05", "19.05.01", "19.05.01")
+        _set_news("militar", novo)
+        _log_audit("militar", CORPUS["militar"], novo, campaign="tema26-llm-d1b")
+
+        stats = _run_module(mod, "rollback", dry_run=False)
+
+        assert _news_codes()["militar"] == novo
+        assert _audit("tema26-llm-d1b")[0][-1] is False
+        assert stats["campaign_rows_reverted"] == {"tema26-034": len(TOCADOS)}
 
     def test_linha_gravada_depois_da_leitura_nao_e_marcada(self, mod):
         """Só as linhas lidas pelo rollback ganham reverted_at (marca por id).
@@ -509,6 +531,10 @@ class TestRollback:
 
         assert _news_codes()["novo_do_worker"] == ("19", "19.03", "19.03.03", "19.03.03")
         assert stats["by_reason"]["mapa_inverso"] == 1
+        # Fora da auditoria (contrato sem campanha de rollback): fica no log do rollback.
+        assert stats["unaudited_inverse_map"] == ["novo_do_worker"]
+        assert "novo_do_worker" not in {row[0] for row in _audit()}
+        assert _campanhas() == {"tema26-034"}
 
     def test_artigo_alterado_depois_e_fora_do_26_fica(self, mod):
         _run_migrate("migrate", "--yes")
@@ -546,7 +572,8 @@ class TestRollback:
             result = _run_migrate("rollback", "034", "--yes")
             assert result.returncode == 0, result.stdout + result.stderr
             assert _news_codes() == CORPUS
-        assert len(_audit("tema26-rollback")) == len(TOCADOS)
+        assert len(_audit()) == len(TOCADOS)
+        assert _campanhas() == {"tema26-034"}
 
 
 @pytest.mark.integration
@@ -563,6 +590,45 @@ class TestContratoComODs1:
     def test_unique_campaign_unique_id_sem_predicado(self):
         _run_migrate("migrate", "--yes")
         assert _execute_params(DS1_AUDIT_UNIQUE_SQL, ("news_theme_changes",)) == [(True,)]
+
+    def test_colunas_tipos_e_nulidade_exatamente_do_contrato(self):
+        _run_migrate("migrate", "--yes")
+        colunas = _execute(
+            "SELECT column_name, data_type, character_maximum_length, is_nullable "
+            "FROM information_schema.columns WHERE table_name = 'news_theme_changes' "
+            "ORDER BY ordinal_position"
+        )
+        codigos = [
+            (f"{lado}_{nivel}_code", "character varying", 20, "YES")
+            for lado in ("old", "new")
+            for nivel in ("l1", "l2", "l3", "most_specific")
+        ]
+        assert colunas == [
+            ("id", "bigint", None, "NO"),
+            ("campaign", "character varying", 50, "NO"),
+            ("unique_id", "character varying", 120, "NO"),
+            *codigos,
+            ("source", "character varying", 50, "NO"),
+            ("note", "text", None, "YES"),
+            ("changed_at", "timestamp with time zone", None, "NO"),
+            ("reverted_at", "timestamp with time zone", None, "YES"),
+        ]
+
+    def test_unique_e_constraint_da_tabela(self):
+        _run_migrate("migrate", "--yes")
+        assert _execute(
+            "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conrelid = 'news_theme_changes'::regclass AND contype = 'u'"
+        ) == [("uq_news_theme_changes_campaign_uid", "UNIQUE (campaign, unique_id)")]
+
+    def test_tabela_pre_existente_sem_unique_aborta(self, mod):
+        _execute(
+            "CREATE TABLE news_theme_changes (id BIGSERIAL PRIMARY KEY, "
+            "campaign VARCHAR(50) NOT NULL, unique_id VARCHAR(120) NOT NULL)"
+        )
+        with pytest.raises(RuntimeError, match="UNIQUE"):
+            _run_module(mod, "migrate", dry_run=False)
+        assert _news_codes() == CORPUS
 
     def test_campanha_do_llm_sem_fonte_estranha(self):
         _run_migrate("migrate", "--yes")

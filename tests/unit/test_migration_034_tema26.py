@@ -18,6 +18,7 @@ SQL contra um Postgres real.
 
 import importlib.util
 import itertools
+import re
 from pathlib import Path
 
 import pytest
@@ -109,19 +110,19 @@ class TestConstantes:
         assert m.INVERSE_MAP == {new: old for old, new in m.CODE_MAP.items()} | {"26": "19"}
 
     def test_campanhas_e_origens_do_contrato_de_22_10(self):
-        """Contrato da auditoria (plano, 22/10): campanhas separadas por origem."""
+        """Contrato da auditoria (plano, 22/10): só duas campanhas, separadas por origem."""
         assert m.CAMPAIGN == "tema26-034"
         assert m.SOURCE == "migration-034"
         assert m.LLM_CAMPAIGN == "tema26-llm-d1"  # DS-1 (data-science#49), source llm:<modelo>
-        assert m.ROLLBACK_CAMPAIGN == "tema26-rollback"
-        assert m.ROLLBACK_SOURCE == "migration-034-rollback"
 
-    def test_padrao_das_campanhas_do_tema_26(self):
-        """O rollback e o MERGE do BigQuery leem `campaign LIKE 'tema26-%'`."""
-        assert m.CAMPAIGN_PATTERN == "tema26-%"
-        prefixo = m.CAMPAIGN_PATTERN.rstrip("%")
-        for campanha in (m.CAMPAIGN, m.LLM_CAMPAIGN, m.ROLLBACK_CAMPAIGN):
-            assert campanha.startswith(prefixo), campanha
+    def test_rollback_percorre_o_llm_e_depois_a_034(self):
+        """O rollback (e o MERGE do BigQuery) lê exatamente as duas campanhas do contrato."""
+        assert m.THEME26_CAMPAIGNS == ("tema26-llm-d1", "tema26-034")
+
+    def test_sem_campanha_propria_do_rollback(self):
+        """O rollback só marca reverted_at: nenhuma terceira campanha na auditoria."""
+        for nome in ("ROLLBACK_CAMPAIGN", "ROLLBACK_SOURCE", "CAMPAIGN_PATTERN"):
+            assert not hasattr(m, nome), nome
 
 
 # --------------------------------------------------------------------------
@@ -133,34 +134,56 @@ def _sql(texto: str) -> str:
     return " ".join(texto.split())
 
 
+# Contrato de 22/10: colunas, tipos e nulidade, nesta ordem (mais o UNIQUE).
+COLUNAS_DO_CONTRATO = [
+    "id BIGSERIAL PRIMARY KEY",
+    "campaign VARCHAR(50) NOT NULL",
+    "unique_id VARCHAR(120) NOT NULL",
+    "old_l1_code VARCHAR(20)",
+    "old_l2_code VARCHAR(20)",
+    "old_l3_code VARCHAR(20)",
+    "old_most_specific_code VARCHAR(20)",
+    "new_l1_code VARCHAR(20)",
+    "new_l2_code VARCHAR(20)",
+    "new_l3_code VARCHAR(20)",
+    "new_most_specific_code VARCHAR(20)",
+    "source VARCHAR(50) NOT NULL",
+    "note TEXT",
+    "changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    "reverted_at TIMESTAMPTZ",
+]
+
+
+def _create_table_body() -> list[str]:
+    sql = m.CREATE_AUDIT_SQL
+    inicio = sql.index("CREATE TABLE IF NOT EXISTS news_theme_changes (")
+    corpo = sql[inicio : sql.index(");", inicio)].split("(", 1)[1]
+    return [_sql(item) for item in re.split(r",\n", corpo) if item.strip()]
+
+
 class TestContratoDaAuditoria:
-    def test_unique_em_campaign_unique_id_sem_predicado(self):
-        """O preflight do DS-1 exige índice único exatamente em (campaign, unique_id)."""
-        sql = _sql(m.CREATE_AUDIT_SQL)
-        assert (
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_news_theme_changes_campaign_uid "
-            "ON news_theme_changes (campaign, unique_id);" in sql
-        )
+    def test_colunas_exatamente_as_do_contrato(self):
+        corpo = _create_table_body()
+        colunas = [item for item in corpo if not item.startswith("CONSTRAINT")]
+        assert colunas == COLUNAS_DO_CONTRATO
 
-    def test_sem_indice_nao_unico_redundante(self):
-        assert "idx_news_theme_changes_campaign_uid" not in m.CREATE_AUDIT_SQL
+    def test_unique_campaign_unique_id_como_constraint_da_tabela(self):
+        """UNIQUE (campaign, unique_id) do contrato, sem predicado (preflight do DS-1)."""
+        restricoes = [item for item in _create_table_body() if item.startswith("CONSTRAINT")]
+        assert restricoes == [
+            "CONSTRAINT uq_news_theme_changes_campaign_uid UNIQUE (campaign, unique_id)"
+        ]
 
-    def test_colunas_do_contrato(self):
-        sql = _sql(m.CREATE_AUDIT_SQL)
-        for coluna in (
-            "id BIGSERIAL PRIMARY KEY",
-            "campaign VARCHAR(50) NOT NULL",
-            "unique_id VARCHAR(120) NOT NULL",
-            "old_l1_code VARCHAR(20)",
-            "old_most_specific_code VARCHAR(20)",
-            "new_l1_code VARCHAR(20)",
-            "new_most_specific_code VARCHAR(20)",
-            "source VARCHAR(50) NOT NULL",
-            "note TEXT",
-            "changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-            "reverted_at TIMESTAMPTZ",
-        ):
-            assert coluna in sql, coluna
+    def test_sem_indices_fora_do_contrato(self):
+        assert "CREATE UNIQUE INDEX" not in m.CREATE_AUDIT_SQL
+        assert "CREATE INDEX" not in m.CREATE_AUDIT_SQL
+
+    def test_tabela_pre_existente_sem_unique_e_conferida(self):
+        """CREATE TABLE IF NOT EXISTS não cria o UNIQUE numa tabela que já existe."""
+        sql = _sql(m.AUDIT_UNIQUE_CHECK_SQL)
+        assert "FROM pg_constraint" in sql
+        assert "contype = 'u'" in sql
+        assert "ARRAY['campaign', 'unique_id']" in sql
 
     def test_insert_reaplicavel_depois_do_rollback(self):
         """Uma linha por (campanha, artigo): reaplicar sobrescreve e limpa o reverted_at."""
@@ -171,12 +194,16 @@ class TestContratoDaAuditoria:
         for coluna in ("old_l1_code", "new_most_specific_code", "source", "note"):
             assert f"{coluna} = EXCLUDED.{coluna}" in sql, coluna
 
-    def test_rollback_le_as_campanhas_do_tema_26_menos_a_propria(self):
+    def test_rollback_le_as_duas_campanhas_do_mais_recente_para_o_mais_antigo(self):
         sql = _sql(m.AUDIT_ROWS_SQL)
-        assert "campaign LIKE %(pattern)s" in sql
-        assert "campaign <> %(rollback)s" in sql
+        assert "campaign = ANY(%(campaigns)s)" in sql
+        assert "LIKE" not in sql
         assert "reverted_at IS NULL" in sql
-        assert "ORDER BY changed_at, id" in sql
+        assert "ORDER BY changed_at DESC, (campaign = %(llm_campaign)s) DESC, id DESC" in sql
+        assert m.ROLLBACK_SCOPE_PARAMS == {
+            "campaigns": ["tema26-llm-d1", "tema26-034"],
+            "llm_campaign": "tema26-llm-d1",
+        }
 
     def test_rollback_marca_so_as_linhas_que_leu(self):
         """Linha gravada por um run concorrente depois da leitura não ganha reverted_at."""
@@ -339,8 +366,8 @@ class TestPropriedadesDoRemap:
 
 
 class TestPontasDaAuditoria:
-    """Estado antes da PRIMEIRA mudança e depois da ÚLTIMA, por artigo, somando as
-    campanhas do tema 26 (034 e LLM da D1), na ordem (changed_at, id)."""
+    """Estado antes da PRIMEIRA mudança e depois da ÚLTIMA, por artigo, percorrendo as
+    duas campanhas (LLM da D1 e 034) do changed_at mais recente para o mais antigo."""
 
     t0 = "2026-11-10T22:00:00+00:00"
     t1 = "2026-11-11T10:00:00+00:00"
@@ -372,14 +399,28 @@ class TestPontasDaAuditoria:
         assert first_old == {"a": self.original}
         assert last_new == {"a": self.pos_llm}
 
-    def test_empate_no_changed_at_decide_pelo_id(self):
+    def test_empate_no_changed_at_desfaz_o_llm_antes_da_034(self):
+        """Mesmo changed_at: a do LLM é a mais recente, qualquer que seja o id."""
         rows = [
-            ("a", "tema26-llm-d1", self.t0, 7, self.pos_034, self.pos_llm),
-            ("a", "tema26-034", self.t0, 3, self.original, self.pos_034),
+            ("a", "tema26-034", self.t0, 9, self.original, self.pos_034),
+            ("a", "tema26-llm-d1", self.t0, 2, self.pos_034, self.pos_llm),
         ]
         first_old, last_new = m.audit_endpoints(rows)
         assert first_old == {"a": self.original}
         assert last_new == {"a": self.pos_llm}
+
+    def test_percorre_do_mais_recente_para_o_mais_antigo(self):
+        """A ordem de percurso é a do contrato: changed_at decrescente."""
+        rows = [
+            ("a", "tema26-034", self.t0, 1, self.original, self.pos_034),
+            ("a", "tema26-llm-d1", self.t1, 900, self.pos_034, self.pos_llm),
+            ("b", "tema26-034", self.t1, 2, self.original, self.pos_034),
+        ]
+        assert [(r[0], r[1]) for r in m.rollback_order(rows)] == [
+            ("b", "tema26-034"),
+            ("a", "tema26-llm-d1"),
+            ("a", "tema26-034"),
+        ]
 
     def test_artigo_de_fora_do_19_movido_so_pelo_llm(self):
         """05.02.01 → 26.02.01 na D1: o rollback tem de voltar a 05.02.01, não ao 19."""
