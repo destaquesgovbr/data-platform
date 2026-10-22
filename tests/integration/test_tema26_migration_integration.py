@@ -646,20 +646,48 @@ class TestContratoComODs1:
 
 @pytest.mark.integration
 class TestMergeDoBigQueryLeAsCampanhas:
-    """bq-merge-theme-changes lê o estado atual dos artigos de todas as campanhas tema26-*."""
+    """bq-merge-theme-changes lê as duas campanhas do contrato, só as linhas não revertidas,
+    do changed_at mais recente para o mais antigo; `reverted=True` depois do rollback."""
 
-    def test_campanhas_padrao_incluem_a_do_llm(self):
+    def test_le_as_duas_campanhas_nao_revertidas(self):
         from data_platform.jobs.bigquery import theme_changes
 
         _run_migrate("migrate", "--yes")
         _d1_llm()
+        _log_audit("inc_20", CORPUS["inc_20"], CORPUS["inc_20"], campaign="tema26-llm-d1b")
 
-        df = theme_changes.fetch_theme_changes_state(DATABASE_URL, theme_changes.DEFAULT_CAMPAIGNS)
+        df = theme_changes.fetch_theme_changes_state(DATABASE_URL)
 
         assert set(df["unique_id"]) == TOCADOS | {"clima", "militar"}
         clima = df.set_index("unique_id").loc["clima"]
         assert clima["theme_l1_code"] == "26"
         assert clima["most_specific_theme_code"] == "26.02.01"
+        assert clima["most_specific_theme_label"] == "Resgate e Salvamento"
+
+    def test_do_mais_recente_para_o_mais_antigo(self):
+        from data_platform.jobs.bigquery import theme_changes
+
+        _run_migrate("migrate", "--yes")
+        _d1_llm()
+
+        df = theme_changes.fetch_theme_changes_state(DATABASE_URL)
+
+        # As 3 do LLM (D1) são posteriores às da 034.
+        assert set(df["unique_id"][:3]) == {"inc_esd", "clima", "militar"}
+
+    def test_conta_quem_diverge_da_mudanca_mais_recente(self):
+        from data_platform.jobs.bigquery import theme_changes
+
+        _run_migrate("migrate", "--yes")
+        _d1_llm()
+        assert not theme_changes.fetch_theme_changes_state(DATABASE_URL)[
+            "diverges_from_audit"
+        ].any()
+
+        _set_news("dc1", ("05", "05.02", "05.02.01", "05.02.01"))  # mudou depois da 034
+        df = theme_changes.fetch_theme_changes_state(DATABASE_URL).set_index("unique_id")
+        assert df["diverges_from_audit"].sum() == 1
+        assert bool(df.loc["dc1", "diverges_from_audit"]) is True
 
     def test_contagem_por_campanha(self):
         from data_platform.jobs.bigquery import theme_changes
@@ -667,6 +695,37 @@ class TestMergeDoBigQueryLeAsCampanhas:
         _run_migrate("migrate", "--yes")
         _d1_llm()
 
-        contagem = theme_changes.count_by_campaign(DATABASE_URL, theme_changes.DEFAULT_CAMPAIGNS)
+        contagem = theme_changes.count_by_campaign(DATABASE_URL)
 
         assert contagem == {"tema26-034": len(TOCADOS), LLM_CAMPAIGN: 3}
+
+    def test_depois_do_rollback_le_as_linhas_revertidas(self, mod):
+        from data_platform.jobs.bigquery import theme_changes
+
+        _run_migrate("migrate", "--yes")
+        _d1_llm()
+        _run_module(mod, "rollback", dry_run=False)
+
+        assert theme_changes.fetch_theme_changes_state(DATABASE_URL).empty
+        assert theme_changes.count_by_campaign(DATABASE_URL) == {}
+
+        df = theme_changes.fetch_theme_changes_state(DATABASE_URL, reverted=True)
+        assert set(df["unique_id"]) == TOCADOS | {"clima", "militar"}
+        clima = df.set_index("unique_id").loc["clima"]
+        assert (clima["theme_l1_code"], clima["most_specific_theme_code"]) == ("05", "05.02.01")
+        assert theme_changes.count_by_campaign(DATABASE_URL, reverted=True) == {
+            "tema26-034": len(TOCADOS),
+            LLM_CAMPAIGN: 3,
+        }
+
+    def test_estado_por_unique_id(self, mod):
+        from data_platform.jobs.bigquery import theme_changes
+
+        _run_migrate("migrate", "--yes")
+        _set_news("novo_do_worker", ("26", "26.01", "26.01.03", "26.01.03"), insert=True)
+        _run_module(mod, "rollback", dry_run=False)
+
+        df = theme_changes.fetch_state_by_ids(DATABASE_URL, ["novo_do_worker", "inexistente"])
+
+        assert list(df["unique_id"]) == ["novo_do_worker"]
+        assert df.iloc[0]["most_specific_theme_code"] == "19.03.03"
