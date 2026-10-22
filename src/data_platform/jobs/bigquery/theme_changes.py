@@ -1,10 +1,16 @@
 """MERGE de dgb_gold.fato_noticias a partir da auditoria de temas (news_theme_changes).
 
 A migração 034 (tema 26) e a reclassificação por LLM do DS-1 registram cada mudança de tema
-em `news_theme_changes`. Este job leva para o BigQuery o estado ATUAL de tema (códigos e
-rótulos de l1, l2 e most_specific, os mesmos joins do sync diário) de todo artigo que
-aparece na auditoria das campanhas, numa tabela de staging (WRITE_TRUNCATE), e faz MERGE no
-fato só onde código ou rótulo diverge.
+em `news_theme_changes`, uma linha por artigo em cada campanha: `tema26-034` (a 034),
+`tema26-llm-d1` (o LLM da D1; uma reexecução depois de rollback usa outra `tema26-*`) e
+`tema26-rollback`. Este job leva para o BigQuery o estado ATUAL de tema (códigos e rótulos de
+l1, l2 e most_specific, os mesmos joins do sync diário) de todo artigo que aparece na
+auditoria das campanhas, numa tabela de staging (WRITE_TRUNCATE), e faz MERGE no fato só onde
+código ou rótulo diverge.
+
+As campanhas são padrões LIKE (o default, `tema26-%`, pega todas as do tema 26). As stats
+trazem os artigos por campanha (`by_campaign`): no dry-run da D1, `tema26-llm-d1` tem de
+aparecer com a contagem do run.
 
 O estado vem de `news` e não das colunas new_* da auditoria: se o artigo mudou de novo
 depois (worker ao vivo, rollback), o fato fica igual ao Postgres. Reexecutável: roda na D0
@@ -22,7 +28,8 @@ logger = logging.getLogger(__name__)
 DATASET_ID = "dgb_gold"
 FATO_TABLE = "fato_noticias"
 STAGING_TABLE = "_stg_news_theme_changes"
-DEFAULT_CAMPAIGNS: tuple[str, ...] = ("tema26", "tema26-rollback")
+# Padrão LIKE das campanhas do tema 26 (o mesmo CAMPAIGN_PATTERN da migração 034).
+DEFAULT_CAMPAIGNS: tuple[str, ...] = ("tema26-%",)
 
 THEME_COLUMNS: tuple[str, ...] = (
     "theme_l1_code",
@@ -44,12 +51,21 @@ THEME_CHANGES_STATE_QUERY = """
         tm.label AS most_specific_theme_label
     FROM news n
     JOIN (
-        SELECT DISTINCT unique_id FROM news_theme_changes WHERE campaign = ANY(%s)
+        SELECT DISTINCT unique_id FROM news_theme_changes WHERE campaign LIKE ANY(%s)
     ) c ON c.unique_id = n.unique_id
     LEFT JOIN themes t1 ON n.theme_l1_id = t1.id
     LEFT JOIN themes t2 ON n.theme_l2_id = t2.id
     LEFT JOIN themes tm ON n.most_specific_theme_id = tm.id
     ORDER BY n.unique_id
+"""
+
+
+CAMPAIGN_COUNTS_QUERY = """
+    SELECT campaign, COUNT(DISTINCT unique_id) AS articles
+    FROM news_theme_changes
+    WHERE campaign LIKE ANY(%s)
+    GROUP BY campaign
+    ORDER BY campaign
 """
 
 
@@ -88,18 +104,28 @@ WHERE {_diff_predicate()}
 """
 
 
-def fetch_theme_changes_state(db_url: str, campaigns: Sequence[str]) -> pd.DataFrame:
-    """Estado atual de tema (Postgres) dos artigos que aparecem na auditoria das campanhas."""
+def _read(db_url: str, sql: str, campaigns: Sequence[str]) -> pd.DataFrame:
     from sqlalchemy import create_engine
     from sqlalchemy.pool import NullPool
 
     engine = create_engine(db_url, poolclass=NullPool)
     try:
-        df = pd.read_sql_query(THEME_CHANGES_STATE_QUERY, engine, params=(list(campaigns),))
+        return pd.read_sql_query(sql, engine, params=(list(campaigns),))
     finally:
         engine.dispose()
+
+
+def fetch_theme_changes_state(db_url: str, campaigns: Sequence[str]) -> pd.DataFrame:
+    """Estado atual de tema (Postgres) dos artigos que aparecem na auditoria das campanhas."""
+    df = _read(db_url, THEME_CHANGES_STATE_QUERY, campaigns)
     logger.info(f"{len(df)} artigos na auditoria das campanhas {list(campaigns)}")
     return df
+
+
+def count_by_campaign(db_url: str, campaigns: Sequence[str]) -> dict[str, int]:
+    """Artigos distintos por campanha que casa com os padrões (para o log e o dry-run)."""
+    df = _read(db_url, CAMPAIGN_COUNTS_QUERY, campaigns)
+    return {str(row.campaign): int(row.articles) for row in df.itertuples(index=False)}
 
 
 def merge_theme_changes(
@@ -114,11 +140,13 @@ def merge_theme_changes(
 
     stats = {
         "campaigns": list(campaigns),
+        "by_campaign": count_by_campaign(db_url, campaigns),
         "staged": 0,
         "fato_rows_to_update": 0,
         "merged": 0,
         "dry_run": dry_run,
     }
+    logger.info(f"Artigos por campanha na auditoria: {stats['by_campaign']}")
     df = fetch_theme_changes_state(db_url, campaigns)
     if df.empty:
         logger.info("Auditoria vazia para as campanhas: nada a levar ao BigQuery")

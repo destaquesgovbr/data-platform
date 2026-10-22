@@ -148,13 +148,12 @@ def _client(diff_rows: int = 2, merged_rows: int = 2) -> MagicMock:
 POR_CAMPANHA = {"tema26-034": 209, "tema26-llm-d1": 1377}
 
 
-@pytest.fixture(autouse=True)
-def _contagem_por_campanha():
-    with patch.object(tc, "count_by_campaign", return_value=POR_CAMPANHA) as mock_count:
-        yield mock_count
-
-
 class TestMergeThemeChanges:
+    @pytest.fixture(autouse=True)
+    def contagem(self):
+        with patch.object(tc, "count_by_campaign", return_value=POR_CAMPANHA) as mock_count:
+            yield mock_count
+
     @patch.object(tc, "fetch_theme_changes_state")
     @patch("google.cloud.bigquery.Client")
     def test_carrega_staging_com_truncate_e_schema(self, mock_client_cls, mock_fetch):
@@ -216,7 +215,7 @@ class TestMergeThemeChanges:
     @patch.object(tc, "fetch_theme_changes_state")
     @patch("google.cloud.bigquery.Client")
     def test_contagem_por_campanha_usa_as_mesmas_campanhas(
-        self, mock_client_cls, mock_fetch, _contagem_por_campanha
+        self, mock_client_cls, mock_fetch, contagem
     ):
         mock_fetch.return_value = _state(1)
         mock_client_cls.return_value = _client(diff_rows=1, merged_rows=1)
@@ -225,7 +224,7 @@ class TestMergeThemeChanges:
             "postgresql://x", "projeto-x", campaigns=("tema26-034",), dry_run=True
         )
 
-        _contagem_por_campanha.assert_called_once_with("postgresql://x", ("tema26-034",))
+        contagem.assert_called_once_with("postgresql://x", ("tema26-034",))
         assert stats["by_campaign"] == POR_CAMPANHA
 
     def test_campanha_vazia_falha(self):

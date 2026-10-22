@@ -205,9 +205,10 @@ def typesense_list() -> None:
 @app.command("bq-merge-theme-changes")
 def bq_merge_theme_changes(
     campaign: list[str] = typer.Option(
-        ["tema26", "tema26-rollback"],
+        ["tema26-%"],
         "--campaign",
-        help="Campanha da auditoria news_theme_changes (repita para várias)",
+        help="Campanha (ou padrão LIKE) da auditoria news_theme_changes; repita para "
+        "várias. Padrão tema26-%: tema26-034, tema26-llm-d1 e tema26-rollback",
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Só grava a staging e conta as linhas do fato que mudariam"
@@ -219,7 +220,8 @@ def bq_merge_theme_changes(
     MERGE dgb_gold.fato_noticias from the theme audit (theme 26: D0 and D1).
 
     Reads (read-only) the current theme of every article in news_theme_changes for the
-    campaigns, loads it into dgb_gold._stg_news_theme_changes and merges where it differs.
+    campaigns (LIKE patterns), loads it into dgb_gold._stg_news_theme_changes and merges
+    where it differs. Logs the articles per campaign (by_campaign).
     """
     from data_platform.jobs.bigquery import theme_changes
 
