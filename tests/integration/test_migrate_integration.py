@@ -861,6 +861,16 @@ class TestBackfillContentKeyMigration:
         assert result["projected_seconds"] >= 0
         assert set(_content_keys().values()) == {None}
 
+    def test_036_dry_run_sem_a_035_avisa_em_vez_de_quebrar(self):
+        """`migrate --dry-run` com 035 e 036 pendentes: o runner desfaz o preview da 035."""
+        result = _run_migrate("rollback", "035", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+
+        result = _run_036(dry_run=True)
+
+        assert result["preview"] is True
+        assert "035" in result["message"]
+
     def test_036_corpus_vazio(self):
         _execute("DELETE FROM news")
 
