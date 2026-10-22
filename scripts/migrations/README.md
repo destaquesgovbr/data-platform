@@ -43,6 +43,7 @@ does not report them as gaps. Remove the entry when the PR lands with its file.
 |---|----------|
 | 030 | data-platform#189 (summary moderation) |
 | 031 | data-platform#184 (BGE-M3) |
+| 034 | tema 26 Defesa Civil (DP-2, `feature/tema-26-migracao`) |
 
 ## Backfills
 
