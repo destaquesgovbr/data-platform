@@ -12,8 +12,8 @@
 -- atras do rebuild da DAG (que segura a tabela durante a transacao) bloqueando leitores.
 SET LOCAL lock_timeout = '10s';
 
--- Conteudos distintos que sustentam a aresta. NULL nas arestas estruturais
--- (subordinate_to, is_agency) e nas de co-mencao ate o 1o run pos-migracao.
+-- Conteudos distintos que sustentam a aresta. NULL nas arestas subordinate_to e nas de
+-- co-mencao ate o 1o run pos-migracao.
 ALTER TABLE entity_edges
     ADD COLUMN IF NOT EXISTS unique_content_count INTEGER;
 

@@ -110,19 +110,19 @@ class TestCoMentionDedup:
         assert edges[("Q2", "Q3")] == (2, 2, 2)
         assert all(ucc <= w for w, _, ucc in edges.values())
 
-    def test_arestas_estruturais_ficam_com_unique_content_count_nulo(self):
+    def test_arestas_subordinate_to_ficam_com_unique_content_count_nulo(self):
         _execute(
-            "INSERT INTO entity_registry (entity_id, canonical_name, type, provenance, agency_key) "
-            "VALUES ('dgb_mec', 'MEC', 'ORG', 'agencies_seed', 'mec'), "
-            "('Q_mec', 'Ministério da Educação', 'ORG', 'llm', 'mec')"
+            "INSERT INTO entity_registry (entity_id, canonical_name, type, provenance, extra) "
+            """VALUES ('Q_filho', 'Secretaria', 'ORG', 'llm', '{"parent_qid": "Q1"}')"""
         )
 
         project_entity_graph(DATABASE_URL)
 
         rows = _execute(
-            "SELECT src_id, dst_id, unique_content_count FROM entity_edges WHERE kind = 'is_agency'"
+            "SELECT src_id, dst_id, unique_content_count FROM entity_edges "
+            "WHERE kind = 'subordinate_to'"
         )
-        assert rows == [("Q_mec", "dgb_mec", None)]
+        assert rows == [("Q_filho", "Q1", None)]
 
 
 @pytest.mark.integration
