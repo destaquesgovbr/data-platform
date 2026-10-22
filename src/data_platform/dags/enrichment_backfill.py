@@ -32,7 +32,11 @@ Com limit=400 e workers=2 cada run leva ~15-20 min; dois runs gastam ~0,8 da cot
 Mudar a campanha:
   - permanente (schedule): PR alterando DEFAULT_PARAMS;
   - pontual: "Trigger DAG" com params (select, date_from, date_to, limit, workers,
-    model_id, daily_token_quota, quota_fraction, dry_run). dry_run=true so seleciona.
+    model_id, daily_token_quota, quota_fraction, dry_run, theme_code). dry_run=true so
+    seleciona.
+
+Tema 26 (D1, depois da migracao 034 e do deploy do DS-1): trigger com
+select=theme26-candidates (ou select=theme-code + theme_code=19), date_from=2025-09-01.
 
 Desligar: pausar o DAG na UI do Airflow (o estado de pausa persiste entre deploys) ou
 remover este arquivo por PR. Quando a campanha termina os runs viram no-op
@@ -42,6 +46,7 @@ remover este arquivo por PR. Quando a campanha termina os runs viram no-op
 import datetime as dt
 import json
 import logging
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -69,8 +74,16 @@ BACKFILL_SCRIPT = "reenrich_combined_window.py"
 
 # Modos do reenrich_combined_window.py. null-theme e null-summary exigem --date-to
 # (no maximo hoje BRT, checado pelo script): sem teto pegariam artigos do worker ao vivo.
-SELECT_CHOICES = ("mock", "null-theme", "null-summary")
+# Tema 26 (D1, DS-1), so gravam o tema (e registram em news_theme_changes):
+#   - theme-code: artigos com tema no codigo --theme-code (L1, L2 ou L3);
+#   - theme26-candidates: L1 19, mais os de 04/05.02.01/15.02.03 do MDR ou que citam
+#     "defesa civil", "calamidade", "situacao de emergencia", "estado de emergencia" ou
+#     "desastre" no titulo/conteudo.
+# Os dois so pegam artigo ja com tema (nao disputam com o worker ao vivo): date_to opcional.
+SELECT_CHOICES = ("mock", "null-theme", "null-summary", "theme-code", "theme26-candidates")
 SELECTS_REQUIRING_DATE_TO = ("null-theme", "null-summary")
+SELECT_WITH_THEME_CODE = "theme-code"
+THEME_CODE_PATTERN = r"^\d{2}(\.\d{2}){0,2}$"
 
 HAIKU_45 = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
@@ -86,6 +99,7 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "daily_token_quota": {HAIKU_45: 20000000},
     "quota_fraction": 0.8,
     "dry_run": False,
+    "theme_code": None,
 }
 
 
@@ -141,6 +155,19 @@ def _fraction(value: Any) -> float:
     return fraction
 
 
+def _theme_code(select: str, value: Any) -> str | None:
+    code = value.strip() if isinstance(value, str) else value
+    if select != SELECT_WITH_THEME_CODE:
+        if code not in (None, ""):
+            raise ValueError(f"theme_code so vale com select={SELECT_WITH_THEME_CODE}: {value!r}")
+        return None
+    if code in (None, ""):
+        raise ValueError(f"select {SELECT_WITH_THEME_CODE} exige theme_code (ex.: 19, 05.02.01)")
+    if not isinstance(code, str) or not re.match(THEME_CODE_PATTERN, code):
+        raise ValueError(f"theme_code invalido {value!r} (use NN, NN.NN ou NN.NN.NN)")
+    return code
+
+
 def build_overrides(params: Mapping[str, Any]) -> dict:
     """Valida os params do run e monta o RunJobRequest.Overrides do Job.
 
@@ -155,6 +182,7 @@ def build_overrides(params: Mapping[str, Any]) -> dict:
     select = params.get("select")
     if select not in SELECT_CHOICES:
         raise ValueError(f"select deve ser um de {SELECT_CHOICES}, recebido {select!r}")
+    theme_code = _theme_code(select, params.get("theme_code"))
 
     date_from = _iso_date("date_from", params.get("date_from"))
     raw_date_to = params.get("date_to")
@@ -173,7 +201,10 @@ def build_overrides(params: Mapping[str, Any]) -> dict:
     quota = _quota(params.get("daily_token_quota"), model_id)
     fraction = _fraction(params.get("quota_fraction"))
 
-    args = ["--select", select, "--date-from", date_from]
+    args = ["--select", select]
+    if theme_code is not None:
+        args += ["--theme-code", theme_code]
+    args += ["--date-from", date_from]
     if date_to is not None:
         args += ["--date-to", date_to]
     args += ["--limit", str(limit), "--workers", str(workers)]
@@ -260,6 +291,12 @@ def build_overrides(params: Mapping[str, Any]) -> dict:
             type="boolean",
             description="So seleciona e lista; nao chama o Bedrock nem escreve",
         ),
+        "theme_code": Param(
+            DEFAULT_PARAMS["theme_code"],
+            type=["null", "string"],
+            pattern=THEME_CODE_PATTERN,
+            description="Codigo de tema (NN, NN.NN ou NN.NN.NN); so com select=theme-code",
+        ),
     },
     doc_md="""
     ### Backfills de enriquecimento (tema + resumo + sentimento)
@@ -276,12 +313,18 @@ def build_overrides(params: Mapping[str, Any]) -> dict:
     do ner_backfill.
 
     **Trigger manual com params:** `select`, `date_from`, `date_to`, `limit`,
-    `workers`, `model_id`, `daily_token_quota`, `quota_fraction`, `dry_run`. A task
+    `workers`, `model_id`, `daily_token_quota`, `quota_fraction`, `dry_run`,
+    `theme_code`. A task
     `build_overrides` valida tudo antes de subir o Job (cota sem a chave do modelo
     falha: o governador rodaria sem teto).
 
     **Mudar a campanha de forma permanente:** PR em `DEFAULT_PARAMS`.
     **Desligar:** pausar o DAG na UI.
+
+    **Tema 26 (D1):** `select=theme26-candidates` (L1 19, mais 04/05.02.01/15.02.03 do
+    MDR ou com termo de defesa civil) ou `select=theme-code` + `theme_code` (ex.: `19`).
+    So regravam o tema e registram em `news_theme_changes`; `date_to` e opcional.
+    Sempre `dry_run=true`, depois `limit=10`, depois o lote completo.
 
     **Atencao:** run verde nao significa zero falhas por artigo. Ver a linha `FIM:` no
     log da execucao do Job; artigos com falha sao selecionados de novo no proximo run.
