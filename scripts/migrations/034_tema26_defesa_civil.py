@@ -56,8 +56,11 @@ unique_id ficam em `unaudited_inverse_map`, no log. Os 26* são apagados e a tab
 auditoria fica (histórico).
 
 Reaplicar depois do rollback: o UPSERT da auditoria (ON CONFLICT (campaign, unique_id))
-reaproveita a linha do artigo na campanha, com os códigos novos e reverted_at = NULL. As
-linhas do LLM continuam revertidas.
+reaproveita a linha do artigo em `tema26-034`, com os códigos novos e reverted_at = NULL.
+Reaplicar a 034 não toca as linhas do LLM: elas continuam revertidas até uma nova D1. O
+DS-1 (data-science#49) trata o artigo com linha revertida em `tema26-llm-d1` como
+candidato de novo e reaproveita essa mesma linha (ON CONFLICT ... DO UPDATE ... WHERE
+reverted_at IS NOT NULL, com reverted_at = NULL), sem criar outra campanha.
 
 Depois do apply: sync do Typesense (por intervalo desde 2025-09-01), BigQuery 002 e
 `data-platform bq-merge-theme-changes`; depois de um rollback, `bq-merge-theme-changes
