@@ -42,6 +42,11 @@ class _Cursor:
         self.closed = True
 
 
+def _set_rowcount(cursor, _sql, values, **_kwargs):
+    """execute_values falso: o UPDATE grava todas as linhas do lote."""
+    cursor.rowcount = len(values)
+
+
 def _conn(batches):
     cursor = _Cursor(batches)
     conn = MagicMock()
@@ -94,7 +99,7 @@ class TestPreenchimento:
         conn, cursor = _conn([[("a", LONGO), ("b", CURTO)], [("c", LONGO)]])
         since = datetime(2026, 10, 19, tzinfo=UTC)
 
-        with patch.object(mod, "execute_values") as ev:
+        with patch.object(mod, "execute_values", side_effect=_set_rowcount) as ev:
             result = mod.fill_missing_flesch_ptbr(conn, since=since, batch_size=2)
 
         assert [params["after"] for _, params in cursor.selects] == ["", "b"]

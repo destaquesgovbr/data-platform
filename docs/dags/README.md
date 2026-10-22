@@ -10,7 +10,7 @@ DAGs em produção no Cloud Composer (southamerica-east1), responsáveis por pro
 |-----|----------|--------|-----------|
 | `sync_pg_to_bigquery` | `0 7 * * *` | Gold | PG → BigQuery |
 | `compute_trending` | `0 */6 * * *` | Gold | Trending scores |
-| `aggregate_engagement` | `0 8 * * *` | Gold | Pageview aggregation |
+| `aggregate_engagement` | `0 8 * * *` | Gold | Pageview aggregation + Flesch pt-BR faltante |
 | `compute_clusters` | `30 7 * * *` | Silver | Similarity clustering |
 | `generate_video_thumbnails` | `0 */4 * * *` | Silver | Video thumbnails |
 | `sync_umami_to_bigquery` | `0 9 * * *` | Gold | Umami → BigQuery |
@@ -43,6 +43,17 @@ Agrega pageviews de `dgb_gold.umami_pageviews` por artigo. Persiste em `news_fea
 - **Tags**: `gold`, `features`, `engagement`
 - **Variables**: `gcp_project_id` (sem default — obrigatório)
 - **Job module**: `src/data_platform/jobs/bigquery/engagement.py`
+
+Task independente `fill_flesch_ptbr` (DP-1c): completa `news_features.readability_flesch_ptbr` nas
+linhas tocadas nos últimos 3 dias (`updated_at`) que têm `content` e não têm a chave. O
+feature-worker grava a chave em todo artigo que processa; `enrichment_backfill` e o ner-backfill
+criam ou reescrevem linhas sem ela. Mesmo cálculo do worker
+(`src/data_platform/jobs/features/readability_ptbr.py`), merge no JSONB e commit por lote.
+
+- **Job module**: `src/data_platform/jobs/features/flesch_ptbr_fill.py`
+- **Plugins**: o `composer-deploy-dags` instala o `pyphen` da versão do `poetry.lock` em
+  `plugins/pyphen/` (o ambiente não tem o pacote).
+- **Varredura completa** (manual): `dags trigger aggregate_engagement --conf '{"flesch_lookback_days": null}'`.
 
 ### compute_clusters
 
