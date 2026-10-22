@@ -26,13 +26,16 @@ KIND_IS_AGENCY = "is_agency"
 # Chave de deduplicacao de conteudo: UNICO ponto que define quando dois artigos sao "o mesmo
 # conteudo" para unique_content_count (arestas e entity_stats) e total_unique_content (meta).
 # Contrato: exatamente 1 linha por artigo de news, colunas (unique_id, content_key).
-# Hoje: news.content_hash (16 hex do SHA-256 de titulo + conteudo normalizados, migracoes
-# 009/010); sem hash, o proprio artigo. O hash exato quase nao colapsa republicacoes entre
-# orgaos (o texto raramente e identico); trocar por uma chave de quase-duplicata (titulo
-# normalizado, MinHash, ...) e so mudar este SELECT — sem migracao. Por ser uma tabela derivada,
-# a chave e calculada 1 vez por artigo (nao por par de mencoes) e pode vir de outra tabela.
+# 1) news.content_key: unique_id do lider do grupo de quase-duplicatas (regra H5, migracao 035,
+#    calculada por content_keys.compute_content_keys na task anterior da DAG); NULL = sem
+#    quase-duplicata ou ainda nao calculada.
+# 2) news.content_hash: 16 hex do SHA-256 de titulo + conteudo normalizados (009/010), que so
+#    junta textos identicos.
+# 3) o proprio artigo.
+# Os espacos de chave nao colidem (unique_id do lider x 16 hex). A graphql-api usa a mesma regra
+# em _CONTENT_DEDUP_KEY_SQL.
 ARTICLE_CONTENT_KEY_SQL = """
-    SELECT n.unique_id, COALESCE(n.content_hash, n.unique_id) AS content_key
+    SELECT n.unique_id, COALESCE(n.content_key, n.content_hash, n.unique_id) AS content_key
     FROM news n
 """
 
