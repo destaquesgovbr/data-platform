@@ -108,10 +108,78 @@ class TestConstantes:
     def test_mapa_inverso(self):
         assert m.INVERSE_MAP == {new: old for old, new in m.CODE_MAP.items()} | {"26": "19"}
 
-    def test_campanha_e_origem(self):
-        assert m.CAMPAIGN == "tema26"
-        assert m.SOURCE == "034_remap"
+    def test_campanhas_e_origens_do_contrato_de_22_10(self):
+        """Contrato da auditoria (plano, 22/10): campanhas separadas por origem."""
+        assert m.CAMPAIGN == "tema26-034"
+        assert m.SOURCE == "migration-034"
+        assert m.LLM_CAMPAIGN == "tema26-llm-d1"  # DS-1 (data-science#49), source llm:<modelo>
         assert m.ROLLBACK_CAMPAIGN == "tema26-rollback"
+        assert m.ROLLBACK_SOURCE == "migration-034-rollback"
+
+    def test_padrao_das_campanhas_do_tema_26(self):
+        """O rollback e o MERGE do BigQuery leem `campaign LIKE 'tema26-%'`."""
+        assert m.CAMPAIGN_PATTERN == "tema26-%"
+        prefixo = m.CAMPAIGN_PATTERN.rstrip("%")
+        for campanha in (m.CAMPAIGN, m.LLM_CAMPAIGN, m.ROLLBACK_CAMPAIGN):
+            assert campanha.startswith(prefixo), campanha
+
+
+# --------------------------------------------------------------------------
+# Tabela de auditoria: contrato com o DS-1 (UNIQUE (campaign, unique_id))
+# --------------------------------------------------------------------------
+
+
+def _sql(texto: str) -> str:
+    return " ".join(texto.split())
+
+
+class TestContratoDaAuditoria:
+    def test_unique_em_campaign_unique_id_sem_predicado(self):
+        """O preflight do DS-1 exige índice único exatamente em (campaign, unique_id)."""
+        sql = _sql(m.CREATE_AUDIT_SQL)
+        assert (
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_news_theme_changes_campaign_uid "
+            "ON news_theme_changes (campaign, unique_id);" in sql
+        )
+
+    def test_sem_indice_nao_unico_redundante(self):
+        assert "idx_news_theme_changes_campaign_uid" not in m.CREATE_AUDIT_SQL
+
+    def test_colunas_do_contrato(self):
+        sql = _sql(m.CREATE_AUDIT_SQL)
+        for coluna in (
+            "id BIGSERIAL PRIMARY KEY",
+            "campaign VARCHAR(50) NOT NULL",
+            "unique_id VARCHAR(120) NOT NULL",
+            "old_l1_code VARCHAR(20)",
+            "old_most_specific_code VARCHAR(20)",
+            "new_l1_code VARCHAR(20)",
+            "new_most_specific_code VARCHAR(20)",
+            "source VARCHAR(50) NOT NULL",
+            "note TEXT",
+            "changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+            "reverted_at TIMESTAMPTZ",
+        ):
+            assert coluna in sql, coluna
+
+    def test_insert_reaplicavel_depois_do_rollback(self):
+        """Uma linha por (campanha, artigo): reaplicar sobrescreve e limpa o reverted_at."""
+        sql = _sql(m.INSERT_AUDIT_SQL)
+        assert "ON CONFLICT (campaign, unique_id) DO UPDATE SET" in sql
+        assert "changed_at = EXCLUDED.changed_at" in sql
+        assert "reverted_at = NULL" in sql
+        for coluna in ("old_l1_code", "new_most_specific_code", "source", "note"):
+            assert f"{coluna} = EXCLUDED.{coluna}" in sql, coluna
+
+    def test_rollback_le_as_campanhas_do_tema_26_menos_a_propria(self):
+        sql = _sql(m.AUDIT_ROWS_SQL)
+        assert "campaign LIKE %(pattern)s" in sql
+        assert "campaign <> %(rollback)s" in sql
+        assert "reverted_at IS NULL" in sql
+        assert "ORDER BY changed_at, id" in sql
+        marca = _sql(m.MARK_REVERTED_SQL)
+        assert "campaign LIKE %(pattern)s" in marca
+        assert "campaign <> %(rollback)s" in marca
 
 
 # --------------------------------------------------------------------------
@@ -264,6 +332,62 @@ class TestPropriedadesDoRemap:
 # --------------------------------------------------------------------------
 # Rollback: alvo a partir da auditoria e mapa inverso
 # --------------------------------------------------------------------------
+
+
+class TestPontasDaAuditoria:
+    """Estado antes da PRIMEIRA mudança e depois da ÚLTIMA, por artigo, somando as
+    campanhas do tema 26 (034 e LLM da D1), na ordem (changed_at, id)."""
+
+    t0 = "2026-11-10T22:00:00+00:00"
+    t1 = "2026-11-11T10:00:00+00:00"
+    original = _codes("19", "19.03", "19.03.03")
+    pos_034 = _codes("26", "26.01", "26.01.03")
+    pos_llm = _codes("26", "26.02", "26.02.01")
+
+    def test_uma_campanha(self):
+        rows = [("a", "tema26-034", self.t0, 1, self.original, self.pos_034)]
+        first_old, last_new = m.audit_endpoints(rows)
+        assert first_old == {"a": self.original}
+        assert last_new == {"a": self.pos_034}
+
+    def test_034_e_depois_o_llm(self):
+        rows = [
+            ("a", "tema26-034", self.t0, 1, self.original, self.pos_034),
+            ("a", "tema26-llm-d1", self.t1, 900, self.pos_034, self.pos_llm),
+        ]
+        first_old, last_new = m.audit_endpoints(rows)
+        assert first_old == {"a": self.original}
+        assert last_new == {"a": self.pos_llm}
+
+    def test_ordem_e_por_changed_at_e_nao_pela_lista(self):
+        rows = [
+            ("a", "tema26-llm-d1", self.t1, 900, self.pos_034, self.pos_llm),
+            ("a", "tema26-034", self.t0, 1, self.original, self.pos_034),
+        ]
+        first_old, last_new = m.audit_endpoints(rows)
+        assert first_old == {"a": self.original}
+        assert last_new == {"a": self.pos_llm}
+
+    def test_empate_no_changed_at_decide_pelo_id(self):
+        rows = [
+            ("a", "tema26-llm-d1", self.t0, 7, self.pos_034, self.pos_llm),
+            ("a", "tema26-034", self.t0, 3, self.original, self.pos_034),
+        ]
+        first_old, last_new = m.audit_endpoints(rows)
+        assert first_old == {"a": self.original}
+        assert last_new == {"a": self.pos_llm}
+
+    def test_artigo_de_fora_do_19_movido_so_pelo_llm(self):
+        """05.02.01 → 26.02.01 na D1: o rollback tem de voltar a 05.02.01, não ao 19."""
+        clima = _codes("05", "05.02", "05.02.01")
+        rows = [("c", "tema26-llm-d1", self.t1, 5, clima, self.pos_llm)]
+        first_old, last_new = m.audit_endpoints(rows)
+        assert first_old == {"c": clima}
+        assert last_new == {"c": self.pos_llm}
+        assert m.rollback_target(self.pos_llm, first_old["c"], last_new["c"]) == (
+            clima,
+            "revertido",
+        )
 
 
 class TestRollback:

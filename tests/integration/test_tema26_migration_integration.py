@@ -5,6 +5,11 @@ Banco descartável de test_migrate_integration.py (MIGRATION_TEST_DATABASE_URL):
 + `stamp 033`, para que `migrate` rode só a 034. O corpus semeado reproduz os padrões de
 produção de 21/10 (contagens de base, seção C): hierarquias coerentes em 19.03/19.04,
 só-L2, as 4 incoerentes que envolvem o 19 e artigos fora do escopo.
+
+Contrato da auditoria com o DS-1 (data-science#49, scripts/reenrich_combined_window.py):
+UNIQUE (campaign, unique_id), campanha `tema26-034` (source `migration-034`) para a 034 e
+`tema26-llm-d1` (source `llm:<modelo>`) para a reclassificação por LLM da D1. O preflight
+do DS-1 está copiado abaixo (DS1_*) e roda contra a tabela que a 034 cria.
 """
 
 import importlib.util
@@ -19,6 +24,17 @@ from tests.integration.test_migrate_integration import (
     _reset_database,
     _run_migrate,
 )
+
+
+def _execute_params(sql: str, params: tuple) -> list[tuple]:
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+    finally:
+        conn.close()
+
 
 MIGRATION = Path(__file__).parents[2] / "scripts" / "migrations" / "034_tema26_defesa_civil.py"
 
@@ -88,6 +104,51 @@ ESPERADO_APOS_034 = {
 }
 
 TOCADOS = {"dc1", "dc2", "dc3", "em1", "so_l2", "inc_15", "inc_esd", "inc_bh"}
+
+LLM_CAMPAIGN = "tema26-llm-d1"
+LLM_SOURCE = "llm:us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+# Cópia do preflight do DS-1 (data-science#49, scripts/reenrich_combined_window.py:
+# AUDIT_REQUIRED_COLUMNS, AUDIT_UNIQUE_SQL e CAMPAIGN_FOREIGN_SOURCES_SQL). Sem isso o
+# script sai com 1, inclusive no --dry-run, e a D1 inteira fica bloqueada.
+DS1_AUDIT_REQUIRED_COLUMNS = (
+    "campaign",
+    "unique_id",
+    "old_l1_code",
+    "old_l2_code",
+    "old_l3_code",
+    "old_most_specific_code",
+    "new_l1_code",
+    "new_l2_code",
+    "new_l3_code",
+    "new_most_specific_code",
+    "source",
+    "changed_at",
+)
+DS1_AUDIT_COLUMNS_SQL = """
+    SELECT column_name FROM information_schema.columns
+    WHERE table_name = %s AND table_schema = current_schema()
+"""
+DS1_AUDIT_UNIQUE_SQL = """
+    SELECT EXISTS (
+        SELECT 1 FROM pg_index i
+        WHERE i.indrelid = to_regclass(%s)
+          AND i.indisunique
+          AND i.indpred IS NULL
+          AND i.indnkeyatts = 2
+          AND (
+              SELECT array_agg(a.attname::text ORDER BY a.attname::text)
+              FROM pg_attribute a
+              WHERE a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey::int2[])
+          ) = ARRAY['campaign', 'unique_id']
+    )
+"""
+DS1_CAMPAIGN_FOREIGN_SOURCES_SQL = """
+    SELECT DISTINCT source FROM news_theme_changes
+    WHERE campaign = %s AND source NOT LIKE %s
+    ORDER BY source
+    LIMIT 5
+"""
 
 LEGADO = [
     "19.03",
@@ -177,7 +238,7 @@ def _audit_table_exists() -> bool:
     return _execute("SELECT to_regclass('news_theme_changes') IS NOT NULL") == [(True,)]
 
 
-def _audit(campaign: str = "tema26") -> list[tuple]:
+def _audit(campaign: str = "tema26-034") -> list[tuple]:
     return _execute(
         "SELECT unique_id, old_l1_code, old_l2_code, old_l3_code, old_most_specific_code, "
         "new_l1_code, new_l2_code, new_l3_code, new_most_specific_code, source, note, "
@@ -186,7 +247,14 @@ def _audit(campaign: str = "tema26") -> list[tuple]:
     )
 
 
-def _log_audit(unique_id: str, old: tuple, new: tuple, source: str = "ds1_llm") -> None:
+def _log_audit(
+    unique_id: str,
+    old: tuple,
+    new: tuple,
+    campaign: str = LLM_CAMPAIGN,
+    source: str = LLM_SOURCE,
+) -> None:
+    """Grava como o DS-1 (INSERT_AUDIT_SQL do data-science#49: sem note, sem ON CONFLICT)."""
     conn = psycopg2.connect(DATABASE_URL)
     try:
         with conn.cursor() as cur:
@@ -194,12 +262,28 @@ def _log_audit(unique_id: str, old: tuple, new: tuple, source: str = "ds1_llm") 
                 "INSERT INTO news_theme_changes (campaign, unique_id, old_l1_code, old_l2_code, "
                 "old_l3_code, old_most_specific_code, new_l1_code, new_l2_code, new_l3_code, "
                 "new_most_specific_code, source) "
-                "VALUES ('tema26', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (unique_id, *old, *new, source),
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (campaign, unique_id, *old, *new, source),
             )
         conn.commit()
     finally:
         conn.close()
+
+
+def _d1_llm() -> None:
+    """D1 simulada depois da 034: o LLM move 3 artigos, cada um na campanha do DS-1.
+
+    - inc_esd: ficou no 19 pela 034 (l3_descartado) e o LLM o põe no 26;
+    - clima: de 05.02.01 (bloco extra, sem auditoria da 034) para o 26;
+    - militar: dentro do 19 (19.01.02 → 19.05.01).
+    """
+    for uid, old, new in (
+        ("inc_esd", ESPERADO_APOS_034["inc_esd"], ("26", "26.01", "26.01.03", "26.01.03")),
+        ("clima", CORPUS["clima"], ("26", "26.02", "26.02.01", "26.02.01")),
+        ("militar", CORPUS["militar"], ("19", "19.05", "19.05.01", "19.05.01")),
+    ):
+        _set_news(uid, new)
+        _log_audit(uid, old, new)
 
 
 def _run_module(mod, action: str, dry_run: bool) -> dict:
@@ -306,7 +390,7 @@ class TestApply:
         for uid, *codes, source, note, reverted in audit:
             assert tuple(codes[:4]) == CORPUS[uid]
             assert tuple(codes[4:]) == ESPERADO_APOS_034[uid]
-            assert source == "034_remap"
+            assert source == "migration-034"
             assert note in {"remap", "hierarquia_reconstruida", "l3_descartado"}
             assert reverted is False
 
@@ -363,22 +447,28 @@ class TestRollback:
         assert all(row[-1] for row in _audit())
         desfeito = _audit("tema26-rollback")
         assert {row[0] for row in desfeito} == TOCADOS
-        assert {row[9] for row in desfeito} == {"034_rollback"}
+        assert {row[9] for row in desfeito} == {"migration-034-rollback"}
 
     def test_rollback_desfaz_tambem_a_reclassificacao_por_llm(self, mod):
         _run_migrate("migrate", "--yes")
-        # D1: o LLM move o inc_esd (ficou no 19) e um artigo de 05 para o 26
-        novo_esd = ("26", "26.01", "26.01.03", "26.01.03")
-        _set_news("inc_esd", novo_esd)
-        _log_audit("inc_esd", ESPERADO_APOS_034["inc_esd"], novo_esd)
-        novo_clima = ("26", "26.02", "26.02.01", "26.02.01")
-        _set_news("clima", novo_clima)
-        _log_audit("clima", CORPUS["clima"], novo_clima)
+        _d1_llm()
 
         stats = _run_module(mod, "rollback", dry_run=False)
 
         assert _news_codes() == CORPUS
-        assert stats["by_reason"] == {"revertido": 9}
+        assert stats["by_reason"] == {"revertido": len(TOCADOS) + 2}
+        assert stats["campaign_rows_reverted"] == {"tema26-034": len(TOCADOS), LLM_CAMPAIGN: 3}
+        assert all(row[-1] for row in _audit(LLM_CAMPAIGN))
+
+    def test_artigo_movido_para_o_26_so_pelo_llm_volta_ao_tema_original(self, mod):
+        """05.02.01 → 26.02.01 na campanha do LLM volta a 05.02.01, não a 19.04.01."""
+        _run_migrate("migrate", "--yes")
+        _d1_llm()
+
+        _run_module(mod, "rollback", dry_run=False)
+
+        assert _news_codes()["clima"] == ("05", "05.02", "05.02.01", "05.02.01")
+        assert _news_codes()["militar"] == CORPUS["militar"]
 
     def test_artigo_no_26_fora_da_auditoria_volta_pelo_mapa_inverso(self, mod):
         _run_migrate("migrate", "--yes")
@@ -412,5 +502,46 @@ class TestRollback:
         result = _run_migrate("migrate", "--yes")
         assert result.returncode == 0, result.stdout + result.stderr
         assert _news_codes() == ESPERADO_APOS_034
-        ativos = [row for row in _audit() if not row[-1]]
-        assert {row[0] for row in ativos} == TOCADOS
+        audit = _audit()
+        assert len(audit) == len(TOCADOS)  # UNIQUE: a linha é reaproveitada
+        assert {row[0] for row in audit} == TOCADOS
+        assert not any(row[-1] for row in audit)
+
+    def test_aplicar_reverter_duas_vezes(self):
+        for _ in range(2):
+            result = _run_migrate("migrate", "--yes")
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert _news_codes() == ESPERADO_APOS_034
+            result = _run_migrate("rollback", "034", "--yes")
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert _news_codes() == CORPUS
+        assert len(_audit("tema26-rollback")) == len(TOCADOS)
+
+
+@pytest.mark.integration
+class TestContratoComODs1:
+    """O preflight do DS-1 (data-science#49) aceita a tabela que a 034 cria."""
+
+    def test_colunas_do_contrato(self):
+        _run_migrate("migrate", "--yes")
+        colunas = {
+            row[0] for row in _execute_params(DS1_AUDIT_COLUMNS_SQL, ("news_theme_changes",))
+        }
+        assert set(DS1_AUDIT_REQUIRED_COLUMNS) <= colunas
+
+    def test_unique_campaign_unique_id_sem_predicado(self):
+        _run_migrate("migrate", "--yes")
+        assert _execute_params(DS1_AUDIT_UNIQUE_SQL, ("news_theme_changes",)) == [(True,)]
+
+    def test_campanha_do_llm_sem_fonte_estranha(self):
+        _run_migrate("migrate", "--yes")
+        assert _execute_params(DS1_CAMPAIGN_FOREIGN_SOURCES_SQL, (LLM_CAMPAIGN, "llm:%")) == []
+        estranhas = _execute_params(DS1_CAMPAIGN_FOREIGN_SOURCES_SQL, ("tema26-034", "llm:%"))
+        assert estranhas == [("migration-034",)]
+
+    def test_unique_barra_segunda_linha_do_mesmo_artigo_na_campanha(self):
+        _run_migrate("migrate", "--yes")
+        novo = ("26", "26.01", "26.01.03", "26.01.03")
+        _log_audit("inc_esd", ESPERADO_APOS_034["inc_esd"], novo)
+        with pytest.raises(psycopg2.errors.UniqueViolation):
+            _log_audit("inc_esd", novo, novo)
