@@ -1,10 +1,11 @@
 """
 Integração da projeção em grafo (jobs/graph/edges.py) contra PostgreSQL real.
 
-Aplica todas as migrações (inclusive a 032) num banco descartável e roda
-project_entity_graph de ponta a ponta: dedup por content_hash nas arestas de
-co-menção (unique_content_count), entity_stats e entity_graph_meta. Os testes
-unitários só conferem as strings de SQL.
+Aplica todas as migrações (inclusive 032 e 035) num banco descartável e roda
+project_entity_graph de ponta a ponta: dedup por COALESCE(content_key, content_hash,
+unique_id) nas arestas de co-menção (unique_content_count), entity_stats e
+entity_graph_meta; e compute_content_keys (chave de quase-duplicata H5) gravando
+news.content_key. Os testes unitários só conferem as strings de SQL e o plano.
 
 Requer: PostgreSQL com pgvector, apontado por MIGRATION_TEST_DATABASE_URL (o mesmo
 banco descartável de test_migrate_integration.py; ver ci-migrations.yaml):
@@ -12,13 +13,16 @@ banco descartável de test_migrate_integration.py; ver ci-migrations.yaml):
 """
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+import psycopg2
 import pytest
 
+from data_platform.jobs.graph.content_keys import compute_content_keys, run_content_keys
 from data_platform.jobs.graph.edges import project_entity_graph
 from tests.integration.test_migrate_integration import (
     DATABASE_URL,
+    MIGRATIONS_DIR,
     _apply_all_migrations,
     _execute,
     _reset_database,
@@ -44,11 +48,14 @@ def _insert_article(
     published_at: str,
     content_hash: str | None,
     entity_ids: list[str],
+    content_key: str | None = None,
 ) -> None:
     hash_sql = f"'{content_hash}'" if content_hash else "NULL"
+    key_sql = f"'{content_key}'" if content_key else "NULL"
     _execute(
-        "INSERT INTO news (unique_id, agency_id, title, published_at, agency_key, content_hash) "
-        f"SELECT '{unique_id}', id, 'Título', '{published_at}', key, {hash_sql} "
+        "INSERT INTO news (unique_id, agency_id, title, published_at, agency_key, content_hash, "
+        "content_key) "
+        f"SELECT '{unique_id}', id, 'Título', '{published_at}', key, {hash_sql}, {key_sql} "
         f"FROM agencies WHERE key = '{agency_key}'"
     )
     entities = [{"text": e, "type": "ORG", "canonical_id": e} for e in entity_ids]
@@ -90,6 +97,19 @@ class TestCoMentionDedup:
 
         # weight/article_count brutos (3 artigos); conteúdos distintos: h1 + a3 = 2
         assert _co_mention_edges() == {("Q1", "Q2"): (3, 3, 2)}
+
+    def test_content_key_prevalece_sobre_o_content_hash(self):
+        """Quase-duplicata (hashes diferentes, mesma content_key) conta 1; sem chave, cai no hash."""
+        _insert_article("a1", "mec", "2026-10-01T12:00:00+00:00", "h1", ["Q1", "Q2"], "a1")
+        _insert_article("a2", "mds", "2026-10-02T12:00:00+00:00", "h2", ["Q1", "Q2"], "a1")
+        _insert_article("a3", "mec", "2026-10-03T12:00:00+00:00", "h3", ["Q1", "Q2"])
+        _insert_article("a4", "mds", "2026-10-04T12:00:00+00:00", "h3", ["Q1", "Q2"])
+
+        result = project_entity_graph(DATABASE_URL)
+
+        # conteúdos distintos: a1 (a1 + a2) e h3 (a3 + a4)
+        assert _co_mention_edges() == {("Q1", "Q2"): (4, 4, 2)}
+        assert result["total_unique_content"] == 2
 
     def test_conjunto_de_arestas_usa_contagem_bruta(self):
         """Republicação pura (2 artigos, 1 conteúdo) continua virando aresta (weight >= 2)."""
@@ -196,3 +216,163 @@ class TestEntityStats:
             (0, 0)
         ]
         assert result["entity_stats"] == 0
+
+
+# ---------------------------------------------------------------------------
+# compute_content_keys (DP-1b) contra o Postgres
+# ---------------------------------------------------------------------------
+
+_BASE = " ".join(f"reforma{i}" for i in range(200))
+_OUTRO = " ".join(f"outro{i}" for i in range(200))
+_T0 = datetime(2026, 10, 1, 12, tzinfo=UTC)
+
+
+def _insert_news(
+    unique_id: str,
+    agency_key: str,
+    title: str,
+    content: str,
+    published_at: datetime,
+    content_key: str | None = None,
+) -> None:
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO news (unique_id, agency_id, title, content, published_at, "
+                "agency_key, content_key) "
+                "SELECT %s, id, %s, %s, %s, key, %s FROM agencies WHERE key = %s",
+                (unique_id, title, content, published_at, content_key, agency_key),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _content_keys() -> dict[str, str | None]:
+    return dict(_execute("SELECT unique_id, content_key FROM news") or [])
+
+
+def _compute(**kwargs) -> dict:
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        result = compute_content_keys(conn, **kwargs)
+        conn.commit()
+        return result
+    finally:
+        conn.close()
+
+
+def _republicacao() -> None:
+    """mec publica; mds republica com URL de imagem própria (content_hash diferente)."""
+    _insert_news("mec-1", "mec", "Programa amplia vagas em escolas", _BASE, _T0)
+    _insert_news(
+        "mds-1",
+        "mds",
+        "MDS detalha ampliação de vagas",
+        f"![foto](https://www.gov.br/mds/a.jpg) {_BASE}",
+        _T0 + timedelta(hours=3),
+    )
+    _insert_news("mec-2", "mec", "Outro assunto", _OUTRO, _T0 + timedelta(hours=5))
+
+
+@pytest.mark.integration
+class TestComputeContentKeys:
+    def test_grava_o_lider_nos_membros_e_nulo_nos_isolados(self):
+        _republicacao()
+
+        result = _compute(since=None)
+
+        assert _content_keys() == {"mec-1": "mec-1", "mds-1": "mec-1", "mec-2": None}
+        assert result["changes"] == 2
+        assert result["updated"] == 2
+
+    def test_idempotente(self):
+        _republicacao()
+        _compute(since=None)
+
+        second = _compute(since=None)
+
+        assert second["changes"] == 0
+        assert second["updated"] == 0
+
+    def test_dry_run_nao_grava(self):
+        _republicacao()
+
+        result = _compute(since=None, dry_run=True)
+
+        assert result["changes"] == 2
+        assert set(_content_keys().values()) == {None}
+
+    def test_janela_le_o_contexto_e_so_grava_o_alvo_e_o_lider_promovido(self):
+        _republicacao()
+        # anterior ao contexto: nunca é lido nem regravado
+        _insert_news("velho", "mec", "Programa antigo", _BASE, _T0 - timedelta(days=30), "x")
+
+        result = _compute(since=_T0 + timedelta(hours=1))
+
+        assert _content_keys() == {
+            "mec-1": "mec-1",
+            "mds-1": "mec-1",
+            "mec-2": None,
+            "velho": "x",
+        }
+        assert result["context"] == 1
+        assert result["target"] == 2
+
+    def test_alimenta_o_dedup_do_grafo(self):
+        _republicacao()
+        entities = [{"text": e, "type": "ORG", "canonical_id": e} for e in ("Q1", "Q2")]
+        for uid in ("mec-1", "mds-1", "mec-2"):
+            _execute(
+                "INSERT INTO news_features (unique_id, features) "
+                f"VALUES ('{uid}', '{json.dumps({'entities': entities})}'::jsonb)"
+            )
+        _compute(since=None)
+
+        project_entity_graph(DATABASE_URL)
+
+        # 3 artigos; conteúdos distintos: mec-1 (com a republicação do mds) e mec-2
+        assert _co_mention_edges() == {("Q1", "Q2"): (3, 3, 2)}
+
+    def test_run_content_keys_recalcula_os_ultimos_10_dias(self):
+        _republicacao()
+
+        # since = T0 + 2 dias: tudo vira contexto, semeado como líder; nada a gravar
+        result = run_content_keys(DATABASE_URL, now=_T0 + timedelta(days=12))
+
+        assert result["target"] == 0
+        assert set(_content_keys().values()) == {None}
+
+        result = run_content_keys(DATABASE_URL, now=_T0 + timedelta(days=9))
+
+        assert result["target"] == 3
+        assert _content_keys() == {"mec-1": "mec-1", "mds-1": "mec-1", "mec-2": None}
+
+
+@pytest.mark.integration
+class TestSemAColunaContentKey:
+    """Código mergeado antes da 035 (ou 035 revertida): o grafo cai no content_hash e a task da
+    chave sai com aviso, em vez de os dois quebrarem por "column content_key does not exist"."""
+
+    def _reverter_035(self) -> None:
+        _execute((MIGRATIONS_DIR / "035_add_news_content_key_rollback.sql").read_text())
+
+    def test_grafo_cai_no_content_hash(self):
+        _three_articles_two_share_content()
+        self._reverter_035()
+
+        result = project_entity_graph(DATABASE_URL)
+
+        # o mesmo resultado de antes da 035: h1 (a1 + a2) e a3
+        assert _co_mention_edges() == {("Q1", "Q2"): (3, 3, 2)}
+        assert result["total_unique_content"] == 2
+        assert _entity_stats()["Q1"][:2] == (3, 2)
+
+    def test_run_content_keys_pula_com_aviso(self):
+        _republicacao()
+        self._reverter_035()
+
+        result = run_content_keys(DATABASE_URL, now=_T0 + timedelta(days=1))
+
+        assert result["status"] == "skipped"

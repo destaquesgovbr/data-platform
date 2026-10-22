@@ -634,10 +634,10 @@ class TestValidateMigrations:
         assert issues == ["Sequence gap: migration 003 is missing"]
 
     def test_reserved_versions_are_the_open_prs(self):
-        """030 (#189) e 031 (#184) ficam reservadas; quem entra depois usa 032+."""
+        """030 (#189), 031 (#184) e 034 (tema 26, DP-2) ficam reservadas; o DP-1b usa 035/036."""
         from migrate import RESERVED_VERSIONS
 
-        assert set(RESERVED_VERSIONS) == {"030", "031"}
+        assert set(RESERVED_VERSIONS) == {"030", "031", "034"}
 
 
 # ---------------------------------------------------------------------------

@@ -110,6 +110,7 @@ CREATE TABLE news (
 
     -- Deduplication
     content_hash            VARCHAR(16),    -- SHA-256 truncated (title+content normalized)
+    content_key             TEXT,           -- near-duplicate group leader (unique_id), H5 (035)
 
     -- Denormalized (performance)
     agency_key              VARCHAR(100),
@@ -138,6 +139,14 @@ CREATE TABLE news (
 **Key fields**:
 - `unique_id`: slugify(title) + "_" + MD5(agency + published_at + title)[:6]
 - `content_hash`: SHA-256(normalize(title) + "\n" + normalize(content))[:16] for cross-agency dedup
+  (exact text only: the stored content embeds each agency's image/link URLs, so it misses most
+  cross-agency republications)
+- `content_key`: `unique_id` of the near-duplicate group leader (the oldest article), H5 rule in
+  `jobs/graph/content_keys.py` (5-shingle Jaccard/containment or same normalized title, with
+  template-family and same-agency guards). NULL = no near-duplicate (or not computed yet).
+  Computed in batch by the `project_entity_graph` DAG (last 10 days per run) and backfilled by
+  migration 036. Readers dedup by `COALESCE(content_key, content_hash, unique_id)`. Not indexed
+  (no reader filters by it; keeps the update eligible for HOT).
 - `most_specific_theme_id`: Most granular theme (L3 > L2 > L1)
 - `synced_to_hf_at`: Last sync to HuggingFace Dataset
 - `agency_key`, `agency_name`: Denormalized from agencies for performance

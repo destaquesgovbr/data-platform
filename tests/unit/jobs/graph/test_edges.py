@@ -12,6 +12,7 @@ import pytest
 
 from data_platform.jobs.graph import edges
 from data_platform.jobs.graph.edges import (
+    ARTICLE_CONTENT_KEY_FALLBACK_SQL,
     ARTICLE_CONTENT_KEY_SQL,
     CO_MENTION_MIN_WEIGHT,
     DELETE_CO_MENTION_EDGES_SQL,
@@ -23,6 +24,7 @@ from data_platform.jobs.graph.edges import (
     RECOMPUTE_CO_MENTION_EDGES_SQL,
     UPSERT_ENTITY_GRAPH_META_SQL,
     UPSERT_ENTITY_STATS_SQL,
+    article_content_key_sql,
     project_entity_graph,
     rebuild_news_entities,
     recompute_co_mention_edges,
@@ -138,9 +140,10 @@ class TestArticleContentKey:
         assert norm.startswith("select n.unique_id,")
         assert norm.endswith("as content_key from news n")
 
-    def test_hoje_e_o_content_hash_ou_o_proprio_artigo(self):
+    def test_quase_duplicata_depois_hash_exato_depois_o_proprio_artigo(self):
+        """content_key (H5, migracao 035) quando calculada; senao content_hash; senao o artigo."""
         norm = _normalize(ARTICLE_CONTENT_KEY_SQL)
-        assert "coalesce(n.content_hash, n.unique_id) as content_key" in norm
+        assert "coalesce(n.content_key, n.content_hash, n.unique_id) as content_key" in norm
 
     def test_regra_de_dedup_definida_num_lugar_so(self):
         """Arestas, entity_stats e meta usam o mesmo fragmento; content_hash so aparece nele."""
@@ -151,7 +154,64 @@ class TestArticleContentKey:
         ):
             assert ARTICLE_CONTENT_KEY_SQL in sql
         code = inspect.getsource(edges)
-        assert code.count("content_hash, n.unique_id") == 1
+        assert code.count("n.content_key, n.content_hash, n.unique_id") == 1
+        assert code.count("COALESCE(n.content_hash, n.unique_id)") == 1
+
+
+class TestArticleContentKeySemA035:
+    """Sem news.content_key (codigo antes da 035, ou 035 revertida), o grafo cai no hash exato."""
+
+    def test_fallback_e_o_hash_exato_com_uma_linha_por_artigo(self):
+        norm = _normalize(ARTICLE_CONTENT_KEY_FALLBACK_SQL)
+        assert norm == (
+            "select n.unique_id, coalesce(n.content_hash, n.unique_id) as content_key from news n"
+        )
+
+    def test_com_a_coluna_usa_a_chave_de_quase_duplicata(self):
+        with patch.object(edges, "has_content_key_column", return_value=True):
+            assert article_content_key_sql(MagicMock()) == ARTICLE_CONTENT_KEY_SQL
+
+    def test_sem_a_coluna_avisa_e_cai_no_hash(self, caplog):
+        with patch.object(edges, "has_content_key_column", return_value=False):
+            sql = article_content_key_sql(MagicMock())
+
+        assert sql == ARTICLE_CONTENT_KEY_FALLBACK_SQL
+        assert "content_key" in caplog.text and "035" in caplog.text
+
+    def test_co_mencao_usa_a_chave_recebida(self):
+        conn, cursor = _conn_with_cursor(rowcount=1)
+
+        recompute_co_mention_edges(conn, content_key_sql=ARTICLE_CONTENT_KEY_FALLBACK_SQL)
+
+        sql = cursor.execute.call_args_list[1].args[0]
+        assert ARTICLE_CONTENT_KEY_FALLBACK_SQL in sql
+        assert "n.content_key" not in sql
+
+    def test_estatisticas_usam_a_chave_recebida(self):
+        conn, cursor = _conn_with_cursor(rowcount=1)
+        cursor.fetchone.return_value = (1, 1)
+
+        recompute_entity_stats(conn, content_key_sql=ARTICLE_CONTENT_KEY_FALLBACK_SQL)
+
+        stats_sql, meta_sql = (c.args[0] for c in cursor.execute.call_args_list[1:3])
+        for sql in (stats_sql, meta_sql):
+            assert ARTICLE_CONTENT_KEY_FALLBACK_SQL in sql
+            assert "n.content_key" not in sql
+
+    def test_projecao_sem_a_coluna_nao_le_content_key(self):
+        conn, cursor = _conn_with_cursor(rowcount=0)
+        cursor.fetchone.return_value = (0, 0)
+        with (
+            patch("psycopg2.connect", return_value=conn),
+            patch.object(edges, "has_content_key_column", return_value=False),
+        ):
+            result = project_entity_graph("postgresql://fake")
+
+        executed = [c.args[0] for c in cursor.execute.call_args_list]
+        assert not any("n.content_key" in sql for sql in executed)
+        assert sum(ARTICLE_CONTENT_KEY_FALLBACK_SQL in sql for sql in executed) == 3
+        assert result["status"] == "ok"
+        conn.commit.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
