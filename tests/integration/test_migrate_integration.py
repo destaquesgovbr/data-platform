@@ -545,6 +545,56 @@ class TestEntityStatsMigration:
         assert "is_generic" in _columns("entity_stats")
 
 
+def _indexes(table: str) -> dict[str, str]:
+    """{nome do índice: definição} de uma tabela do schema public."""
+    rows = _execute(f"SELECT indexname, indexdef FROM pg_indexes WHERE tablename = '{table}'")
+    return dict(rows or [])
+
+
+@pytest.mark.integration
+class TestNewsContentKeyMigration:
+    """035: news.content_key, a chave de quase-duplicata (DP-1b).
+
+    Contrato lido por ARTICLE_CONTENT_KEY_SQL (jobs/graph/edges.py) e pela graphql-api (GQL-1b):
+    COALESCE(n.content_key, n.content_hash, n.unique_id).
+    """
+
+    def test_035_adiciona_content_key_texto_nulo(self):
+        _apply_all_migrations()
+
+        assert _columns("news")["content_key"] == ("text", "YES")
+
+    def test_035_artigos_existentes_ficam_sem_chave(self):
+        result = _run_migrate("migrate", "--target", "033", "--yes")
+        assert result.returncode == 0, f"Setup failed:\n{result.stdout}\n{result.stderr}"
+        _execute("INSERT INTO agencies (key, name) VALUES ('mec', 'MEC')")
+        _execute(
+            "INSERT INTO news (unique_id, agency_id, title, published_at) "
+            "SELECT 'antigo', id, 'Título', NOW() FROM agencies WHERE key = 'mec'"
+        )
+
+        _apply_all_migrations()
+
+        assert _execute("SELECT content_key FROM news WHERE unique_id = 'antigo'") == [(None,)]
+
+    def test_035_nao_indexa_content_key(self):
+        """Sem índice na coluna, o UPDATE da chave pode ser HOT (não toca o HNSW do embedding)."""
+        _apply_all_migrations()
+
+        assert not [d for d in _indexes("news").values() if "content_key" in d]
+
+    def test_035_rollback_remove_coluna_e_reaplica(self):
+        _apply_all_migrations()
+
+        result = _run_migrate("rollback", "035", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+        assert "content_key" not in _columns("news")
+
+        result = _run_migrate("migrate", "--yes")
+        assert result.returncode == 0, f"Re-apply failed:\n{result.stdout}\n{result.stderr}"
+        assert _columns("news")["content_key"] == ("text", "YES")
+
+
 _TEXTO_LONGO = (
     "O Ministério da Educação anunciou nesta segunda-feira a ampliação do "
     "programa de bolsas para estudantes de baixa renda em todo o país."
