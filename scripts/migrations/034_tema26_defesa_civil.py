@@ -13,13 +13,14 @@ desfeito, com as contagens no log):
   1. LOCK em `themes` (EXCLUSIVE, lock_timeout 10s): leituras seguem, mas nenhuma
      escrita em `news` que aponte para um tema (a FK pega FOR KEY SHARE em `themes`)
      entra até o commit. O worker ao vivo espera alguns segundos.
-  2. Tabela de auditoria `news_theme_changes` (IF NOT EXISTS), com códigos (não ids:
-     os ids de 19.03*/19.04* deixam de existir) e UNIQUE (campaign, unique_id): uma
-     linha por artigo em cada campanha. Contrato de 22/10 com o DS-1 (data-science#49),
-     cujo preflight exige esse UNIQUE:
+  2. Tabela de auditoria `news_theme_changes` (IF NOT EXISTS), exatamente no contrato de
+     22/10 com o DS-1 (data-science#49): id, campaign, unique_id, os 4 códigos antigos e os
+     4 novos (códigos, não ids: os ids de 19.03*/19.04* deixam de existir), source, note,
+     changed_at e reverted_at, mais UNIQUE (campaign, unique_id) (uma linha por artigo em
+     cada campanha; o preflight do DS-1 exige). Tabela que já existia sem o UNIQUE aborta.
+     Só duas campanhas:
        - `tema26-034`, source `migration-034` (esta migração; `note` = regra aplicada);
-       - `tema26-llm-d1`, source `llm:<model_id>` (reclassificação por LLM da D1);
-       - `tema26-rollback`, source `migration-034-rollback` (o rollback abaixo).
+       - `tema26-llm-d1`, source `llm:<model_id>` (reclassificação por LLM da D1).
   3. Upsert de 26/26.01/26.02/26.0x.0y em `themes` (ON CONFLICT (code)), pai antes do
      filho. Nunca usar scripts/populate_themes.py em produção (DELETE + ids novos).
   4. Remap de news.theme_l1/l2/l3/most_specific de todo artigo que referencia
@@ -42,23 +43,25 @@ As 4 hierarquias incoerentes com o 19 (contagens de base de 21/10, seção C.4):
     `inconsistent_l1_19_26_after`.
 
 Rollback (a partir da auditoria, também numa transação): recria 19.03*/19.04* (ids
-novos) e lê as linhas ainda não revertidas de TODAS as campanhas `tema26-*` menos a do
-próprio rollback (a 034, a do LLM da D1 e eventuais reexecuções dela), na ordem
-(changed_at, id). Cada artigo auditado volta ao estado anterior à PRIMEIRA mudança,
-somando as campanhas, se o estado atual for o da ÚLTIMA (ou ainda apontar para o 26;
-senão mantém e conta). Assim, um artigo que o LLM tirou de 05.02.01 e pôs no 26 volta a
-05.02.01. Só o que está no 26 sem nenhuma linha de auditoria (ex.: classificado pelo
-worker depois do DS-1) é desfeito pelo mapa inverso (26.01* → 19.03*, 26.02* → 19.04*,
-26 → 19). Tudo fica registrado na campanha `tema26-rollback`; as linhas lidas ganham
-reverted_at e os 26* são apagados. A tabela de auditoria fica (histórico).
+novos) e lê as linhas ainda não revertidas das duas campanhas (`campaign IN
+('tema26-llm-d1', 'tema26-034')`), do changed_at mais recente para o mais antigo (no
+empate, a do LLM antes da 034). Por artigo, o percurso desfaz a mudança mais recente e
+chega ao estado anterior à PRIMEIRA: o artigo volta a ele se o estado atual for o da
+ÚLTIMA mudança (ou ainda apontar para o 26; senão mantém e conta). Assim, um artigo que
+o LLM tirou de 05.02.01 e pôs no 26 volta a 05.02.01. As linhas lidas ganham
+reverted_at (o rollback não grava linha nova: o contrato tem só as duas campanhas). Só o
+que está no 26 sem nenhuma linha de auditoria (ex.: classificado pelo worker depois do
+DS-1) é desfeito pelo mapa inverso (26.01* → 19.03*, 26.02* → 19.04*, 26 → 19); esses
+unique_id ficam em `unaudited_inverse_map`, no log. Os 26* são apagados e a tabela de
+auditoria fica (histórico).
 
 Reaplicar depois do rollback: o UPSERT da auditoria (ON CONFLICT (campaign, unique_id))
-reaproveita a linha do artigo na campanha, com os códigos novos e reverted_at = NULL. A
-campanha do LLM não é reaproveitada: o DS-1 pula artigo já auditado nela, então uma
-nova D1 depois de um rollback usa outra campanha `tema26-*` (ex.: `tema26-llm-d1b`).
+reaproveita a linha do artigo na campanha, com os códigos novos e reverted_at = NULL. As
+linhas do LLM continuam revertidas.
 
-Depois do apply: sync do Typesense (incremental desde 2025-09-01), BigQuery 002 e
-`data-platform bq-merge-theme-changes`. Runbook completo no PR do DP-2.
+Depois do apply: sync do Typesense (por intervalo desde 2025-09-01), BigQuery 002 e
+`data-platform bq-merge-theme-changes`; depois de um rollback, `bq-merge-theme-changes
+--reverted`. Runbook completo no PR do DP-2.
 """
 
 import json
@@ -70,15 +73,13 @@ from dataclasses import dataclass
 from loguru import logger
 from psycopg2.extras import execute_values
 
-# Contrato da auditoria (plano, 22/10): campanhas separadas por origem.
+# Contrato da auditoria (plano, 22/10): duas campanhas, separadas por origem.
 CAMPAIGN = "tema26-034"
 SOURCE = "migration-034"
 # Reclassificação por LLM da D1 (DS-1, data-science#49), source "llm:<model_id>".
 LLM_CAMPAIGN = "tema26-llm-d1"
-ROLLBACK_CAMPAIGN = "tema26-rollback"
-ROLLBACK_SOURCE = "migration-034-rollback"
-# Toda campanha do tema 26: o rollback (menos a própria) e o MERGE do BigQuery leem assim.
-CAMPAIGN_PATTERN = "tema26-%"
+# O que o rollback (e o MERGE do BigQuery) lê, na ordem em que desfaz: o LLM, depois a 034.
+THEME26_CAMPAIGNS = (LLM_CAMPAIGN, CAMPAIGN)
 
 # (code, label, level, parent_code), pai antes do filho.
 THEMES_26: tuple[tuple[str, str, int, str | None], ...] = (
@@ -210,19 +211,30 @@ def remap(old: ThemeCodes) -> tuple[ThemeCodes, str]:
     return new, rule
 
 
+def rollback_order(rows) -> list:
+    """Linhas na ordem do rollback: changed_at decrescente; no empate, o LLM antes da 034.
+
+    `rows`: (unique_id, campaign, changed_at, id, antigo, novo). O id só desempata dentro
+    da mesma campanha (que tem uma linha por artigo). É a ordem do AUDIT_ROWS_SQL.
+    """
+    rank = {campaign: len(THEME26_CAMPAIGNS) - i for i, campaign in enumerate(THEME26_CAMPAIGNS)}
+    return sorted(rows, key=lambda r: (r[2], rank.get(r[1], 0), r[3]), reverse=True)
+
+
 def audit_endpoints(rows) -> tuple[dict[str, ThemeCodes], dict[str, ThemeCodes]]:
     """Estado antes da PRIMEIRA e depois da ÚLTIMA mudança auditada de cada artigo.
 
-    `rows`: (unique_id, campaign, changed_at, id, antigo, novo) de qualquer campanha do
-    tema 26; a ordem é (changed_at, id), não a da lista. Junta a 034 e o LLM da D1: um
-    artigo remapeado pela 034 e depois reclassificado pelo LLM tem como ponta antiga o
-    estado de antes da 034 e como ponta nova o que o LLM gravou.
+    Percorre as linhas do mais recente para o mais antigo (`rollback_order`): a primeira
+    linha de um artigo dá o estado que ele deveria ter hoje (o novo da mudança mais
+    recente) e a última, o estado a restaurar (o antigo da mudança mais antiga). Junta a
+    034 e o LLM da D1: um artigo remapeado pela 034 e depois reclassificado pelo LLM tem
+    como ponta antiga o estado de antes da 034 e como ponta nova o que o LLM gravou.
     """
     first_old: dict[str, ThemeCodes] = {}
     last_new: dict[str, ThemeCodes] = {}
-    for uid, _campaign, _changed_at, _id, old, new in sorted(rows, key=lambda r: (r[2], r[3])):
-        first_old.setdefault(uid, old)
-        last_new[uid] = new
+    for uid, _campaign, _changed_at, _id, old, new in rollback_order(rows):
+        last_new.setdefault(uid, new)
+        first_old[uid] = old
     return first_old, last_new
 
 
@@ -279,20 +291,28 @@ CREATE TABLE IF NOT EXISTS news_theme_changes (
     source                  VARCHAR(50)  NOT NULL,
     note                    TEXT,
     changed_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    reverted_at             TIMESTAMPTZ
+    reverted_at             TIMESTAMPTZ,
+    CONSTRAINT uq_news_theme_changes_campaign_uid UNIQUE (campaign, unique_id)
 );
--- Contrato com o DS-1: uma linha por artigo em cada campanha (o preflight dele exige
--- índice único sem predicado exatamente em (campaign, unique_id)). Índice e não
--- constraint inline: vale também se a tabela já existir.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_news_theme_changes_campaign_uid
-    ON news_theme_changes (campaign, unique_id);
-CREATE INDEX IF NOT EXISTS idx_news_theme_changes_changed_at
-    ON news_theme_changes (changed_at);
 COMMENT ON TABLE news_theme_changes IS
     'Auditoria de mudanças de tema em news (códigos, não ids), uma linha por artigo e '
-    'campanha. tema26-034: migração 034 (source migration-034); tema26-llm-d1: '
-    'reclassificação por LLM da D1 (source llm:<model_id>); tema26-rollback: rollback '
-    'da 034, que preenche reverted_at nas linhas que desfaz.';
+    'campanha. tema26-034: migração 034 (source migration-034, note = regra); '
+    'tema26-llm-d1: reclassificação por LLM da D1 (source llm:<model_id>). O rollback da '
+    '034 preenche reverted_at nas linhas que desfaz.';
+"""
+
+# CREATE TABLE IF NOT EXISTS não cria o UNIQUE numa tabela que já existia: confere.
+AUDIT_UNIQUE_CHECK_SQL = """
+    SELECT EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = 'news_theme_changes'::regclass
+          AND c.contype = 'u'
+          AND (
+              SELECT array_agg(a.attname::text ORDER BY a.attname::text)
+              FROM pg_attribute a
+              WHERE a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+          ) = ARRAY['campaign', 'unique_id']
+    )
 """
 
 UPSERT_THEME_SQL = """
@@ -384,22 +404,17 @@ INCONSISTENT_19_26_SQL = """
            OR (t3.id IS NOT NULL AND t3.parent_code IS DISTINCT FROM t2.code))
 """
 
-# Linhas que o rollback desfaz: todas as campanhas tema26-* menos a dele, ainda ativas.
-_ROLLBACK_SCOPE = """
-    campaign LIKE %(pattern)s AND campaign <> %(rollback)s AND reverted_at IS NULL
-"""
-ROLLBACK_SCOPE_PARAMS = {"pattern": CAMPAIGN_PATTERN, "rollback": ROLLBACK_CAMPAIGN}
-
-AUDIT_ROWS_SQL = (
-    """
+# Linhas que o rollback desfaz: as duas campanhas do contrato, ainda ativas, do changed_at
+# mais recente para o mais antigo (no empate, o LLM antes da 034; ver rollback_order).
+AUDIT_ROWS_SQL = """
     SELECT unique_id, campaign, changed_at, id,
         old_l1_code, old_l2_code, old_l3_code, old_most_specific_code,
         new_l1_code, new_l2_code, new_l3_code, new_most_specific_code
     FROM news_theme_changes
-    WHERE"""
-    + _ROLLBACK_SCOPE
-    + "ORDER BY changed_at, id"
-)
+    WHERE campaign = ANY(%(campaigns)s) AND reverted_at IS NULL
+    ORDER BY changed_at DESC, (campaign = %(llm_campaign)s) DESC, id DESC
+"""
+ROLLBACK_SCOPE_PARAMS = {"campaigns": list(THEME26_CAMPAIGNS), "llm_campaign": LLM_CAMPAIGN}
 
 # Só as linhas lidas (por id): uma gravada depois da leitura não foi desfeita.
 MARK_REVERTED_SQL = """
@@ -443,14 +458,20 @@ def _ids_for(codes: ThemeCodes, ids: dict[str, int]) -> tuple:
     return tuple(ids[code] if code is not None else None for code in codes.values())
 
 
-def _write_changes(
-    cursor,
-    changes: list[tuple[str, ThemeCodes, ThemeCodes, str]],
-    ids: dict[str, int],
-    campaign: str,
-    source: str,
+def _ensure_audit_table(cursor) -> None:
+    cursor.execute(CREATE_AUDIT_SQL)
+    cursor.execute(AUDIT_UNIQUE_CHECK_SQL)
+    if not cursor.fetchone()[0]:
+        raise RuntimeError(
+            "news_theme_changes já existe sem UNIQUE (campaign, unique_id) (contrato de 22/10): "
+            "corrija a tabela antes de rodar a 034"
+        )
+
+
+def _insert_audit(
+    cursor, changes: list[tuple[str, ThemeCodes, ThemeCodes, str]], campaign: str, source: str
 ) -> None:
-    """Auditoria + UPDATE de news para [(unique_id, antigo, novo, nota)]."""
+    """Uma linha de auditoria por artigo: [(unique_id, antigo, novo, nota)]."""
     if not changes:
         return
     execute_values(
@@ -462,6 +483,14 @@ def _write_changes(
         ],
         page_size=1000,
     )
+
+
+def _update_news(
+    cursor, changes: list[tuple[str, ThemeCodes, ThemeCodes, str]], ids: dict[str, int]
+) -> None:
+    """UPDATE dos ids de tema de news para [(unique_id, antigo, novo, nota)]."""
+    if not changes:
+        return
     execute_values(
         cursor,
         UPDATE_NEWS_SQL,
@@ -489,7 +518,7 @@ def _count_references(cursor, ids: list[int]) -> int:
 
 def _apply(cursor) -> dict:
     cursor.execute(LOCK_THEMES_SQL)
-    cursor.execute(CREATE_AUDIT_SQL)
+    _ensure_audit_table(cursor)
 
     cursor.execute(LEGACY_PREFIX_SQL)
     unexpected = sorted({code for (code,) in cursor.fetchall()} - LEGACY_CODES)
@@ -515,7 +544,8 @@ def _apply(cursor) -> dict:
         for code in set(old.values()) & LEGACY_CODES:
             refs_before[code] += 1
 
-    _write_changes(cursor, changes, ids, CAMPAIGN, SOURCE)
+    _insert_audit(cursor, changes, CAMPAIGN, SOURCE)
+    _update_news(cursor, changes, ids)
 
     remaining = _count_references(cursor, legacy_ids)
     if remaining:
@@ -543,7 +573,7 @@ def _apply(cursor) -> dict:
 
 def _revert(cursor) -> dict:
     cursor.execute(LOCK_THEMES_SQL)
-    cursor.execute(CREATE_AUDIT_SQL)
+    _ensure_audit_table(cursor)
 
     ids = _theme_ids(cursor)
     legacy_inserted = 0
@@ -567,16 +597,20 @@ def _revert(cursor) -> dict:
 
     changes = []
     reasons: Counter = Counter()
+    unaudited: list[str] = []
     for uid, now in current.items():
         if uid in first_old:
             target, reason = rollback_target(now, first_old[uid], last_new[uid])
         else:
             target, reason = inverse(now), "mapa_inverso"
+            unaudited.append(uid)
         reasons[reason] += 1
         if target is not None and target != now:
             changes.append((uid, now, target, reason))
 
-    _write_changes(cursor, changes, ids, ROLLBACK_CAMPAIGN, ROLLBACK_SOURCE)
+    # Sem linha nova na auditoria (o contrato tem só as duas campanhas): as linhas lidas
+    # ganham reverted_at e o que veio pelo mapa inverso fica no log (unaudited_inverse_map).
+    _update_news(cursor, changes, ids)
     cursor.execute(MARK_REVERTED_SQL, {"ids": [row_id for _u, _c, _t, row_id, *_ in audit_rows]})
     marked = Counter(campaign for (campaign,) in cursor.fetchall())
 
@@ -586,7 +620,7 @@ def _revert(cursor) -> dict:
     deleted = _delete_by_level(cursor, THEMES_26, levels=(3, 2, 1))
 
     return {
-        "campaign_pattern": CAMPAIGN_PATTERN,
+        "campaigns": list(THEME26_CAMPAIGNS),
         "audited_rows_by_campaign": dict(sorted(audited_by_campaign.items())),
         "audited_articles": len(first_old),
         "legacy_themes_restored": legacy_inserted,
@@ -594,6 +628,7 @@ def _revert(cursor) -> dict:
         "by_reason": dict(reasons.most_common()),
         "transitions": transition_counts([(old, new) for _uid, old, new, _r in changes]),
         "campaign_rows_reverted": dict(sorted(marked.items())),
+        "unaudited_inverse_map": sorted(unaudited),
         "themes_26_deleted": deleted,
     }
 

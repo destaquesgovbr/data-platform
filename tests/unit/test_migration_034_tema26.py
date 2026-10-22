@@ -417,8 +417,8 @@ class TestPontasDaAuditoria:
             ("b", "tema26-034", self.t1, 2, self.original, self.pos_034),
         ]
         assert [(r[0], r[1]) for r in m.rollback_order(rows)] == [
+            ("a", "tema26-llm-d1"),  # empate em t1 com b: o LLM primeiro
             ("b", "tema26-034"),
-            ("a", "tema26-llm-d1"),
             ("a", "tema26-034"),
         ]
 

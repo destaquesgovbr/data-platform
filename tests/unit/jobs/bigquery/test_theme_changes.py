@@ -70,12 +70,11 @@ class TestConsultaDoEstado:
         """tema26-034 (034), tema26-llm-d1 (LLM da D1), reexecuções e tema26-rollback."""
         assert tc.DEFAULT_CAMPAIGNS == ("tema26-%",)
 
-    def test_padrao_igual_ao_da_migracao_034(self):
+    def test_padrao_cobre_as_campanhas_da_migracao_034(self):
         m = _migration_034()
-        assert m.CAMPAIGN_PATTERN in tc.DEFAULT_CAMPAIGNS
-        prefixo = m.CAMPAIGN_PATTERN.rstrip("%")
-        for campanha in (m.CAMPAIGN, m.LLM_CAMPAIGN, m.ROLLBACK_CAMPAIGN):
-            assert campanha.startswith(prefixo)
+        (padrao,) = tc.DEFAULT_CAMPAIGNS
+        for campanha in m.THEME26_CAMPAIGNS:
+            assert campanha.startswith(padrao.rstrip("%"))
 
     @patch("sqlalchemy.create_engine")
     @patch("pandas.read_sql_query")
