@@ -8,8 +8,8 @@ e logica no repo data-science) pedindo, por container override, o script
     script por essa env; sem ela roda backfill_ner_corpus.py, como no ner_backfill);
   - env ENRICHMENT_MODEL_ID, BEDROCK_DAILY_TOKEN_QUOTA (JSON {modelo: tokens/dia}) e
     BACKFILL_QUOTA_FRACTION (governador de cota, ledger `llm_daily_usage`);
-  - args --select [--theme-code] [--theme-only --campaign [--term-fields]
-    [--extra-codes]] --date-from [--date-to] --limit --workers [--dry-run].
+  - args --select [--theme-code] --date-from [--date-to] --limit --workers [--dry-run]
+    (contrato de 22/10 com o DS-1, data-science#49: exatamente essas flags).
 
 O script e idempotente e resumivel: a selecao exclui o que ja foi feito, para gracioso
 (exit 0) quando o consumo do dia do modelo bate fracao x cota e termina rapido com
@@ -33,15 +33,17 @@ Com limit=400 e workers=2 cada run leva ~15-20 min; dois runs gastam ~0,8 da cot
 Mudar a campanha:
   - permanente (schedule): PR alterando DEFAULT_PARAMS;
   - pontual: "Trigger DAG" com params (select, date_from, date_to, limit, workers,
-    model_id, daily_token_quota, quota_fraction, dry_run, theme_code, campaign,
-    term_fields, extra_codes). dry_run=true so seleciona.
+    model_id, daily_token_quota, quota_fraction, dry_run, theme_code). dry_run=true so
+    seleciona.
 
 Tema 26 (D1, depois da migracao 034 e do deploy do DS-1, data-science#49): trigger com
-select=theme26-candidates, date_from=2018-01-01 e date_to VAZIO (sem teto). O DAG passa
---theme-only e --campaign (param campaign, default tema26-llm-d1) e, no
-theme26-candidates, --term-fields (default title-content, o escopo de 22/10) e
---extra-codes (opcional). O date_to herdado do B5 (2026-03-01) e recusado nas selecoes
-de tema: cortaria ~70% do L1 19. select=theme-code + theme_code=19 pega so o L1 19.
+select=theme26-candidates, date_from=2018-01-01 e date_to VAZIO (sem teto). Flags do
+contrato: --select theme26-candidates (ou --select theme-code --theme-code <c>),
+--date-from, [--date-to], --limit, --workers, [--dry-run]. O DS-1 grava so o tema e
+audita na campanha tema26-llm-d1 (source llm:<model_id>), com os termos no titulo e no
+conteudo e a guarda dos extras (fora do L1 19, so muda se o novo L1 for 26); nada disso
+e param do DAG. O date_to herdado do B5 (2026-03-01) e recusado nas selecoes de tema:
+cortaria ~70% do L1 19. select=theme-code + theme_code=19 pega so o L1 19.
 
 Desligar: pausar o DAG na UI do Airflow (o estado de pausa persiste entre deploys) ou
 remover este arquivo por PR. Quando a campanha termina os runs viram no-op
@@ -79,27 +81,21 @@ BACKFILL_SCRIPT = "reenrich_combined_window.py"
 
 # Modos do reenrich_combined_window.py. null-theme e null-summary exigem --date-to
 # (no maximo hoje BRT, checado pelo script): sem teto pegariam artigos do worker ao vivo.
-# Tema 26 (D1, DS-1), so gravam o tema (e registram em news_theme_changes):
+# Tema 26 (D1, DS-1), so gravam o tema (auditoria em news_theme_changes, campanha
+# tema26-llm-d1 do contrato de 22/10):
 #   - theme-code: artigos com tema no codigo --theme-code (L1, L2 ou L3);
 #   - theme26-candidates: L1 19, mais os de 04/05.02.01/15.02.03 do MDR ou que citam
-#     "defesa civil", "calamidade", "situacao de emergencia", "estado de emergencia" ou
-#     "desastre" no titulo/conteudo.
+#     termos de defesa civil no titulo e no conteudo.
 # Os dois so pegam artigo ja com tema (nao disputam com o worker ao vivo): date_to opcional.
 SELECT_CHOICES = ("mock", "null-theme", "null-summary", "theme-code", "theme26-candidates")
 SELECTS_REQUIRING_DATE_TO = ("null-theme", "null-summary")
 SELECT_WITH_THEME_CODE = "theme-code"
 SELECT_THEME26_CANDIDATES = "theme26-candidates"
-# Selecoes de tema: o DS-1 exige --theme-only (grava so o tema) e --campaign (auditoria).
 THEME_SELECTS = (SELECT_WITH_THEME_CODE, SELECT_THEME26_CANDIDATES)
 THEME_CODE_PATTERN = r"^\d{2}(\.\d{2}){0,2}$"
-# Mesmo formato do --campaign do DS-1 (_CAMPAIGN_RE).
-CAMPAIGN_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,49}$"
-# O rollback da 034 e o MERGE do BigQuery leem as campanhas tema26-*; as da propria
-# migracao (tema26-034, tema26-rollback) nao recebem gravacao do LLM.
-THEME26_CAMPAIGN_PREFIX = "tema26-"
-RESERVED_CAMPAIGNS = ("tema26-034", "tema26-rollback")
-# --term-fields do DS-1: onde procurar os termos de defesa civil.
-TERM_FIELDS_CHOICES = ("title", "title-content")
+# Params que o contrato de 22/10 nao tem (campanha, campos dos termos e codigos extras sao
+# do DS-1). Vindos no conf do trigger, seriam ignorados calados: falham.
+PARAMS_OUTSIDE_CONTRACT = ("campaign", "term_fields", "extra_codes")
 
 HAIKU_45 = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
@@ -116,10 +112,6 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "quota_fraction": 0.8,
     "dry_run": False,
     "theme_code": None,
-    # Selecoes de tema (D1 do tema 26). Ignorados nas demais.
-    "campaign": "tema26-llm-d1",
-    "term_fields": "title-content",  # escopo decidido em 22/10: 1.586 candidatos
-    "extra_codes": None,  # None/vazio = padrao do DS-1 (04, 05.02.01, 15.02.03)
 }
 
 
@@ -188,52 +180,15 @@ def _theme_code(select: str, value: Any) -> str | None:
     return code
 
 
-def _campaign(select: str, value: Any) -> str | None:
-    if select not in THEME_SELECTS:
-        return None
-    campaign = value.strip() if isinstance(value, str) else value
-    if not isinstance(campaign, str) or not re.match(CAMPAIGN_PATTERN, campaign):
+def _reject_outside_contract(params: Mapping[str, Any]) -> None:
+    outside = [name for name in PARAMS_OUTSIDE_CONTRACT if params.get(name) not in (None, "")]
+    if outside:
         raise ValueError(
-            f"campaign invalida {value!r}: use [a-z0-9._-], comecando por letra ou digito, "
-            "ate 50 caracteres (ex.: tema26-llm-d1)"
+            f"params fora do contrato de 22/10: {', '.join(outside)}. O DS-1 grava na "
+            "campanha tema26-llm-d1, busca os termos no titulo e no conteudo e aplica a "
+            "guarda dos extras; o DAG so passa --select, --theme-code, --date-from, "
+            "--date-to, --limit, --workers e --dry-run"
         )
-    if campaign in RESERVED_CAMPAIGNS:
-        raise ValueError(
-            f"campaign {campaign!r} e da migracao 034 (tema26-034/tema26-rollback); use uma "
-            "campanha propria do LLM (ex.: tema26-llm-d1)"
-        )
-    if select == SELECT_THEME26_CANDIDATES and not campaign.startswith(THEME26_CAMPAIGN_PREFIX):
-        raise ValueError(
-            f"campaign {campaign!r}: o theme26-candidates exige uma campanha "
-            f"{THEME26_CAMPAIGN_PREFIX}* (o rollback da 034 e o MERGE do BigQuery so leem essas)"
-        )
-    return campaign
-
-
-def _term_fields(select: str, value: Any) -> str | None:
-    if select != SELECT_THEME26_CANDIDATES:
-        return None
-    if value not in TERM_FIELDS_CHOICES:
-        raise ValueError(f"term_fields deve ser um de {TERM_FIELDS_CHOICES}, recebido {value!r}")
-    return value
-
-
-def _extra_codes(select: str, value: Any) -> str | None:
-    text = value.strip() if isinstance(value, str) else value
-    if text in (None, ""):
-        return None
-    if select != SELECT_THEME26_CANDIDATES:
-        raise ValueError(f"extra_codes so vale com select={SELECT_THEME26_CANDIDATES}: {value!r}")
-    if not isinstance(text, str):
-        raise ValueError(f"extra_codes deve ser texto (codigos separados por virgula): {value!r}")
-    codes = [part.strip() for part in text.split(",")]
-    for code in codes:
-        if not re.match(THEME_CODE_PATTERN, code):
-            raise ValueError(
-                f"extra_codes: codigo invalido {code!r} em {value!r} (use NN, NN.NN ou "
-                "NN.NN.NN separados por virgula)"
-            )
-    return ",".join(codes)
 
 
 def build_overrides(params: Mapping[str, Any]) -> dict:
@@ -250,10 +205,8 @@ def build_overrides(params: Mapping[str, Any]) -> dict:
     select = params.get("select")
     if select not in SELECT_CHOICES:
         raise ValueError(f"select deve ser um de {SELECT_CHOICES}, recebido {select!r}")
+    _reject_outside_contract(params)
     theme_code = _theme_code(select, params.get("theme_code"))
-    campaign = _campaign(select, params.get("campaign"))
-    term_fields = _term_fields(select, params.get("term_fields"))
-    extra_codes = _extra_codes(select, params.get("extra_codes"))
 
     date_from = _iso_date("date_from", params.get("date_from"))
     raw_date_to = params.get("date_to")
@@ -283,12 +236,6 @@ def build_overrides(params: Mapping[str, Any]) -> dict:
     args = ["--select", select]
     if theme_code is not None:
         args += ["--theme-code", theme_code]
-    if campaign is not None:
-        args += ["--theme-only", "--campaign", campaign]
-    if term_fields is not None:
-        args += ["--term-fields", term_fields]
-    if extra_codes is not None:
-        args += ["--extra-codes", extra_codes]
     args += ["--date-from", date_from]
     if date_to is not None:
         args += ["--date-to", date_to]
@@ -382,27 +329,6 @@ def build_overrides(params: Mapping[str, Any]) -> dict:
             pattern=THEME_CODE_PATTERN,
             description="Codigo de tema (NN, NN.NN ou NN.NN.NN); so com select=theme-code",
         ),
-        "campaign": Param(
-            DEFAULT_PARAMS["campaign"],
-            type="string",
-            pattern=CAMPAIGN_PATTERN,
-            description="Campanha da auditoria news_theme_changes (--campaign), so nas "
-            "selecoes de tema. Tema 26: tema26-llm-d1; nova D1 depois de rollback: outra "
-            "tema26-* (ex.: tema26-llm-d1b)",
-        ),
-        "term_fields": Param(
-            DEFAULT_PARAMS["term_fields"],
-            type="string",
-            enum=list(TERM_FIELDS_CHOICES),
-            description="theme26-candidates: termos no titulo (title) ou no titulo e no "
-            "conteudo (title-content, escopo de 22/10)",
-        ),
-        "extra_codes": Param(
-            DEFAULT_PARAMS["extra_codes"],
-            type=["null", "string"],
-            description="theme26-candidates: codigos do bloco extra separados por virgula; "
-            "vazio = padrao do DS-1 (04,05.02.01,15.02.03)",
-        ),
     },
     doc_md="""
     ### Backfills de enriquecimento (tema + resumo + sentimento)
@@ -420,7 +346,7 @@ def build_overrides(params: Mapping[str, Any]) -> dict:
 
     **Trigger manual com params:** `select`, `date_from`, `date_to`, `limit`,
     `workers`, `model_id`, `daily_token_quota`, `quota_fraction`, `dry_run`,
-    `theme_code`, `campaign`, `term_fields`, `extra_codes`. A task
+    `theme_code`. A task
     `build_overrides` valida tudo antes de subir o Job (cota sem a chave do modelo
     falha: o governador rodaria sem teto).
 
@@ -429,11 +355,12 @@ def build_overrides(params: Mapping[str, Any]) -> dict:
 
     **Tema 26 (D1):** `select=theme26-candidates` (L1 19, mais 04/05.02.01/15.02.03 do
     MDR ou com termo de defesa civil), `date_from=2018-01-01` e **`date_to` vazio** (o
-    default do B5, 2026-03-01, e recusado nas selecoes de tema). O DAG passa
-    `--theme-only --campaign <campaign>` (default `tema26-llm-d1`) e
-    `--term-fields <term_fields>` (default `title-content`); `extra_codes` e opcional.
-    `select=theme-code` + `theme_code` (ex.: `19`) pega so a subarvore do codigo.
-    So regravam o tema e registram em `news_theme_changes`.
+    default do B5, 2026-03-01, e recusado nas selecoes de tema). Flags do contrato de
+    22/10: `--select`, `--theme-code` (so no `theme-code`), `--date-from`, `--date-to`,
+    `--limit`, `--workers` e `--dry-run`. O DS-1 grava so o tema na campanha
+    `tema26-llm-d1` de `news_theme_changes`, com os termos no titulo e no conteudo e a
+    guarda dos extras. `select=theme-code` + `theme_code` (ex.: `19`) pega so a
+    subarvore do codigo.
     Sempre `dry_run=true`, depois `limit=10`, depois o lote completo.
 
     **Atencao:** run verde nao significa zero falhas por artigo. Ver a linha `FIM:` no
