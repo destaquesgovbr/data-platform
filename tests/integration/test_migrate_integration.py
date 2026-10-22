@@ -545,6 +545,56 @@ class TestEntityStatsMigration:
         assert "is_generic" in _columns("entity_stats")
 
 
+def _indexes(table: str) -> dict[str, str]:
+    """{nome do índice: definição} de uma tabela do schema public."""
+    rows = _execute(f"SELECT indexname, indexdef FROM pg_indexes WHERE tablename = '{table}'")
+    return dict(rows or [])
+
+
+@pytest.mark.integration
+class TestNewsContentKeyMigration:
+    """035: news.content_key, a chave de quase-duplicata (DP-1b).
+
+    Contrato lido por ARTICLE_CONTENT_KEY_SQL (jobs/graph/edges.py) e pela graphql-api (GQL-1b):
+    COALESCE(n.content_key, n.content_hash, n.unique_id).
+    """
+
+    def test_035_adiciona_content_key_texto_nulo(self):
+        _apply_all_migrations()
+
+        assert _columns("news")["content_key"] == ("text", "YES")
+
+    def test_035_artigos_existentes_ficam_sem_chave(self):
+        result = _run_migrate("migrate", "--target", "033", "--yes")
+        assert result.returncode == 0, f"Setup failed:\n{result.stdout}\n{result.stderr}"
+        _execute("INSERT INTO agencies (key, name) VALUES ('mec', 'MEC')")
+        _execute(
+            "INSERT INTO news (unique_id, agency_id, title, published_at) "
+            "SELECT 'antigo', id, 'Título', NOW() FROM agencies WHERE key = 'mec'"
+        )
+
+        _apply_all_migrations()
+
+        assert _execute("SELECT content_key FROM news WHERE unique_id = 'antigo'") == [(None,)]
+
+    def test_035_nao_indexa_content_key(self):
+        """Sem índice na coluna, o UPDATE da chave pode ser HOT (não toca o HNSW do embedding)."""
+        _apply_all_migrations()
+
+        assert not [d for d in _indexes("news").values() if "content_key" in d]
+
+    def test_035_rollback_remove_coluna_e_reaplica(self):
+        _apply_all_migrations()
+
+        result = _run_migrate("rollback", "035", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+        assert "content_key" not in _columns("news")
+
+        result = _run_migrate("migrate", "--yes")
+        assert result.returncode == 0, f"Re-apply failed:\n{result.stdout}\n{result.stderr}"
+        assert _columns("news")["content_key"] == ("text", "YES")
+
+
 _TEXTO_LONGO = (
     "O Ministério da Educação anunciou nesta segunda-feira a ampliação do "
     "programa de bolsas para estudantes de baixa renda em todo o país."
@@ -684,3 +734,152 @@ class TestBackfillFleschPtbrMigration:
         assert features["f_com_features"] == {}
         assert features["d_ja_tem"] == {}
         assert "b_sem_linha" not in features
+
+
+def _load_migration_036():
+    import importlib.util
+
+    path = MIGRATIONS_DIR / "036_backfill_news_content_key.py"
+    spec = importlib.util.spec_from_file_location("migration_036", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_036(dry_run: bool = False, chunk_days: int | None = None) -> dict:
+    module = _load_migration_036()
+    if chunk_days:
+        module.CHUNK_DAYS = chunk_days
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        result = module.migrate(conn, dry_run=dry_run)
+        conn.commit()
+        return result
+    finally:
+        conn.close()
+
+
+_REPUBLICADO = " ".join(f"reforma{i}" for i in range(200))
+
+
+def _insert_full_news(
+    unique_id: str, agency_key: str, title: str, content: str, published_at: str
+) -> None:
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO news (unique_id, agency_id, title, content, published_at, agency_key) "
+                "SELECT %s, id, %s, %s, %s, key FROM agencies WHERE key = %s",
+                (unique_id, title, content, published_at, agency_key),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _content_keys() -> dict[str, str | None]:
+    return dict(_execute("SELECT unique_id, content_key FROM news") or [])
+
+
+_CHAVES_ESPERADAS = {
+    "antigo-mec": "antigo-mec",
+    "antigo-mds": "antigo-mec",
+    "virada-mec": "virada-mec",
+    "virada-mds": "virada-mec",
+    "isolado": None,
+}
+
+
+@pytest.mark.integration
+class TestBackfillContentKeyMigration:
+    """036: backfill de news.content_key (chave de quase-duplicata H5) no corpus inteiro."""
+
+    @pytest.fixture(autouse=True)
+    def _corpus(self):
+        _apply_all_migrations()
+        _execute("INSERT INTO agencies (key, name) VALUES ('mec', 'MEC'), ('mds', 'MDS')")
+        # republicação antiga (2015), uma que atravessa a virada de dia e um texto isolado
+        _insert_full_news(
+            "antigo-mec", "mec", "Programa amplia vagas", _REPUBLICADO, "2015-03-10T12:00:00+00"
+        )
+        _insert_full_news(
+            "antigo-mds",
+            "mds",
+            "MDS detalha vagas",
+            f"![foto](https://www.gov.br/mds/a.jpg) {_REPUBLICADO}",
+            "2015-03-10T15:00:00+00",
+        )
+        _insert_full_news(
+            "virada-mec", "mec", "Outro programa novo", _REPUBLICADO, "2026-10-01T12:00:00+00"
+        )
+        _insert_full_news(
+            "virada-mds", "mds", "Republicação do programa", _REPUBLICADO, "2026-10-02T13:00:00+00"
+        )
+        _insert_full_news(
+            "isolado",
+            "mec",
+            "Assunto sem relação",
+            " ".join(f"z{i}" for i in range(200)),
+            "2026-10-05T12:00:00+00",
+        )
+
+    def test_036_grava_o_lider_nos_grupos_e_nulo_nos_isolados(self):
+        result = _run_036()
+
+        assert _content_keys() == _CHAVES_ESPERADAS
+        assert result["rows_updated"] == 4
+        assert result["grouped"] == 4
+        assert result["target"] == 5
+
+    def test_036_blocos_de_um_dia_dao_o_mesmo_resultado(self):
+        """A republicação de 01→02/10 atravessa o bloco: o contexto semeado a junta."""
+        result = _run_036(chunk_days=1)
+
+        assert _content_keys() == _CHAVES_ESPERADAS
+        # 2015 + (01/10 12h) + (02/10 13h) + o último, aberto; os buracos são pulados
+        assert result["chunks"] == 4
+
+    def test_036_pula_os_anos_sem_artigo(self):
+        assert _run_036()["chunks"] == 2
+
+    def test_036_idempotente(self):
+        _run_036()
+        second = _run_036()
+
+        assert second["rows_updated"] == 0
+        assert _content_keys() == _CHAVES_ESPERADAS
+
+    def test_036_dry_run_projeta_sem_gravar(self):
+        result = _run_036(dry_run=True)
+
+        assert result["preview"] is True
+        assert result["total_articles"] == 5
+        assert result["sample_target"] == 3  # últimos SAMPLE_DAYS dias
+        assert result["sample_changes"] == 2
+        assert result["projected_changes"] == round(2 / 3 * 5)
+        assert result["projected_seconds"] >= 0
+        assert set(_content_keys().values()) == {None}
+
+    def test_036_dry_run_sem_a_035_avisa_em_vez_de_quebrar(self):
+        """`migrate --dry-run` com 035 e 036 pendentes: o runner desfaz o preview da 035."""
+        result = _run_migrate("rollback", "035", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+
+        result = _run_036(dry_run=True)
+
+        assert result["preview"] is True
+        assert "035" in result["message"]
+
+    def test_036_corpus_vazio(self):
+        _execute("DELETE FROM news")
+
+        assert _run_036()["rows_updated"] == 0
+
+    def test_036_rollback_limpa_as_chaves(self):
+        _run_036()
+
+        result = _run_migrate("rollback", "036", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+
+        assert set(_content_keys().values()) == {None}

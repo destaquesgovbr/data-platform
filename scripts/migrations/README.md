@@ -43,6 +43,7 @@ does not report them as gaps. Remove the entry when the PR lands with its file.
 |---|----------|
 | 030 | data-platform#189 (summary moderation) |
 | 031 | data-platform#184 (BGE-M3) |
+| 034 | tema 26 Defesa Civil (DP-2, `feature/tema-26-migracao`) |
 
 ## Backfills
 
@@ -50,6 +51,16 @@ Python backfills run with the pending SQL migrations unless targeted. To apply o
 migration and leave a later backfill for its own window, use `--target`, e.g.
 `migrate --target 032` (leaves `033_backfill_readability_flesch_ptbr.py` pending), and
 dry-run the backfill first: its preview reports the pending count and a projected run time.
+
+`--target NNN` applies **every** pending migration up to and including NNN, not just NNN. Run
+`status` first: if an earlier backfill is still pending (e.g. 033 when targeting 035), it runs
+in the same call, outside its own window. Apply the earlier ones first, in their windows.
+
+Likewise `migrate --target 035` adds `news.content_key` and leaves
+`036_backfill_news_content_key.py` (near-duplicate key for the whole corpus, 90-day chunks,
+idempotent) for its own window — with 033 and 034 already applied, otherwise they run too; its dry-run computes the last 30 days without writing and
+projects time and changes. A `migrate --dry-run` with 035 and 036 both pending only reports that
+035 must be applied first (the runner rolls back the 035 preview before 036 runs).
 
 ## Theme changes (034)
 
@@ -65,8 +76,10 @@ back, logging the counts per code and per rule. Its rollback reads only those tw
 from the most recent `changed_at` to the oldest (on a tie, the LLM row first), restores each
 article to its state before the first change and only sets `reverted_at` on the rows it read
 (no new audit rows); articles in theme 26 without audit rows are undone by the inverse map and
-listed as `unaudited_inverse_map` in the log. Never use `scripts/populate_themes.py` in
-production (it deletes `themes` and reinserts with new ids).
+listed as `unaudited_inverse_map` in the log. Apply it with `migrate --target 034` after
+`status`: pending means "not in the history", so with 035/036 already applied only 034 runs.
+Never use `scripts/populate_themes.py` in production (it deletes `themes` and reinserts with
+new ids).
 
 ## Current Migrations
 
