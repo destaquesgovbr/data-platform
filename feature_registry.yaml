@@ -77,6 +77,8 @@ features:
       fácil, 50–75 fácil, 25–50 difícil, 0–25 muito difícil. Valor cru, sem
       clamp (pode ficar negativo ou passar de 100); ausente abaixo de 10
       palavras. Não é comparável com readability_flesch (fórmula inglesa).
+      Linhas que outros escritores criam sem a chave são completadas todo dia
+      pela task fill_flesch_ptbr da DAG aggregate_engagement (mesmo cálculo).
     model: "local/pyphen-pt_BR"
     compute: "feature-worker"
 
