@@ -6,7 +6,8 @@ de construcao de SQL permite testar a logica (threshold, ordem canonica, filtro 
 sem precisar de um banco real.
 
 Fonte: news_features.features->'entities' (apenas mencoes com canonical_id NAO-NULL).
-Saida: news_entities (mencao normalizada) -> entity_edges (co-mencao + estruturais).
+Saida: news_entities (mencao normalizada) -> entity_edges (co-mencao + estruturais)
+-> entity_stats (por entidade) + entity_graph_meta (totais do corpus).
 """
 
 import logging
@@ -21,6 +22,19 @@ CO_MENTION_MIN_WEIGHT = 2
 KIND_CO_MENTION = "co_mention"
 KIND_SUBORDINATE_TO = "subordinate_to"
 KIND_IS_AGENCY = "is_agency"
+
+# Chave de deduplicacao de conteudo: UNICO ponto que define quando dois artigos sao "o mesmo
+# conteudo" para unique_content_count (arestas e entity_stats) e total_unique_content (meta).
+# Contrato: exatamente 1 linha por artigo de news, colunas (unique_id, content_key).
+# Hoje: news.content_hash (16 hex do SHA-256 de titulo + conteudo normalizados, migracoes
+# 009/010); sem hash, o proprio artigo. O hash exato quase nao colapsa republicacoes entre
+# orgaos (o texto raramente e identico); trocar por uma chave de quase-duplicata (titulo
+# normalizado, MinHash, ...) e so mudar este SELECT — sem migracao. Por ser uma tabela derivada,
+# a chave e calculada 1 vez por artigo (nao por par de mencoes) e pode vir de outra tabela.
+ARTICLE_CONTENT_KEY_SQL = """
+    SELECT n.unique_id, COALESCE(n.content_hash, n.unique_id) AS content_key
+    FROM news n
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -83,29 +97,40 @@ def rebuild_news_entities(conn) -> int:
 # aresta nao-direcionada sem duplicar par). Agrega por par:
 #   weight        = nº de artigos distintos em co-mencao
 #   article_count = idem (mesma metrica neste 1º corte)
+#   unique_content_count = nº de conteudos distintos (content_key de ARTICLE_CONTENT_KEY_SQL):
+#                   republicacoes da mesma materia por varios orgaos contam 1
 #   first/last_seen = min/max(published_at)
-# Threshold via HAVING: so pares com >= %(min_weight)s artigos.
+# Threshold via HAVING: so pares com >= %(min_weight)s artigos — na contagem BRUTA, para o
+# conjunto de arestas (portal/Neo4j) nao mudar com o dedup.
 #
 # Idempotente: DELETE da kind 'co_mention' + INSERT recomputado.
 DELETE_CO_MENTION_EDGES_SQL = "DELETE FROM entity_edges WHERE kind = %(kind)s"
 
-RECOMPUTE_CO_MENTION_EDGES_SQL = """
-    INSERT INTO entity_edges (src_id, dst_id, kind, weight, article_count, first_seen, last_seen)
+RECOMPUTE_CO_MENTION_EDGES_SQL = (
+    """
+    INSERT INTO entity_edges (src_id, dst_id, kind, weight, article_count,
+                              unique_content_count, first_seen, last_seen)
     SELECT
         a.entity_id                       AS src_id,
         b.entity_id                       AS dst_id,
         %(kind)s                          AS kind,
         COUNT(DISTINCT a.unique_id)       AS weight,
         COUNT(DISTINCT a.unique_id)       AS article_count,
+        COUNT(DISTINCT ck.content_key)    AS unique_content_count,
         MIN(a.published_at)               AS first_seen,
         MAX(a.published_at)               AS last_seen
     FROM news_entities a
     JOIN news_entities b
       ON a.unique_id = b.unique_id
      AND a.entity_id < b.entity_id
+    -- 1 linha por artigo (FK news_entities -> news): o join nao descarta nem duplica mencoes
+    JOIN ("""
+    + ARTICLE_CONTENT_KEY_SQL
+    + """) ck ON ck.unique_id = a.unique_id
     GROUP BY a.entity_id, b.entity_id
     HAVING COUNT(DISTINCT a.unique_id) >= %(min_weight)s
 """
+)
 
 
 def recompute_co_mention_edges(conn, min_weight: int = CO_MENTION_MIN_WEIGHT) -> int:
@@ -216,12 +241,108 @@ def recompute_structural_edges(conn) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# (d) Estatisticas por entidade e totais do corpus (lift/PMI na graphql-api)
+# ---------------------------------------------------------------------------
+
+# Remove as entidades que ficaram sem mencao no news_entities recem-reconstruido.
+DELETE_STALE_ENTITY_STATS_SQL = """
+    DELETE FROM entity_stats s
+    WHERE NOT EXISTS (
+        SELECT 1 FROM news_entities ne WHERE ne.entity_id = s.entity_id
+    )
+"""
+
+# Por entidade: artigos distintos, conteudos distintos (content_key de ARTICLE_CONTENT_KEY_SQL,
+# como em unique_content_count das arestas) e janela de mencoes. Upsert em vez de DELETE + INSERT para
+# nao apagar a curadoria (is_generic/generic_reason, que este job nao calcula); sem TRUNCATE,
+# os leitores seguem vendo o snapshot anterior ate o commit.
+UPSERT_ENTITY_STATS_SQL = (
+    """
+    INSERT INTO entity_stats (entity_id, article_count, unique_content_count,
+                              first_seen, last_seen, computed_at)
+    SELECT
+        ne.entity_id,
+        COUNT(DISTINCT ne.unique_id)   AS article_count,
+        COUNT(DISTINCT ck.content_key) AS unique_content_count,
+        MIN(ne.published_at)           AS first_seen,
+        MAX(ne.published_at)           AS last_seen,
+        NOW()                          AS computed_at
+    FROM news_entities ne
+    JOIN ("""
+    + ARTICLE_CONTENT_KEY_SQL
+    + """) ck ON ck.unique_id = ne.unique_id
+    GROUP BY ne.entity_id
+    ON CONFLICT (entity_id) DO UPDATE SET
+        article_count        = EXCLUDED.article_count,
+        unique_content_count = EXCLUDED.unique_content_count,
+        first_seen           = EXCLUDED.first_seen,
+        last_seen            = EXCLUDED.last_seen,
+        computed_at          = EXCLUDED.computed_at
+"""
+)
+
+# Totais do corpus do grafo (linha unica id = 1). Universo = artigos com ao menos uma mencao
+# canonica em news_entities (o mesmo das contagens por entidade/aresta), nao a tabela news
+# inteira: e o denominador do lift/PMI. Agregado sem GROUP BY: corpus vazio grava (0, 0).
+UPSERT_ENTITY_GRAPH_META_SQL = (
+    """
+    INSERT INTO entity_graph_meta (id, total_articles, total_unique_content, computed_at)
+    SELECT
+        1,
+        COUNT(DISTINCT ne.unique_id),
+        COUNT(DISTINCT ck.content_key),
+        NOW()
+    FROM news_entities ne
+    JOIN ("""
+    + ARTICLE_CONTENT_KEY_SQL
+    + """) ck ON ck.unique_id = ne.unique_id
+    ON CONFLICT (id) DO UPDATE SET
+        total_articles       = EXCLUDED.total_articles,
+        total_unique_content = EXCLUDED.total_unique_content,
+        computed_at          = EXCLUDED.computed_at
+    RETURNING total_articles, total_unique_content
+"""
+)
+
+
+def recompute_entity_stats(conn) -> dict:
+    """Recomputa entity_stats e entity_graph_meta a partir de news_entities.
+
+    Roda depois do rebuild de news_entities, na mesma transacao. Retorna as contagens.
+    """
+    cursor = conn.cursor()
+    try:
+        cursor.execute(DELETE_STALE_ENTITY_STATS_SQL)
+        stale_removed = cursor.rowcount
+        cursor.execute(UPSERT_ENTITY_STATS_SQL)
+        entity_stats = cursor.rowcount
+        cursor.execute(UPSERT_ENTITY_GRAPH_META_SQL)
+        total_articles, total_unique_content = cursor.fetchone()
+        logger.info(
+            "entity_stats recomputadas: %s entidades (%s removidas); corpus: %s artigos, "
+            "%s conteudos distintos",
+            entity_stats,
+            stale_removed,
+            total_articles,
+            total_unique_content,
+        )
+        return {
+            "stale_removed": stale_removed,
+            "entity_stats": entity_stats,
+            "total_articles": total_articles,
+            "total_unique_content": total_unique_content,
+        }
+    finally:
+        cursor.close()
+
+
+# ---------------------------------------------------------------------------
 # Orquestracao (uma transacao para todo o rebuild)
 # ---------------------------------------------------------------------------
 
 
 def project_entity_graph(db_url: str, min_weight: int = CO_MENTION_MIN_WEIGHT) -> dict:
-    """Executa o rebuild completo (news_entities + entity_edges) numa unica transacao.
+    """Executa o rebuild completo (news_entities + entity_edges + entity_stats) numa transacao.
 
     Args:
         db_url: connection string do Postgres.
@@ -238,6 +359,7 @@ def project_entity_graph(db_url: str, min_weight: int = CO_MENTION_MIN_WEIGHT) -
         mentions = rebuild_news_entities(conn)
         co_mention = recompute_co_mention_edges(conn, min_weight=min_weight)
         structural = recompute_structural_edges(conn)
+        stats = recompute_entity_stats(conn)
         conn.commit()
         return {
             "status": "ok",
@@ -245,6 +367,9 @@ def project_entity_graph(db_url: str, min_weight: int = CO_MENTION_MIN_WEIGHT) -
             "co_mention_edges": co_mention,
             "subordinate_to_edges": structural["subordinate_to"],
             "is_agency_edges": structural["is_agency"],
+            "entity_stats": stats["entity_stats"],
+            "total_articles": stats["total_articles"],
+            "total_unique_content": stats["total_unique_content"],
         }
     except Exception:
         conn.rollback()

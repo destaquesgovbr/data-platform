@@ -453,3 +453,234 @@ class TestEntityTrendingBaselineMigration:
         result = _run_migrate("migrate", "--yes")
         assert result.returncode == 0, f"Re-apply failed:\n{result.stdout}\n{result.stderr}"
         assert {"baseline_count", "baseline_agencies"} <= set(_columns("entity_trending_scores"))
+
+
+@pytest.mark.integration
+class TestEntityStatsMigration:
+    """032: entity_stats, entity_graph_meta e entity_edges.unique_content_count (DP-1).
+
+    Contrato lido pela graphql-api (GQL-1) via LEFT JOIN: nomes e tipos fixos.
+    """
+
+    def test_032_adiciona_unique_content_count_nulo_em_entity_edges(self):
+        _apply_all_migrations()
+
+        assert _columns("entity_edges")["unique_content_count"] == ("integer", "YES")
+
+    def test_032_cria_entity_stats_com_o_contrato(self):
+        _apply_all_migrations()
+
+        assert _columns("entity_stats") == {
+            "entity_id": ("character varying", "NO"),
+            "article_count": ("integer", "NO"),
+            "unique_content_count": ("integer", "NO"),
+            "first_seen": ("timestamp with time zone", "YES"),
+            "last_seen": ("timestamp with time zone", "YES"),
+            "is_generic": ("boolean", "NO"),
+            "generic_reason": ("text", "YES"),
+            "computed_at": ("timestamp with time zone", "NO"),
+        }
+
+    def test_032_cria_entity_graph_meta_com_o_contrato(self):
+        _apply_all_migrations()
+
+        assert _columns("entity_graph_meta") == {
+            "id": ("smallint", "NO"),
+            "total_articles": ("integer", "NO"),
+            "total_unique_content": ("integer", "NO"),
+            "computed_at": ("timestamp with time zone", "NO"),
+        }
+
+    def test_032_entity_graph_meta_so_aceita_id_1(self):
+        _apply_all_migrations()
+        _execute(
+            "INSERT INTO entity_graph_meta (id, total_articles, total_unique_content) VALUES (1, 0, 0)"
+        )
+
+        with pytest.raises(psycopg2.errors.CheckViolation):
+            _execute(
+                "INSERT INTO entity_graph_meta (id, total_articles, total_unique_content) "
+                "VALUES (2, 0, 0)"
+            )
+
+    def test_032_defaults_de_entity_stats_e_cascade_do_registry(self):
+        _apply_all_migrations()
+        _execute(
+            "INSERT INTO entity_registry (entity_id, canonical_name, type, provenance) "
+            "VALUES ('Q1', 'Org', 'ORG', 'llm')"
+        )
+        _execute(
+            "INSERT INTO entity_stats (entity_id, article_count, unique_content_count) "
+            "VALUES ('Q1', 3, 2)"
+        )
+        rows = _execute(
+            "SELECT is_generic, generic_reason, computed_at IS NOT NULL FROM entity_stats"
+        )
+        assert rows == [(False, None, True)]
+
+        _execute("DELETE FROM entity_registry WHERE entity_id = 'Q1'")
+        assert _execute("SELECT count(*) FROM entity_stats") == [(0,)]
+
+    def test_032_entity_stats_exige_entidade_do_registry(self):
+        _apply_all_migrations()
+
+        with pytest.raises(psycopg2.errors.ForeignKeyViolation):
+            _execute(
+                "INSERT INTO entity_stats (entity_id, article_count, unique_content_count) "
+                "VALUES ('Q_inexistente', 1, 1)"
+            )
+
+    def test_032_rollback_remove_tudo_e_reaplica(self):
+        _apply_all_migrations()
+
+        result = _run_migrate("rollback", "032", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+        assert _columns("entity_stats") == {}
+        assert _columns("entity_graph_meta") == {}
+        assert "unique_content_count" not in _columns("entity_edges")
+
+        result = _run_migrate("migrate", "--yes")
+        assert result.returncode == 0, f"Re-apply failed:\n{result.stdout}\n{result.stderr}"
+        assert "unique_content_count" in _columns("entity_edges")
+        assert "is_generic" in _columns("entity_stats")
+
+
+_TEXTO_LONGO = (
+    "O Ministério da Educação anunciou nesta segunda-feira a ampliação do "
+    "programa de bolsas para estudantes de baixa renda em todo o país."
+)
+
+
+def _load_migration_033():
+    import importlib.util
+
+    path = MIGRATIONS_DIR / "033_backfill_readability_flesch_ptbr.py"
+    spec = importlib.util.spec_from_file_location("migration_033", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _insert_news(unique_id: str, content: str | None) -> None:
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO news (unique_id, agency_id, title, content, published_at) "
+                "SELECT %s, id, 'Título', %s, NOW() FROM agencies WHERE key = 'mec'",
+                (unique_id, content),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _features() -> dict[str, dict]:
+    return dict(_execute("SELECT unique_id, features FROM news_features") or [])
+
+
+def _run_033(dry_run: bool = False, batch_size: int | None = None) -> dict:
+    module = _load_migration_033()
+    if batch_size:
+        module.BATCH_SIZE = batch_size
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        result = module.migrate(conn, dry_run=dry_run)
+        conn.commit()
+        return result
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+class TestBackfillFleschPtbrMigration:
+    """033: backfill de readability_flesch_ptbr nas linhas existentes de news_features (DP-1).
+
+    Só UPDATE: notícia sem linha em news_features fica de fora (não ganha linha nova).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _corpus(self):
+        from data_platform.workers.feature_worker.features import (
+            compute_readability_flesch_ptbr,
+        )
+
+        _apply_all_migrations()
+        _execute("INSERT INTO agencies (key, name) VALUES ('mec', 'MEC')")
+        _insert_news("a_com_features", _TEXTO_LONGO)
+        _insert_news("b_sem_linha", _TEXTO_LONGO + " Segunda frase do texto.")
+        _insert_news("c_curto", "Texto curto.")
+        _insert_news("d_ja_tem", _TEXTO_LONGO)
+        _insert_news("e_sem_content", None)
+        _insert_news("f_com_features", _TEXTO_LONGO + " Segunda frase do texto.")
+        _execute(
+            "INSERT INTO news_features (unique_id, features) VALUES "
+            """('a_com_features', '{"word_count": 22, "readability_flesch": 38.38}'), """
+            """('c_curto', '{"word_count": 2}'), """
+            """('d_ja_tem', '{"readability_flesch_ptbr": 999}'), """
+            """('e_sem_content', '{}'), """
+            """('f_com_features', '{}')"""
+        )
+        self.expected_a = compute_readability_flesch_ptbr(_TEXTO_LONGO)
+        self.expected_f = compute_readability_flesch_ptbr(_TEXTO_LONGO + " Segunda frase do texto.")
+
+    def test_033_grava_a_chave_preservando_as_demais(self):
+        result = _run_033()
+
+        features = _features()
+        assert features["a_com_features"] == {
+            "word_count": 22,
+            "readability_flesch": 38.38,
+            "readability_flesch_ptbr": self.expected_a,
+        }
+        assert features["f_com_features"] == {"readability_flesch_ptbr": self.expected_f}
+        assert features["c_curto"] == {"word_count": 2}
+        assert features["e_sem_content"] == {}
+        assert features["d_ja_tem"] == {"readability_flesch_ptbr": 999}
+        assert result["rows_updated"] == 2
+        assert result["too_short"] == 1
+
+    def test_033_nao_cria_linha_para_noticia_sem_features(self):
+        """Decisão: as ~153,8 mil notícias sem linha em news_features ficam de fora."""
+        result = _run_033()
+
+        assert "b_sem_linha" not in _features()
+        assert len(_features()) == 5
+        assert result["scanned"] == 3
+
+    def test_033_pagina_em_lotes_pequenos(self):
+        result = _run_033(batch_size=1)
+
+        features = _features()
+        assert features["a_com_features"]["readability_flesch_ptbr"] == self.expected_a
+        assert features["f_com_features"]["readability_flesch_ptbr"] == self.expected_f
+        assert "b_sem_linha" not in features
+        assert result["scanned"] == 3
+
+    def test_033_retomavel(self):
+        _run_033()
+        second = _run_033()
+
+        # só o texto curto volta a ser lido (nunca ganha a chave)
+        assert second["rows_updated"] == 0
+        assert second["scanned"] == 1
+
+    def test_033_dry_run_projeta_sem_gravar(self):
+        result = _run_033(dry_run=True)
+
+        assert result["preview"] is True
+        assert result["pending"] == 3
+        assert result["sample_size"] == 3
+        assert "readability_flesch_ptbr" not in _features()["a_com_features"]
+
+    def test_033_rollback_remove_so_a_chave(self):
+        _run_033()
+
+        result = _run_migrate("rollback", "033", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+
+        features = _features()
+        assert features["a_com_features"] == {"word_count": 22, "readability_flesch": 38.38}
+        assert features["f_com_features"] == {}
+        assert features["d_ja_tem"] == {}
+        assert "b_sem_linha" not in features

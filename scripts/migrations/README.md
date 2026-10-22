@@ -34,6 +34,23 @@ python scripts/migrate.py validate
 | SQL rollback | `NNN_description_rollback.sql` | `005_alter_unique_id_varchar_rollback.sql` |
 | Python migration | `NNN_description.py` | `006_migrate_unique_ids.py` |
 
+## Reserved Versions
+
+`RESERVED_VERSIONS` in `scripts/migrate.py` lists numbers held for PRs still open; `validate`
+does not report them as gaps. Remove the entry when the PR lands with its file.
+
+| # | Held for |
+|---|----------|
+| 030 | data-platform#189 (summary moderation) |
+| 031 | data-platform#184 (BGE-M3) |
+
+## Backfills
+
+Python backfills run with the pending SQL migrations unless targeted. To apply only a schema
+migration and leave a later backfill for its own window, use `--target`, e.g.
+`migrate --target 032` (leaves `033_backfill_readability_flesch_ptbr.py` pending), and
+dry-run the backfill first: its preview reports the pending count and a projected run time.
+
 ## Current Migrations
 
 | # | File | Type | Description |

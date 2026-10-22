@@ -614,6 +614,31 @@ class TestValidateMigrations:
         issues = validate_migrations(migrations)
         assert issues == []
 
+    def test_reserved_version_is_not_a_gap(self, tmp_path):
+        (tmp_path / "001_first.sql").write_text("SELECT 1;")
+        (tmp_path / "003_third.sql").write_text("SELECT 3;")
+
+        from migrate import discover_migrations, validate_migrations
+
+        migrations = discover_migrations(tmp_path)
+        assert validate_migrations(migrations, reserved={"002"}) == []
+
+    def test_unreserved_gap_still_reported_alongside_reserved(self, tmp_path):
+        (tmp_path / "001_first.sql").write_text("SELECT 1;")
+        (tmp_path / "004_fourth.sql").write_text("SELECT 4;")
+
+        from migrate import discover_migrations, validate_migrations
+
+        migrations = discover_migrations(tmp_path)
+        issues = validate_migrations(migrations, reserved={"002"})
+        assert issues == ["Sequence gap: migration 003 is missing"]
+
+    def test_reserved_versions_are_the_open_prs(self):
+        """030 (#189) e 031 (#184) ficam reservadas; quem entra depois usa 032+."""
+        from migrate import RESERVED_VERSIONS
+
+        assert set(RESERVED_VERSIONS) == {"030", "031"}
+
 
 # ---------------------------------------------------------------------------
 # Stamp

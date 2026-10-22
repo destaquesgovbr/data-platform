@@ -191,7 +191,7 @@ features:
   readability_flesch:
     version: "1.0"
     type: float
-    description: "Flesch reading ease score (adaptado pt-BR)"
+    description: "Flesch reading ease score (fórmula inglesa do textstat; a adaptação pt-BR é a chave readability_flesch_ptbr)"
     model: "local/textstat"
     compute: "feature-worker"
 

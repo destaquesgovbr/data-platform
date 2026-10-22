@@ -40,7 +40,8 @@ features:
 | `has_video` | boolean | Artigo possui vídeo |
 | `publication_hour` | integer | Hora de publicação (0-23 UTC) |
 | `publication_dow` | integer | Dia da semana (0=seg, 6=dom) |
-| `readability_flesch` | float | Flesch reading ease (pt-BR) |
+| `readability_flesch` | float | Flesch reading ease, fórmula **inglesa** do textstat 0.7.13 (sem `set_lang`; pode dar negativo em português) |
+| `readability_flesch_ptbr` | float | Flesch adaptado ao português (Martins et al., 1996: 248,835 − 1,015·ASL − 84,6·ASW), sílabas pelo pyphen `pt_BR`; valor cru, sem clamp. Faixas: 75–100 muito fácil, 50–75 fácil, 25–50 difícil, 0–25 muito difícil |
 
 ### Features IA (enrichment-worker)
 

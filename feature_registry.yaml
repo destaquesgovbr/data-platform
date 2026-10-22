@@ -63,6 +63,23 @@ features:
     model: "local/textstat"
     compute: "feature-worker"
 
+  readability_flesch_ptbr:
+    version: "1.0"
+    type: float
+    description: >-
+      Flesch reading ease adaptado ao português (Martins et al., 1996):
+      248,835 − 1,015·ASL − 84,6·ASW, com ASL = palavras/frases e
+      ASW = sílabas/palavras. Sílabas pelo pyphen pt_BR (left=1, right=1:
+      pontos de hifenização + 1; composto com hífen soma as partes).
+      Palavras = tokens alfabéticos; frases terminam em [.!?…], linha em
+      branco, título ou item de lista markdown; imagens, URLs e a sintaxe de
+      links do markdown são descartadas. Faixas de Martins: 75–100 muito
+      fácil, 50–75 fácil, 25–50 difícil, 0–25 muito difícil. Valor cru, sem
+      clamp (pode ficar negativo ou passar de 100); ausente abaixo de 10
+      palavras. Não é comparável com readability_flesch (fórmula inglesa).
+    model: "local/pyphen-pt_BR"
+    compute: "feature-worker"
+
   content_annotations:
     version: "1.0"
     type: array

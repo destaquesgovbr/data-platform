@@ -45,6 +45,7 @@ def _pytest_args() -> list[str]:
 def test_descobre_os_testes_do_banco_descartavel():
     assert _disposable_db_tests() == [
         "tests/integration/test_backfill_features_window_integration.py",
+        "tests/integration/test_entity_graph_integration.py",
         "tests/integration/test_migrate_integration.py",
         "tests/integration/test_trend_detection_integration.py",
     ]
@@ -65,6 +66,8 @@ def test_workflow_dispara_quando_o_teste_muda(test_file):
     [
         "scripts/migrate.py",
         "scripts/migrations/029_entity_trending_baseline.sql",
+        "scripts/migrations/032_entity_stats.sql",
+        "src/data_platform/jobs/graph/edges.py",
         "src/data_platform/jobs/trend_detection/signals.py",
         "src/data_platform/jobs/trend_detection/persist.py",
         "scripts/backfill_features_window.py",

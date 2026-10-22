@@ -49,6 +49,8 @@ pre-commit = "^4.5.1"
 fastapi = "^0.115.0"
 uvicorn = {version = "^0.34.0", extras = ["standard"]}
 textstat = "^0.7.13"
+# Sílabas do Flesch pt-BR (dicionário pt_BR); já vinha como dependência do textstat
+pyphen = "^0.17"
 google-cloud-storage = "^3.9.0"
 google-cloud-bigquery = "^3.40.1"
 
