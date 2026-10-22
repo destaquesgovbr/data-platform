@@ -460,6 +460,37 @@ class TestRollback:
         assert stats["campaign_rows_reverted"] == {"tema26-034": len(TOCADOS), LLM_CAMPAIGN: 3}
         assert all(row[-1] for row in _audit(LLM_CAMPAIGN))
 
+    def test_linha_gravada_depois_da_leitura_nao_e_marcada(self, mod):
+        """Só as linhas lidas pelo rollback ganham reverted_at (marca por id).
+
+        Fora do teste, o CREATE ... IF NOT EXISTS do rollback já segura um insert
+        concorrente até o commit; aqui a linha entra na mesma transação, depois da leitura.
+        """
+        _run_migrate("migrate", "--yes")
+        conn = psycopg2.connect(DATABASE_URL)
+        try:
+            cursor = conn.cursor()
+            original = mod.audit_endpoints
+
+            def le_e_grava_concorrente(rows):
+                cursor.execute(
+                    "INSERT INTO news_theme_changes (campaign, unique_id, old_l1_code, "
+                    "new_l1_code, source) VALUES (%s, 'militar', '19', '19', %s)",
+                    (LLM_CAMPAIGN, LLM_SOURCE),
+                )
+                return original(rows)
+
+            mod.audit_endpoints = le_e_grava_concorrente
+            try:
+                stats = mod._revert(cursor)
+            finally:
+                mod.audit_endpoints = original
+            conn.commit()
+        finally:
+            conn.close()
+        assert stats["campaign_rows_reverted"] == {"tema26-034": len(TOCADOS)}
+        assert _audit(LLM_CAMPAIGN)[0][-1] is False
+
     def test_artigo_movido_para_o_26_so_pelo_llm_volta_ao_tema_original(self, mod):
         """05.02.01 → 26.02.01 na campanha do LLM volta a 05.02.01, não a 19.04.01."""
         _run_migrate("migrate", "--yes")

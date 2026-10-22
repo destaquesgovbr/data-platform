@@ -177,9 +177,13 @@ class TestContratoDaAuditoria:
         assert "campaign <> %(rollback)s" in sql
         assert "reverted_at IS NULL" in sql
         assert "ORDER BY changed_at, id" in sql
+
+    def test_rollback_marca_so_as_linhas_que_leu(self):
+        """Linha gravada por um run concorrente depois da leitura não ganha reverted_at."""
         marca = _sql(m.MARK_REVERTED_SQL)
-        assert "campaign LIKE %(pattern)s" in marca
-        assert "campaign <> %(rollback)s" in marca
+        assert "SET reverted_at = NOW()" in marca
+        assert "WHERE id = ANY(%(ids)s)" in marca
+        assert "RETURNING campaign" in marca
 
 
 # --------------------------------------------------------------------------
