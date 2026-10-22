@@ -138,9 +138,10 @@ class TestArticleContentKey:
         assert norm.startswith("select n.unique_id,")
         assert norm.endswith("as content_key from news n")
 
-    def test_hoje_e_o_content_hash_ou_o_proprio_artigo(self):
+    def test_quase_duplicata_depois_hash_exato_depois_o_proprio_artigo(self):
+        """content_key (H5, migracao 035) quando calculada; senao content_hash; senao o artigo."""
         norm = _normalize(ARTICLE_CONTENT_KEY_SQL)
-        assert "coalesce(n.content_hash, n.unique_id) as content_key" in norm
+        assert "coalesce(n.content_key, n.content_hash, n.unique_id) as content_key" in norm
 
     def test_regra_de_dedup_definida_num_lugar_so(self):
         """Arestas, entity_stats e meta usam o mesmo fragmento; content_hash so aparece nele."""
@@ -151,7 +152,7 @@ class TestArticleContentKey:
         ):
             assert ARTICLE_CONTENT_KEY_SQL in sql
         code = inspect.getsource(edges)
-        assert code.count("content_hash, n.unique_id") == 1
+        assert code.count("n.content_key, n.content_hash, n.unique_id") == 1
 
 
 # ---------------------------------------------------------------------------
