@@ -634,10 +634,16 @@ class TestValidateMigrations:
         assert issues == ["Sequence gap: migration 003 is missing"]
 
     def test_reserved_versions_are_the_open_prs(self):
-        """030 (#189), 031 (#184) e 034 (tema 26, DP-2) ficam reservadas; o DP-1b usa 035/036."""
+        """030 (#189) e 031 (#184) ficam reservadas; a 034 (tema 26, DP-2) chegou com o arquivo."""
         from migrate import RESERVED_VERSIONS
 
-        assert set(RESERVED_VERSIONS) == {"030", "031", "034"}
+        assert set(RESERVED_VERSIONS) == {"030", "031"}
+
+    def test_034_tem_arquivo_e_nao_e_reservada(self):
+        from migrate import MIGRATIONS_DIR, RESERVED_VERSIONS
+
+        assert (MIGRATIONS_DIR / "034_tema26_defesa_civil.py").is_file()
+        assert "034" not in RESERVED_VERSIONS
 
 
 # ---------------------------------------------------------------------------

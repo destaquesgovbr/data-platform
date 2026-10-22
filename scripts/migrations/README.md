@@ -43,7 +43,6 @@ does not report them as gaps. Remove the entry when the PR lands with its file.
 |---|----------|
 | 030 | data-platform#189 (summary moderation) |
 | 031 | data-platform#184 (BGE-M3) |
-| 034 | tema 26 Defesa Civil (DP-2, `feature/tema-26-migracao`) |
 
 ## Backfills
 
@@ -61,6 +60,25 @@ Likewise `migrate --target 035` adds `news.content_key` and leaves
 idempotent) for its own window — with 033 and 034 already applied, otherwise they run too; its dry-run computes the last 30 days without writing and
 projects time and changes. A `migrate --dry-run` with 035 and 036 both pending only reports that
 035 must be applied first (the runner rolls back the 035 preview before 036 runs).
+
+## Theme changes (034)
+
+`034_tema26_defesa_civil.py` creates theme 26 (Defesa Civil e Gestão de Desastres), remaps
+`news` from 19.03*/19.04* to 26.01*/26.02* in one transaction and deletes the old codes. Every
+change goes to the `news_theme_changes` audit table, exactly as in the 22/10 contract: `id`,
+`campaign`, `unique_id`, the 4 old and 4 new theme codes (codes, not ids), `source`, `note`,
+`changed_at`, `reverted_at`, plus `UNIQUE (campaign, unique_id)` (one row per article and
+campaign). There are two campaigns: the migration writes `tema26-034` (source `migration-034`,
+`note` = the remap rule) and the LLM reclassification (data-science#49) writes `tema26-llm-d1`
+(source `llm:<model_id>`). Its dry-run applies everything inside a savepoint and rolls it
+back, logging the counts per code and per rule. Its rollback reads only those two campaigns,
+from the most recent `changed_at` to the oldest (on a tie, the LLM row first), restores each
+article to its state before the first change and only sets `reverted_at` on the rows it read
+(no new audit rows); articles in theme 26 without audit rows are undone by the inverse map and
+listed as `unaudited_inverse_map` in the log. Apply it with `migrate --target 034` after
+`status`: pending means "not in the history", so with 035/036 already applied only 034 runs.
+Never use `scripts/populate_themes.py` in production (it deletes `themes` and reinserts with
+new ids).
 
 ## Current Migrations
 

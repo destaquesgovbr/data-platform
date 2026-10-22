@@ -10,7 +10,10 @@ Contrato com o data-science (entrypoint do Job destaquesgovbr-ner-backfill):
   - env BACKFILL_SCRIPT escolhe o script; o DAG passa reenrich_combined_window.py;
   - env ENRICHMENT_MODEL_ID, BEDROCK_DAILY_TOKEN_QUOTA (JSON) e
     BACKFILL_QUOTA_FRACTION vao no container override "env";
-  - os argumentos do reenrich vao no container override "args".
+  - os argumentos do reenrich vao no container override "args", exatamente as flags do
+    contrato de 22/10 (plano): --select, [--theme-code], --date-from, [--date-to],
+    --limit, --workers, [--dry-run]. TestContratoComACliDoDs1 passa os args pelo parser
+    do contrato (_ds1_cli_contrato.py), que recusa qualquer outra flag.
 """
 
 import ast
@@ -23,6 +26,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+from tests.unit.dags import _ds1_cli_contrato as ds1_cli
 
 DAG_FILE = Path("src/data_platform/dags/enrichment_backfill.py")
 HAIKU_45 = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -227,12 +232,31 @@ class TestConfiguracaoDoDag:
             "daily_token_quota": {HAIKU_45: 20000000},
             "quota_fraction": 0.8,
             "dry_run": False,
+            "theme_code": None,
         }
 
     def test_param_select_restrito_aos_modos_do_script(self, monkeypatch):
         _, captured = _load(monkeypatch)
         schema = captured["dag_kwargs"]["params"]["select"].schema
-        assert schema["enum"] == ["mock", "null-theme", "null-summary"]
+        assert schema["enum"] == [
+            "mock",
+            "null-theme",
+            "null-summary",
+            "theme-code",
+            "theme26-candidates",
+        ]
+
+    def test_param_theme_code_opcional_com_formato_de_codigo(self, monkeypatch):
+        _, captured = _load(monkeypatch)
+        schema = captured["dag_kwargs"]["params"]["theme_code"].schema
+        assert schema["type"] == ["null", "string"]
+        assert schema["pattern"] == r"^\d{2}(\.\d{2}){0,2}$"
+
+    @pytest.mark.parametrize("nome", ["campaign", "term_fields", "extra_codes"])
+    def test_sem_params_fora_do_contrato(self, monkeypatch, nome):
+        """Campanha, campos dos termos e códigos extras são do DS-1, não flags (22/10)."""
+        _, captured = _load(monkeypatch)
+        assert nome not in captured["dag_kwargs"]["params"]
 
 
 # --------------------------------------------------------------------------
@@ -420,3 +444,233 @@ class TestValidacaoDosParams:
         module, captured = _load(monkeypatch)
         with pytest.raises(ValueError, match="date_to"):
             module.build_overrides(_default_params(captured) | {"select": select, "date_to": ""})
+
+
+# --------------------------------------------------------------------------
+# Tema 26 (D1): reclassificação por código de tema e candidatos por regra
+# --------------------------------------------------------------------------
+
+
+class TestSelecoesDoTema26:
+    """Flags do contrato de 22/10 (plano) com o reenrich_combined_window.py do DS-1:
+
+    - `--select theme-code --theme-code <NN|NN.NN|NN.NN.NN>`: artigos com tema no código;
+    - `--select theme26-candidates`: L1 19, mais os de 04/05.02.01/15.02.03 do MDR ou com
+      termo de defesa civil no título e no conteúdo (escopo de 22/10: 1.586 candidatos);
+    - as duas com `--date-from` obrigatório e `--date-to` opcional, mais `--limit`,
+      `--workers` e `[--dry-run]`. Nenhuma outra flag: o DS-1 grava só o tema na campanha
+      tema26-llm-d1 (source llm:<model_id>), com a guarda dos extras.
+    Nenhuma disputa artigo com o worker ao vivo (só pegam artigo já com tema), então
+    date_to é opcional; o date_to herdado da campanha B5 (2026-03-01) é recusado.
+    """
+
+    FORA_DO_CONTRATO = ("--theme-only", "--campaign", "--term-fields", "--extra-codes")
+
+    def _params(self, captured, **override) -> dict:
+        return _default_params(captured) | {"date_from": "2018-01-01", "date_to": None} | override
+
+    def _args(self, module, captured, **override) -> list[str]:
+        return _container(module.build_overrides(self._params(captured, **override)))["args"]
+
+    def test_theme_code_exatamente_as_flags_do_contrato(self, monkeypatch):
+        module, captured = _load(monkeypatch)
+        assert self._args(module, captured, select="theme-code", theme_code="19") == [
+            "--select",
+            "theme-code",
+            "--theme-code",
+            "19",
+            "--date-from",
+            "2018-01-01",
+            "--limit",
+            "400",
+            "--workers",
+            "2",
+        ]
+
+    def test_candidatos_do_tema_26_exatamente_as_flags_do_contrato(self, monkeypatch):
+        module, captured = _load(monkeypatch)
+        assert self._args(module, captured, select="theme26-candidates") == [
+            "--select",
+            "theme26-candidates",
+            "--date-from",
+            "2018-01-01",
+            "--limit",
+            "400",
+            "--workers",
+            "2",
+        ]
+
+    @pytest.mark.parametrize(
+        ("select", "extra"),
+        [
+            ("mock", {}),
+            ("null-theme", {"date_to": "2026-10-21"}),
+            ("null-summary", {"date_to": "2026-10-21"}),
+            ("theme-code", {"theme_code": "19"}),
+            ("theme26-candidates", {}),
+        ],
+    )
+    def test_nenhuma_flag_fora_do_contrato(self, monkeypatch, select, extra):
+        module, captured = _load(monkeypatch)
+        args = self._args(module, captured, select=select, **extra)
+        for flag in self.FORA_DO_CONTRATO:
+            assert flag not in args
+
+    @pytest.mark.parametrize(
+        ("nome", "valor"),
+        [("campaign", "tema26-llm-d1b"), ("term_fields", "title"), ("extra_codes", "04")],
+    )
+    def test_param_fora_do_contrato_no_trigger_falha(self, monkeypatch, nome, valor):
+        """Passar no conf um param que o contrato não tem falharia calado; falha alto."""
+        module, captured = _load(monkeypatch)
+        with pytest.raises(ValueError, match=nome):
+            self._args(module, captured, select="theme26-candidates", **{nome: valor})
+
+    @pytest.mark.parametrize("valor", [None, ""])
+    def test_param_fora_do_contrato_vazio_e_ignorado(self, monkeypatch, valor):
+        module, captured = _load(monkeypatch)
+        args = self._args(module, captured, select="theme26-candidates", campaign=valor)
+        assert "--campaign" not in args
+
+    @pytest.mark.parametrize("codigo", ["19", "05.02", "05.02.01", " 15.02.03 "])
+    def test_theme_code_aceita_l1_l2_e_l3(self, monkeypatch, codigo):
+        module, captured = _load(monkeypatch)
+        args = self._args(module, captured, select="theme-code", theme_code=codigo)
+        assert args[args.index("--theme-code") + 1] == codigo.strip()
+
+    @pytest.mark.parametrize("codigo", [None, "", "  "])
+    def test_theme_code_obrigatorio_com_select_theme_code(self, monkeypatch, codigo):
+        module, captured = _load(monkeypatch)
+        with pytest.raises(ValueError, match="theme_code"):
+            self._args(module, captured, select="theme-code", theme_code=codigo)
+
+    @pytest.mark.parametrize("codigo", ["9", "19.3", "abc", "19.03.01.01", "19-03", 19])
+    def test_theme_code_com_formato_invalido_falha(self, monkeypatch, codigo):
+        module, captured = _load(monkeypatch)
+        with pytest.raises(ValueError, match="theme_code"):
+            self._args(module, captured, select="theme-code", theme_code=codigo)
+
+    @pytest.mark.parametrize("select", ["mock", "null-theme", "null-summary", "theme26-candidates"])
+    def test_theme_code_so_vale_com_select_theme_code(self, monkeypatch, select):
+        module, captured = _load(monkeypatch)
+        with pytest.raises(ValueError, match="theme_code"):
+            self._args(module, captured, select=select, theme_code="19", date_to="2026-10-21")
+
+    def test_candidatos_do_tema_26_com_date_to_e_dry_run(self, monkeypatch):
+        module, captured = _load(monkeypatch)
+        args = self._args(
+            module, captured, select="theme26-candidates", date_to="2026-11-11", dry_run=True
+        )
+        assert args[args.index("--date-to") + 1] == "2026-11-11"
+        assert args[-1] == "--dry-run"
+
+    @pytest.mark.parametrize("select", ["theme-code", "theme26-candidates"])
+    def test_date_to_herdado_da_campanha_b5_e_recusado(self, monkeypatch, select):
+        """Sem limpar o date_to, o default do B5 (2026-03-01) cortaria ~70% do L1 19
+        (341 de 484 artigos são de mar/2026 em diante)."""
+        module, captured = _load(monkeypatch)
+        params = _default_params(captured) | {"select": select, "date_from": "2018-01-01"}
+        if select == "theme-code":
+            params["theme_code"] = "19"
+        assert params["date_to"] == "2026-03-01"
+        with pytest.raises(ValueError, match="date_to.*B5"):
+            module.build_overrides(params)
+
+    def test_mock_segue_aceitando_o_date_to_do_b5(self, monkeypatch):
+        module, captured = _load(monkeypatch)
+        args = _container(module.build_overrides(_default_params(captured)))["args"]
+        assert args[args.index("--date-to") + 1] == "2026-03-01"
+
+    def test_env_do_job_nao_muda(self, monkeypatch):
+        module, captured = _load(monkeypatch)
+        overrides = module.build_overrides(
+            self._params(captured, select="theme-code", theme_code="19")
+        )
+        assert _env(overrides)["BACKFILL_SCRIPT"] == "reenrich_combined_window.py"
+
+
+# --------------------------------------------------------------------------
+# Contrato: os args do DAG passam pelo parser da CLI do contrato (_ds1_cli_contrato.py)
+# --------------------------------------------------------------------------
+
+
+class TestContratoComACliDoDs1:
+    """Os args montados pelo DAG são aceitos pelo parser e pela validação do contrato."""
+
+    CASOS = [
+        {"select": "mock"},
+        {"select": "mock", "date_to": None, "dry_run": True},
+        {"select": "null-theme", "date_from": "2026-11-10", "date_to": "2026-11-12"},
+        {"select": "null-summary", "date_from": "2026-06-01", "date_to": "2026-10-21"},
+        {"select": "theme-code", "theme_code": "19", "date_from": "2018-01-01", "date_to": None},
+        {
+            "select": "theme-code",
+            "theme_code": "05.02.01",
+            "date_from": "2018-01-01",
+            "date_to": "2026-11-11",
+            "dry_run": True,
+        },
+        {"select": "theme26-candidates", "date_from": "2018-01-01", "date_to": None},
+        {
+            "select": "theme26-candidates",
+            "date_from": "2018-01-01",
+            "date_to": None,
+            "limit": 10,
+            "dry_run": True,
+        },
+    ]
+
+    def _parse(self, module, captured, override):
+        args = _container(module.build_overrides(_default_params(captured) | override))["args"]
+        parsed = ds1_cli.build_arg_parser().parse_args(args)
+        return args, parsed
+
+    @pytest.mark.parametrize("override", CASOS)
+    def test_parser_e_validacao_do_contrato_aceitam(self, monkeypatch, override):
+        module, captured = _load(monkeypatch)
+        _args, parsed = self._parse(module, captured, override)
+        assert ds1_cli.contract_error(parsed) is None
+
+    def test_candidatos_chegam_ao_ds1(self, monkeypatch):
+        module, captured = _load(monkeypatch)
+        _args, parsed = self._parse(
+            module,
+            captured,
+            {"select": "theme26-candidates", "date_from": "2018-01-01", "date_to": None},
+        )
+        assert vars(parsed) == {
+            "select": "theme26-candidates",
+            "theme_code": None,
+            "date_from": "2018-01-01",
+            "date_to": None,
+            "limit": 400,
+            "workers": 2,
+            "dry_run": False,
+        }
+
+    def test_theme_code_chega_ao_ds1(self, monkeypatch):
+        module, captured = _load(monkeypatch)
+        _args, parsed = self._parse(
+            module,
+            captured,
+            {
+                "select": "theme-code",
+                "theme_code": "19",
+                "date_from": "2018-01-01",
+                "date_to": None,
+                "dry_run": True,
+            },
+        )
+        assert (parsed.select, parsed.theme_code, parsed.dry_run) == ("theme-code", "19", True)
+
+    @pytest.mark.parametrize(
+        "flags",
+        [["--theme-only"], ["--campaign", "tema26-llm-d1"], ["--term-fields", "title-content"]],
+    )
+    def test_o_contrato_recusa_flags_de_fora(self, flags):
+        """Sanidade do parser: o que o DAG mandava antes do contrato final sai com erro."""
+        base = ["--select", "theme26-candidates", "--date-from", "2018-01-01"]
+        with pytest.raises(SystemExit):
+            ds1_cli.build_arg_parser().parse_args(
+                [*base, *flags, "--limit", "10", "--workers", "1"]
+            )

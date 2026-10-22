@@ -48,6 +48,7 @@ def test_descobre_os_testes_do_banco_descartavel():
         "tests/integration/test_entity_graph_integration.py",
         "tests/integration/test_flesch_ptbr_fill_integration.py",
         "tests/integration/test_migrate_integration.py",
+        "tests/integration/test_tema26_migration_integration.py",
         "tests/integration/test_trend_detection_integration.py",
     ]
 
@@ -68,6 +69,7 @@ def test_workflow_dispara_quando_o_teste_muda(test_file):
         "scripts/migrate.py",
         "scripts/migrations/029_entity_trending_baseline.sql",
         "scripts/migrations/032_entity_stats.sql",
+        "scripts/migrations/034_tema26_defesa_civil.py",
         "src/data_platform/jobs/graph/edges.py",
         "src/data_platform/jobs/features/flesch_ptbr_fill.py",
         "src/data_platform/jobs/features/readability_ptbr.py",

@@ -1,9 +1,9 @@
 # Árvore Temática Enriquecida Completa - DestaquesGovBr
-# Versão: 3.1
-# Data: 2025-12-18
+# Versão: 3.2
+# Data: 2026-10-21
 # Inclui: Descrições L1 + L2 + L3 completas
-# Total: 23 temas L1 (temas 22 e 23 originais removidos)
-# Estrutura final após decisões DEC-001 e DEC-002
+# Total: 24 temas L1 (01–21, 24, 25 e 26); temas 22 e 23 originais removidos (DEC-001/DEC-002)
+# 3.2: novo L1 26 - Defesa Civil e Gestão de Desastres (19.03 → 26.01, 19.04 → 26.02; DEC-006)
 
 themes:
 - code: '01'
@@ -1701,6 +1701,7 @@ themes:
   - Defesa nacional e forças armadas (ver Defesa)
   - Sistema judiciário (ver Justiça)
   - Violência contra grupos específicos (ver Minorias)
+  - Defesa civil e resposta a desastres, inclusive resgates feitos por bombeiros (ver Defesa Civil e Gestão de Desastres)
   children:
   - code: '04.01'
     label: Policiamento
@@ -2197,6 +2198,7 @@ themes:
   - Energia renovável como política energética (ver Energia)
   - Saneamento básico urbano (ver Habitação)
   - Agricultura sustentável (ver Agricultura)
+  - 'Ações de defesa civil: alertas, socorro, abrigos e reconstrução após desastres (ver Defesa Civil e Gestão de Desastres)'
   children:
   - code: '05.01'
     label: Conservação Ambiental
@@ -2406,11 +2408,14 @@ themes:
       label: Catástrofes Climáticas
       description: 'Eventos climáticos extremos como enchentes, secas severas, deslizamentos e
 
-        tempestades, incluindo prevenção, resposta emergencial e reconstrução de
+        tempestades sob a ótica das mudanças climáticas: frequência, causas, impactos
 
-        áreas afetadas por desastres naturais relacionados ao clima.'
+        ambientais, adaptação e resiliência. Alertas, decretação de emergência, socorro,
+
+        abrigos e reconstrução pertencem a 26 - Defesa Civil e Gestão de Desastres.'
       keywords:
       - catástrofes climáticas
+      - eventos climáticos extremos
       - desastres naturais
       - eventos extremos
       - enchentes
@@ -2423,16 +2428,16 @@ themes:
       - deslizamentos de terra
       - desabamentos
       - chuvas intensas
-      - Defesa Civil
-      - estado de calamidade
-      - situação de emergência
-      - Cemaden
-      - alertas meteorológicos
+      - onda de calor
+      - El Niño
+      - La Niña
+      - adaptação climática
+      - resiliência climática
       - desastres ambientais
       examples:
-      - Governo federal decreta estado de calamidade após enchentes no Sul
-      - Cemaden emite alerta para risco de deslizamentos em áreas de Serra
-      - Ministério anuncia medidas emergenciais para municípios atingidos por seca
+      - Estudo associa aumento de enchentes e secas extremas no país ao aquecimento global
+      - Governo apresenta plano de adaptação para cidades vulneráveis a eventos climáticos extremos
+      - El Niño deve intensificar a estiagem no Norte e as chuvas no Sul, aponta boletim climático
     - code: 05.02.02
       label: Justiça Climática
       description: 'Equidade na distribuição de impactos e benefícios das políticas climáticas,
@@ -3758,7 +3763,7 @@ themes:
     - transporte de passageiros
     - transporte de carga
     - trem de alta velocidade
-- code: 08
+- code: '08'
   label: Cultura, Artes e Patrimônio
   description: 'Políticas culturais, fomento às artes, preservação do patrimônio
 
@@ -4239,7 +4244,7 @@ themes:
     - empreendedorismo criativo
     - democratização cultural
     - cultura colaborativa
-- code: 09
+- code: '09'
   label: Esportes e Lazer
   description: 'Políticas esportivas, competições, incentivo ao esporte e programas
 
@@ -6934,6 +6939,7 @@ themes:
   - Políticas para minorias específicas (ver Minorias)
   - Habitação popular (ver Habitação)
   - Saúde pública (ver Saúde)
+  - Socorro, abrigos e demais ações de defesa civil em desastres (ver Defesa Civil e Gestão de Desastres)
   children:
   - code: '15.01'
     label: Programas Sociais
@@ -7080,18 +7086,20 @@ themes:
       - Programa de cisternas beneficia 100 mil famílias no Semiárido com acesso à água e alimentos
     - code: 15.02.03
       label: Apoio Emergencial
-      description: 'Auxílios e benefícios temporários para situações de emergência, calamidade pública, desastres naturais
+      description: 'Auxílios e benefícios temporários de transferência de renda para famílias afetadas
 
-        ou crises econômicas.'
+        por emergências, calamidade pública, desastres naturais ou crises econômicas. Socorro,
+
+        abrigos e demais ações de defesa civil pertencem a 26 - Defesa Civil e Gestão de Desastres.'
       keywords:
       - auxílio emergencial, benefício emergencial
-      - calamidade pública, desastre natural
-      - desabrigados, desalojados
-      - Defesa Civil, ajuda humanitária
-      - crise econômica, auxílio extraordinário
+      - auxílio extraordinário, benefício temporário
+      - antecipação de benefícios, parcela adicional
+      - renda emergencial, transferência de renda emergencial
+      - crise econômica, apoio financeiro a famílias atingidas
       examples:
       - Governo libera auxílio emergencial para famílias atingidas por enchentes no Sul do país
-      - MDS anuncia assistência emergencial para 50 mil famílias desabrigadas por desastres naturais
+      - MDS antecipa o pagamento do Bolsa Família em municípios atingidos por enchentes
       - Benefício emergencial temporário é prorrogado para trabalhadores informais afetados pela crise
     - code: 15.02.04
       label: Igualdade Social
@@ -8446,7 +8454,8 @@ themes:
   - Modernização militar
   excludes:
   - Segurança pública e polícia (ver Segurança Pública)
-  - Defesa civil e desastres (se foco civil, ver tema relacionado)
+  - Defesa civil, desastres e situações de emergência, inclusive com apoio das Forças Armadas (ver Defesa Civil e Gestão de
+    Desastres)
   - Cooperação internacional não-militar (ver Relações Internacionais)
   children:
   - code: '19.01'
@@ -8638,194 +8647,6 @@ themes:
     - combate ao narcotráfico
     - pista clandestina
     - Operação Ágata
-  - code: '19.03'
-    label: Defesa Civil
-    children:
-    - code: 19.03.01
-      label: Preparação para Desastres
-      description: 'Ações preventivas de capacitação, planejamento e estruturação de recursos para resposta a desastres
-
-        naturais ou tecnológicos antes que ocorram.'
-      keywords:
-      - preparação para desastres, planejamento de emergência
-      - SEDEC, Secretaria de Defesa Civil
-      - simulado de desastre, CENAD
-      - gestão de riscos, sistema de alerta
-      examples:
-      - Defesa Civil realiza simulado de evacuação em área de risco de inundação
-      - Governo capacita 500 agentes municipais em gestão de desastres
-      - SEDEC lança campanha de preparação para temporada de chuvas
-    - code: 19.03.02
-      label: Planejamento de Evacuação
-      description: 'Elaboração de protocolos, rotas e procedimentos para remoção ordenada e segura de população
-
-        de áreas sob ameaça de desastres.'
-      keywords:
-      - plano de evacuação, rota de fuga
-      - evacuação preventiva, zona de evacuação
-      - sinalização de rotas, área de risco
-      - remoção preventiva
-      examples:
-      - Defesa Civil atualiza plano de evacuação de área costeira sujeita a tsunami
-      - Município instala sinalização de rotas de evacuação em região serrana
-      - Governo elabora protocolo de evacuação para barragens em risco
-    - code: 19.03.03
-      label: Resposta a Desastres
-      description: 'Ações imediatas de socorro, resgate e assistência implementadas durante ou logo após
-
-        a ocorrência de desastres naturais ou tecnológicos.'
-      keywords:
-      - resposta a desastres, socorro a vítimas
-      - enchente, deslizamento, seca
-      - estado de calamidade, situação de emergência
-      - Defesa Civil Nacional
-      examples:
-      - Defesa Civil mobiliza equipes após deslizamento em área urbana
-      - Governo decreta estado de calamidade e intensifica resposta a enchentes
-      - Mais de 500 famílias recebem assistência após desastre no Sul
-    - code: 19.03.04
-      label: Monitoramento de Riscos Naturais
-      description: 'Vigilância contínua de fenômenos naturais potencialmente perigosos através de sistemas de detecção,
-
-        previsão e alerta precoce.'
-      keywords:
-      - monitoramento de riscos, alerta de desastres
-      - CEMADEN, previsão de desastres
-      - monitoramento hidrológico, pluviometria
-      - alerta antecipado, área de risco
-      examples:
-      - CEMADEN emite alerta de deslizamento para 15 municípios da Serra
-      - Sistema de monitoramento detecta elevação crítica do nível de rios
-      - Defesa Civil instala sensores de movimento em encostas de risco
-    - code: 19.03.05
-      label: Gestão de Abrigos
-      description: 'Administração, organização e operação de espaços temporários para acolhimento de pessoas desabrigadas
-
-        ou desalojadas por desastres.'
-      keywords:
-      - abrigo temporário, desabrigados, desalojados
-      - acolhimento emergencial, ginásio
-      - cadastro de abrigados, donativos
-      - kits de higiene
-      examples:
-      - Defesa Civil organiza abrigos temporários para 300 famílias atingidas
-      - Governo estrutura ginásio para receber desabrigados por enchente
-      - Equipes distribuem kits de higiene em abrigos do Rio Grande do Sul
-    description: 'Compreende ações preventivas e de preparação para enfrentamento de desastres naturais ou tecnológicos. Inclui
-      capacitação de agentes, elaboração de planos de evacuação, sistemas de monitoramento e alerta precoce de riscos naturais,
-      simulados de emergência e gestão de abrigos temporários para populações afetadas por calamidades.
-
-      '
-    keywords:
-    - Defesa Civil
-    - preparação para desastres
-    - prevenção de desastres
-    - plano de evacuação
-    - evacuação preventiva
-    - CEMADEN
-    - monitoramento de riscos
-    - alerta de desastres
-    - gestão de abrigos
-    - abrigo temporário
-    - desabrigados
-    - simulado de emergência
-    - SEDEC
-    - CENAD
-    - área de risco
-  - code: '19.04'
-    label: Situações de Emergência
-    children:
-    - code: 19.04.01
-      label: Resgate e Salvamento
-      description: 'Operações especializadas de busca, localização e retirada de pessoas em situações de risco iminente
-
-        ou após desastres.'
-      keywords:
-      - resgate, salvamento, busca e salvamento, SAR
-      - Corpo de Bombeiros, resgate em altura
-      - resgate em escombros, resgate aquático
-      - cães de busca, helicóptero de resgate
-      examples:
-      - Equipes de resgate localizam sobreviventes em área de deslizamento
-      - FAB realiza 20 resgates aéreos em região isolada por enchente
-      - Bombeiros resgatam vítimas soterradas em desabamento de prédio
-    - code: 19.04.02
-      label: Logística de Emergência
-      description: 'Planejamento e execução de transporte, armazenamento e distribuição de suprimentos essenciais
-
-        em situações de emergência.'
-      keywords:
-      - logística emergencial, distribuição de suprimentos
-      - donativos, água potável, medicamentos
-      - ponte aérea, cestas básicas
-      - mobilização de recursos
-      examples:
-      - Forças Armadas estabelecem ponte aérea para levar suprimentos a região isolada
-      - Defesa Civil distribui 5 mil cestas básicas a famílias atingidas
-      - Governo mobiliza caminhões-pipa para abastecer cidade sem água
-    - code: 19.04.03
-      label: Ações Humanitárias
-      description: 'Assistência médica, psicológica, social e material prestada a populações afetadas por desastres
-
-        ou emergências.'
-      keywords:
-      - ação humanitária, assistência humanitária
-      - hospital de campanha, apoio psicológico
-      - atendimento médico emergencial
-      - proteção de grupos vulneráveis
-      examples:
-      - Ministério da Saúde instala hospital de campanha em área de desastre
-      - Equipes prestam atendimento psicológico a vítimas de tragédia
-      - Governo distribui kits de primeira necessidade a famílias desabrigadas
-    - code: 19.04.04
-      label: Reconstrução Pós-Desastre
-      description: 'Ações de recuperação, reconstrução de infraestrutura e reabilitação de serviços após desastres
-
-        para restaurar normalidade.'
-      keywords:
-      - reconstrução, recuperação pós-desastre
-      - obras de recuperação, reassentamento
-      - recuperação de estradas, moradias
-      - financiamento de reconstrução
-      examples:
-      - Governo libera R$ 50 milhões para reconstrução de cidade atingida
-      - Início das obras de recuperação de infraestrutura em área de desastre
-      - Programa federal vai reconstruir 500 moradias em região afetada
-    - code: 19.04.05
-      label: Assistência a Deslocados Internos
-      description: 'Apoio e proteção a pessoas forçadas a deixar suas residências dentro do território nacional
-
-        devido a desastres, conflitos ou emergências.'
-      keywords:
-      - deslocados internos, desabrigados
-      - reassentamento, alojamento provisório
-      - cadastro de deslocados, proteção social
-      - relocação, moradia provisória
-      examples:
-      - Governo cadastra famílias deslocadas por rompimento de barragem
-      - Programa de assistência atende 2 mil deslocados por desastre ambiental
-      - Ministério articula reassentamento de comunidade deslocada por enchente
-    description: 'Engloba respostas imediatas a desastres, emergências e situações de calamidade pública. Compreende operações
-      de busca, resgate e salvamento de vítimas, logística emergencial para distribuição de suprimentos, ações humanitárias
-      de assistência médica e psicológica, programas de reconstrução pós-desastre e apoio a deslocados internos.
-
-      '
-    keywords:
-    - emergência
-    - resgate e salvamento
-    - busca e salvamento
-    - SAR
-    - estado de calamidade
-    - situação de emergência
-    - logística emergencial
-    - ponte aérea
-    - ação humanitária
-    - hospital de campanha
-    - reconstrução
-    - recuperação pós-desastre
-    - deslocados internos
-    - reassentamento
-    - socorro a vítimas
   - code: '19.05'
     label: Políticas e Estratégias de Defesa
     children:
@@ -10667,3 +10488,248 @@ themes:
     - zeladoria
     - limpeza urbana
     - PAC
+- code: '26'
+  label: Defesa Civil e Gestão de Desastres
+  description: 'Proteção e defesa civil e gestão de riscos e desastres naturais ou
+
+    tecnológicos em todas as fases: prevenção, preparação, resposta e
+
+    recuperação. Inclui a atuação do SINPDEC e das defesas civis, alertas à
+
+    população, reconhecimento de situação de emergência e calamidade pública,
+
+    socorro às vítimas, abrigos e reconstrução de áreas atingidas.
+
+    '
+  keywords:
+  - defesa civil
+  - Defesa Civil Nacional
+  - proteção e defesa civil
+  - SINPDEC
+  - SEDEC
+  - Secretaria Nacional de Defesa Civil
+  - CENAD
+  - Cemaden
+  - gestão de riscos
+  - gestão de desastres
+  - prevenção de desastres
+  - área de risco
+  - alerta de desastres
+  - Defesa Civil Alerta
+  - situação de emergência
+  - estado de calamidade
+  - calamidade pública
+  - reconhecimento federal
+  - resposta a desastres
+  - socorro às vítimas
+  - busca e salvamento
+  - desabrigados
+  - desalojados
+  - abrigo temporário
+  - assistência humanitária
+  - reconstrução
+  - recuperação pós-desastre
+  includes:
+  - Atuação da Defesa Civil nos níveis federal, estadual e municipal (SINPDEC)
+  - Prevenção, preparação e gestão de riscos de desastres
+  - Monitoramento de riscos e alertas à população (Cemaden, Defesa Civil Alerta)
+  - Reconhecimento federal de situação de emergência e estado de calamidade pública
+  - 'Resposta a desastres: busca e salvamento, socorro, assistência humanitária e abrigos'
+  - Repasses federais para resposta, restabelecimento e reconstrução de áreas atingidas
+  excludes:
+  - Eventos climáticos extremos tratados como pauta de clima, adaptação e mitigação, sem ação de defesa civil (ver Meio Ambiente,
+    05.02.01 Catástrofes Climáticas)
+  - Auxílios e benefícios de renda a famílias atingidas (ver Desenvolvimento Social, 15.02.03 Apoio Emergencial)
+  - Policiamento e atuação rotineira de bombeiros e forças de segurança fora de desastres (ver Segurança Pública)
+  - Operações militares e defesa nacional sem relação com desastres (ver Defesa e Forças Armadas)
+  - Ajuda humanitária a outros países (ver Relações Internacionais, 12.02.01 Assistência Humanitária)
+  - Obras permanentes de drenagem e saneamento urbano (ver Habitação e Urbanismo)
+  children:
+  - code: '26.01'
+    label: Defesa Civil
+    children:
+    - code: 26.01.01
+      label: Preparação para Desastres
+      description: 'Ações preventivas de capacitação, planejamento e estruturação de recursos para resposta a desastres
+
+        naturais ou tecnológicos antes que ocorram.'
+      keywords:
+      - preparação para desastres, planejamento de emergência
+      - SEDEC, Secretaria de Defesa Civil
+      - simulado de desastre, CENAD
+      - gestão de riscos, sistema de alerta
+      examples:
+      - Defesa Civil realiza simulado de evacuação em área de risco de inundação
+      - Governo capacita 500 agentes municipais em gestão de desastres
+      - SEDEC lança campanha de preparação para temporada de chuvas
+    - code: 26.01.02
+      label: Planejamento de Evacuação
+      description: 'Elaboração de protocolos, rotas e procedimentos para remoção ordenada e segura de população
+
+        de áreas sob ameaça de desastres.'
+      keywords:
+      - plano de evacuação, rota de fuga
+      - evacuação preventiva, zona de evacuação
+      - sinalização de rotas, área de risco
+      - remoção preventiva
+      examples:
+      - Defesa Civil atualiza plano de evacuação de área costeira sujeita a tsunami
+      - Município instala sinalização de rotas de evacuação em região serrana
+      - Governo elabora protocolo de evacuação para barragens em risco
+    - code: 26.01.03
+      label: Resposta a Desastres
+      description: 'Ações imediatas de socorro, resgate e assistência implementadas durante ou logo após
+
+        a ocorrência de desastres naturais ou tecnológicos.'
+      keywords:
+      - resposta a desastres, socorro a vítimas
+      - enchente, deslizamento, seca
+      - estado de calamidade, situação de emergência
+      - Defesa Civil Nacional
+      examples:
+      - Defesa Civil mobiliza equipes após deslizamento em área urbana
+      - Governo decreta estado de calamidade e intensifica resposta a enchentes
+      - Mais de 500 famílias recebem assistência após desastre no Sul
+    - code: 26.01.04
+      label: Monitoramento de Riscos Naturais
+      description: 'Vigilância contínua de fenômenos naturais potencialmente perigosos através de sistemas de detecção,
+
+        previsão e alerta precoce.'
+      keywords:
+      - monitoramento de riscos, alerta de desastres
+      - CEMADEN, previsão de desastres
+      - monitoramento hidrológico, pluviometria
+      - alerta antecipado, área de risco
+      examples:
+      - CEMADEN emite alerta de deslizamento para 15 municípios da Serra
+      - Sistema de monitoramento detecta elevação crítica do nível de rios
+      - Defesa Civil instala sensores de movimento em encostas de risco
+    - code: 26.01.05
+      label: Gestão de Abrigos
+      description: 'Administração, organização e operação de espaços temporários para acolhimento de pessoas desabrigadas
+
+        ou desalojadas por desastres.'
+      keywords:
+      - abrigo temporário, desabrigados, desalojados
+      - acolhimento emergencial, ginásio
+      - cadastro de abrigados, donativos
+      - kits de higiene
+      examples:
+      - Defesa Civil organiza abrigos temporários para 300 famílias atingidas
+      - Governo estrutura ginásio para receber desabrigados por enchente
+      - Equipes distribuem kits de higiene em abrigos do Rio Grande do Sul
+    description: 'Compreende ações preventivas e de preparação para enfrentamento de desastres naturais ou tecnológicos. Inclui
+      capacitação de agentes, elaboração de planos de evacuação, sistemas de monitoramento e alerta precoce de riscos naturais,
+      simulados de emergência e gestão de abrigos temporários para populações afetadas por calamidades.
+
+      '
+    keywords:
+    - Defesa Civil
+    - preparação para desastres
+    - prevenção de desastres
+    - plano de evacuação
+    - evacuação preventiva
+    - CEMADEN
+    - monitoramento de riscos
+    - alerta de desastres
+    - gestão de abrigos
+    - abrigo temporário
+    - desabrigados
+    - simulado de emergência
+    - SEDEC
+    - CENAD
+    - área de risco
+  - code: '26.02'
+    label: Situações de Emergência
+    children:
+    - code: 26.02.01
+      label: Resgate e Salvamento
+      description: 'Operações especializadas de busca, localização e retirada de pessoas em situações de risco iminente
+
+        ou após desastres.'
+      keywords:
+      - resgate, salvamento, busca e salvamento, SAR
+      - Corpo de Bombeiros, resgate em altura
+      - resgate em escombros, resgate aquático
+      - cães de busca, helicóptero de resgate
+      examples:
+      - Equipes de resgate localizam sobreviventes em área de deslizamento
+      - FAB realiza 20 resgates aéreos em região isolada por enchente
+      - Bombeiros resgatam vítimas soterradas em desabamento de prédio
+    - code: 26.02.02
+      label: Logística de Emergência
+      description: 'Planejamento e execução de transporte, armazenamento e distribuição de suprimentos essenciais
+
+        em situações de emergência.'
+      keywords:
+      - logística emergencial, distribuição de suprimentos
+      - donativos, água potável, medicamentos
+      - ponte aérea, cestas básicas
+      - mobilização de recursos
+      examples:
+      - Forças Armadas estabelecem ponte aérea para levar suprimentos a região isolada
+      - Defesa Civil distribui 5 mil cestas básicas a famílias atingidas
+      - Governo mobiliza caminhões-pipa para abastecer cidade sem água
+    - code: 26.02.03
+      label: Ações Humanitárias
+      description: 'Assistência médica, psicológica, social e material prestada a populações afetadas por desastres
+
+        ou emergências.'
+      keywords:
+      - ação humanitária, assistência humanitária
+      - hospital de campanha, apoio psicológico
+      - atendimento médico emergencial
+      - proteção de grupos vulneráveis
+      examples:
+      - Ministério da Saúde instala hospital de campanha em área de desastre
+      - Equipes prestam atendimento psicológico a vítimas de tragédia
+      - Governo distribui kits de primeira necessidade a famílias desabrigadas
+    - code: 26.02.04
+      label: Reconstrução Pós-Desastre
+      description: 'Ações de recuperação, reconstrução de infraestrutura e reabilitação de serviços após desastres
+
+        para restaurar normalidade.'
+      keywords:
+      - reconstrução, recuperação pós-desastre
+      - obras de recuperação, reassentamento
+      - recuperação de estradas, moradias
+      - financiamento de reconstrução
+      examples:
+      - Governo libera R$ 50 milhões para reconstrução de cidade atingida
+      - Início das obras de recuperação de infraestrutura em área de desastre
+      - Programa federal vai reconstruir 500 moradias em região afetada
+    - code: 26.02.05
+      label: Assistência a Deslocados Internos
+      description: 'Apoio e proteção a pessoas forçadas a deixar suas residências dentro do território nacional
+
+        devido a desastres, conflitos ou emergências.'
+      keywords:
+      - deslocados internos, desabrigados
+      - reassentamento, alojamento provisório
+      - cadastro de deslocados, proteção social
+      - relocação, moradia provisória
+      examples:
+      - Governo cadastra famílias deslocadas por rompimento de barragem
+      - Programa de assistência atende 2 mil deslocados por desastre ambiental
+      - Ministério articula reassentamento de comunidade deslocada por enchente
+    description: 'Engloba respostas imediatas a desastres, emergências e situações de calamidade pública. Compreende operações
+      de busca, resgate e salvamento de vítimas, logística emergencial para distribuição de suprimentos, ações humanitárias
+      de assistência médica e psicológica, programas de reconstrução pós-desastre e apoio a deslocados internos.
+
+      '
+    keywords:
+    - emergência
+    - resgate e salvamento
+    - busca e salvamento
+    - SAR
+    - estado de calamidade
+    - situação de emergência
+    - logística emergencial
+    - ponte aérea
+    - ação humanitária
+    - hospital de campanha
+    - reconstrução
+    - recuperação pós-desastre
+    - deslocados internos
+    - reassentamento
+    - socorro a vítimas
