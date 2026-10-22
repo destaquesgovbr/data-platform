@@ -39,7 +39,7 @@ As 4 hierarquias incoerentes com o 19 (contagens de base de 21/10, seção C.4):
   - (19, 19.02, 19.03.01) → (19, 19.02, —): visita da ESD ao Chile, tema militar; o
     par L1–L2 decide, o L3 sai e o artigo segue no 19 (reclassificação da D1);
   - (19, 20.02, 20.02.03): nenhum código legado, fica fora da 034 (D1). Contado em
-    `untouched_inconsistent_l1_19`.
+    `inconsistent_l1_19_26_after`.
 
 Rollback (a partir da auditoria, também numa transação): recria 19.03*/19.04* (ids
 novos) e lê as linhas ainda não revertidas de TODAS as campanhas `tema26-*` menos a do
@@ -401,11 +401,12 @@ AUDIT_ROWS_SQL = (
     + "ORDER BY changed_at, id"
 )
 
-MARK_REVERTED_SQL = (
-    "UPDATE news_theme_changes SET reverted_at = NOW() WHERE"
-    + _ROLLBACK_SCOPE
-    + "RETURNING campaign"
-)
+# Só as linhas lidas (por id): uma gravada depois da leitura não foi desfeita.
+MARK_REVERTED_SQL = """
+    UPDATE news_theme_changes SET reverted_at = NOW()
+    WHERE id = ANY(%(ids)s)
+    RETURNING campaign
+"""
 
 DRY_RUN_SAVEPOINT = "tema26_034_dry_run"
 
@@ -576,7 +577,7 @@ def _revert(cursor) -> dict:
             changes.append((uid, now, target, reason))
 
     _write_changes(cursor, changes, ids, ROLLBACK_CAMPAIGN, ROLLBACK_SOURCE)
-    cursor.execute(MARK_REVERTED_SQL, ROLLBACK_SCOPE_PARAMS)
+    cursor.execute(MARK_REVERTED_SQL, {"ids": [row_id for _u, _c, _t, row_id, *_ in audit_rows]})
     marked = Counter(campaign for (campaign,) in cursor.fetchall())
 
     remaining = _count_references(cursor, ids_26)
