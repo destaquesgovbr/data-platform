@@ -517,6 +517,32 @@ class TestMesmoTituloNoMesmoOrgao:
 
         assert keys == {"inss-a": "inss-a", "inss-b": "inss-a"}
 
+    def test_repostagem_do_mesmo_texto_pelo_proprio_orgao_junta_ate_7_dias(self):
+        """servidor 'Como acessar o contracheque pelo SOUGOV' de novo 4 dias depois (J 1,0); mj
+        'Senasp lança capacitação...' 2 dias depois, só com a data trocada (J 0,95)."""
+        titulo = "Como acessar o contracheque pelo SouGov: consulta pode ser feita pelo app"
+        repostado = _t(BASE[:199], ["06032026"])
+        assert _js(_t(BASE), repostado)[0] >= 0.95
+
+        keys = _keys(
+            _row("srv-1", "servidor", titulo, _t(BASE)),
+            _row("srv-2", "servidor", titulo, _t(BASE), 4 * 24),
+            _row("srv-3", "servidor", titulo, repostado, 6 * 24),
+        )
+
+        assert keys == {"srv-1": "srv-1", "srv-2": "srv-1", "srv-3": "srv-1"}
+
+    def test_mesmo_titulo_com_j_abaixo_de_095_depois_de_1_dia_nao_junta(self):
+        """G2: fora do 'mesmo texto' (J < 0,95), o mesmo órgão exige até 1 dia."""
+        a = _t(BASE)
+        b = _t(BASE[:190], _p("corte", 0, 10))
+        assert 0.8 <= _js(a, b)[0] < 0.95
+        titulo = "Investimento de R$ 50 milhões vai ampliar conectividade na região Norte"
+
+        keys = _keys(_row("mcom-1", "mcom", titulo, a), _row("mcom-2", "mcom", titulo, b, 88))
+
+        assert keys == {"mcom-1": None, "mcom-2": None}
+
     def test_tela_de_login_e_recaptura_no_mesmo_orgao_junta_pelo_titulo(self):
         """Sem J (um lado inutilizável), só a E2 decide: as guardas não se aplicam."""
         titulo = "INSS antecipa pagamento do seguro-defeso a pescadores"
