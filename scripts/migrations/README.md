@@ -52,9 +52,13 @@ migration and leave a later backfill for its own window, use `--target`, e.g.
 `migrate --target 032` (leaves `033_backfill_readability_flesch_ptbr.py` pending), and
 dry-run the backfill first: its preview reports the pending count and a projected run time.
 
+`--target NNN` applies **every** pending migration up to and including NNN, not just NNN. Run
+`status` first: if an earlier backfill is still pending (e.g. 033 when targeting 035), it runs
+in the same call, outside its own window. Apply the earlier ones first, in their windows.
+
 Likewise `migrate --target 035` adds `news.content_key` and leaves
 `036_backfill_news_content_key.py` (near-duplicate key for the whole corpus, 90-day chunks,
-idempotent) for its own window; its dry-run computes the last 30 days without writing and
+idempotent) for its own window — with 033 and 034 already applied, otherwise they run too; its dry-run computes the last 30 days without writing and
 projects time and changes. A `migrate --dry-run` with 035 and 036 both pending only reports that
 035 must be applied first (the runner rolls back the 035 preview before 036 runs).
 

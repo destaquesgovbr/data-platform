@@ -19,7 +19,9 @@ fica NULL e cai no content_hash. Cada UPDATE dispara o trigger updated_at de new
 
 Rollback: content_key = NULL em lotes (o grafo e a graphql-api voltam ao content_hash).
 
-Rodar separado da 035: `migrate.py migrate --target 035` aplica só a coluna.
+Rodar separado da 035. Atenção: `migrate.py migrate --target 035` aplica TODAS as pendentes até a
+035, não só ela (a 033, backfill do Flesch pt-BR, e a 034, tema 26, se ainda pendentes). Rodar
+`status` antes e aplicar a 035 só com a 033/034 já aplicadas nas janelas delas.
 """
 
 import os
@@ -101,7 +103,10 @@ def migrate(conn, dry_run: bool = False) -> dict:
         cursor.execute(HAS_COLUMN_SQL)
         if not cursor.fetchone()[0]:
             # `migrate --dry-run` com 035 e 036 pendentes: o runner já desfez o preview da 035
-            message = "news.content_key ausente: aplicar a 035 antes (migrate --target 035)"
+            message = (
+                "news.content_key ausente: aplicar a 035 antes "
+                "(ver `status`: --target 035 inclui as pendentes anteriores)"
+            )
             if dry_run:
                 return {"preview": True, "message": message}
             raise RuntimeError(message)
