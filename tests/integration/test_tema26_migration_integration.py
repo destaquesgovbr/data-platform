@@ -2,7 +2,7 @@
 Integração da migração 034 (tema 26) contra PostgreSQL real, pelo runner.
 
 Banco descartável de test_migrate_integration.py (MIGRATION_TEST_DATABASE_URL): baseline
-+ `stamp 033`, para que `migrate` rode só a 034. O corpus semeado reproduz os padrões de
++ `stamp 033`, e o runner sempre com `--target 034`, como na D0 (035/036 já estão na main). O corpus semeado reproduz os padrões de
 produção de 21/10 (contagens de base, seção C): hierarquias coerentes em 19.03/19.04,
 só-L2, as 4 incoerentes que envolvem o 19 e artigos fora do escopo.
 
@@ -326,9 +326,10 @@ def seeded_database():
 @pytest.mark.integration
 class TestDryRun:
     def test_runner_dry_run_nao_muda_nada(self):
-        result = _run_migrate("migrate", "--dry-run")
+        result = _run_migrate("migrate", "--dry-run", "--target", "034")
         assert result.returncode == 0, result.stdout + result.stderr
         assert "034_tema26_defesa_civil" in result.stdout
+        assert "035_" not in result.stdout  # o target não arrasta as posteriores
         assert _news_codes() == CORPUS
         assert not _audit_table_exists()
         assert "26" not in _theme_codes()
@@ -371,8 +372,21 @@ class TestDryRun:
 
 @pytest.mark.integration
 class TestApply:
+    def test_target_034_aplica_so_a_034(self):
+        result = _run_migrate("migrate", "--target", "034", "--yes")
+        assert result.returncode == 0, result.stdout + result.stderr
+        aplicadas = {
+            version
+            for (version,) in _execute(
+                "SELECT version FROM migration_history "
+                "WHERE operation = 'migrate' AND status = 'success'"
+            )
+        }
+        assert "034" in aplicadas
+        assert not {"035", "036"} & aplicadas
+
     def test_runner_aplica_remap_e_troca_os_temas(self):
-        result = _run_migrate("migrate", "--yes")
+        result = _run_migrate("migrate", "--target", "034", "--yes")
         assert result.returncode == 0, result.stdout + result.stderr
 
         assert _news_codes() == ESPERADO_APOS_034
@@ -381,7 +395,7 @@ class TestApply:
         assert {"19", "19.01", "19.02", "19.05", "26", "26.01", "26.02.05"} <= temas
 
     def test_temas_26_com_rotulos_pais_e_full_name(self, mod):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         rows = _execute(
             "SELECT code, label, level, parent_code, full_name FROM themes "
             "WHERE code LIKE '26%' ORDER BY code COLLATE \"C\""
@@ -390,7 +404,7 @@ class TestApply:
         assert all(full == f"{code} {label}" for code, label, _l, _p, full in rows)
 
     def test_auditoria_uma_linha_por_artigo_tocado(self):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         audit = _audit()
         assert {row[0] for row in audit} == TOCADOS
         assert len(audit) == len(TOCADOS)
@@ -403,13 +417,13 @@ class TestApply:
 
     def test_artigos_fora_do_escopo_nao_sao_tocados(self):
         antes = dict(_execute("SELECT unique_id, updated_at FROM news"))
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         depois = dict(_execute("SELECT unique_id, updated_at FROM news"))
         for uid in set(CORPUS) - TOCADOS:
             assert depois[uid] == antes[uid], uid
 
     def test_reaplicar_e_no_op(self, mod):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         stats = _run_module(mod, "migrate", dry_run=False)
         assert stats["articles"] == 0
         assert stats["themes_inserted"] == 0
@@ -434,7 +448,7 @@ class TestApply:
 @pytest.mark.integration
 class TestRollback:
     def test_runner_rollback_volta_ao_estado_original(self):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         result = _run_migrate("rollback", "034", "--yes")
         assert result.returncode == 0, result.stdout + result.stderr
 
@@ -450,7 +464,7 @@ class TestRollback:
 
     def test_rollback_so_marca_reverted_at_sem_campanha_nova(self):
         """O contrato tem duas campanhas: o rollback marca as linhas que desfez e só."""
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         _run_migrate("rollback", "034", "--yes")
         audit = _audit()
         assert {row[0] for row in audit} == TOCADOS
@@ -458,7 +472,7 @@ class TestRollback:
         assert _campanhas() == {"tema26-034"}
 
     def test_rollback_desfaz_tambem_a_reclassificacao_por_llm(self, mod):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         _d1_llm()
 
         stats = _run_module(mod, "rollback", dry_run=False)
@@ -471,7 +485,7 @@ class TestRollback:
 
     def test_campanha_fora_do_contrato_nao_e_lida(self, mod):
         """Só tema26-llm-d1 e tema26-034: outra campanha, mesmo tema26-*, fica intacta."""
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         novo = ("19", "19.05", "19.05.01", "19.05.01")
         _set_news("militar", novo)
         _log_audit("militar", CORPUS["militar"], novo, campaign="tema26-llm-d1b")
@@ -488,7 +502,7 @@ class TestRollback:
         Fora do teste, o CREATE ... IF NOT EXISTS do rollback já segura um insert
         concorrente até o commit; aqui a linha entra na mesma transação, depois da leitura.
         """
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         conn = psycopg2.connect(DATABASE_URL)
         try:
             cursor = conn.cursor()
@@ -515,7 +529,7 @@ class TestRollback:
 
     def test_artigo_movido_para_o_26_so_pelo_llm_volta_ao_tema_original(self, mod):
         """05.02.01 → 26.02.01 na campanha do LLM volta a 05.02.01, não a 19.04.01."""
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         _d1_llm()
 
         _run_module(mod, "rollback", dry_run=False)
@@ -524,7 +538,7 @@ class TestRollback:
         assert _news_codes()["militar"] == CORPUS["militar"]
 
     def test_artigo_no_26_fora_da_auditoria_volta_pelo_mapa_inverso(self, mod):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         _set_news("novo_do_worker", ("26", "26.01", "26.01.03", "26.01.03"), insert=True)
 
         stats = _run_module(mod, "rollback", dry_run=False)
@@ -537,7 +551,7 @@ class TestRollback:
         assert _campanhas() == {"tema26-034"}
 
     def test_artigo_alterado_depois_e_fora_do_26_fica(self, mod):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         _set_news("dc1", ("05", "05.02", "05.02.01", "05.02.01"))
 
         stats = _run_module(mod, "rollback", dry_run=False)
@@ -546,7 +560,7 @@ class TestRollback:
         assert stats["by_reason"]["mantido"] == 1
 
     def test_dry_run_do_rollback_nao_muda_nada(self, mod):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         stats = _run_module(mod, "rollback", dry_run=True)
         assert stats["dry_run"] is True
         assert stats["by_reason"] == {"revertido": len(TOCADOS)}
@@ -554,9 +568,9 @@ class TestRollback:
         assert not any(row[-1] for row in _audit())
 
     def test_reaplicar_depois_do_rollback(self):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         _run_migrate("rollback", "034", "--yes")
-        result = _run_migrate("migrate", "--yes")
+        result = _run_migrate("migrate", "--target", "034", "--yes")
         assert result.returncode == 0, result.stdout + result.stderr
         assert _news_codes() == ESPERADO_APOS_034
         audit = _audit()
@@ -566,7 +580,7 @@ class TestRollback:
 
     def test_aplicar_reverter_duas_vezes(self):
         for _ in range(2):
-            result = _run_migrate("migrate", "--yes")
+            result = _run_migrate("migrate", "--target", "034", "--yes")
             assert result.returncode == 0, result.stdout + result.stderr
             assert _news_codes() == ESPERADO_APOS_034
             result = _run_migrate("rollback", "034", "--yes")
@@ -581,18 +595,18 @@ class TestContratoComODs1:
     """O preflight do DS-1 (data-science#49) aceita a tabela que a 034 cria."""
 
     def test_colunas_do_contrato(self):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         colunas = {
             row[0] for row in _execute_params(DS1_AUDIT_COLUMNS_SQL, ("news_theme_changes",))
         }
         assert set(DS1_AUDIT_REQUIRED_COLUMNS) <= colunas
 
     def test_unique_campaign_unique_id_sem_predicado(self):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         assert _execute_params(DS1_AUDIT_UNIQUE_SQL, ("news_theme_changes",)) == [(True,)]
 
     def test_colunas_tipos_e_nulidade_exatamente_do_contrato(self):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         colunas = _execute(
             "SELECT column_name, data_type, character_maximum_length, is_nullable "
             "FROM information_schema.columns WHERE table_name = 'news_theme_changes' "
@@ -615,7 +629,7 @@ class TestContratoComODs1:
         ]
 
     def test_unique_e_constraint_da_tabela(self):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         assert _execute(
             "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
             "WHERE conrelid = 'news_theme_changes'::regclass AND contype = 'u'"
@@ -631,13 +645,13 @@ class TestContratoComODs1:
         assert _news_codes() == CORPUS
 
     def test_campanha_do_llm_sem_fonte_estranha(self):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         assert _execute_params(DS1_CAMPAIGN_FOREIGN_SOURCES_SQL, (LLM_CAMPAIGN, "llm:%")) == []
         estranhas = _execute_params(DS1_CAMPAIGN_FOREIGN_SOURCES_SQL, ("tema26-034", "llm:%"))
         assert estranhas == [("migration-034",)]
 
     def test_unique_barra_segunda_linha_do_mesmo_artigo_na_campanha(self):
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         novo = ("26", "26.01", "26.01.03", "26.01.03")
         _log_audit("inc_esd", ESPERADO_APOS_034["inc_esd"], novo)
         with pytest.raises(psycopg2.errors.UniqueViolation):
@@ -652,7 +666,7 @@ class TestMergeDoBigQueryLeAsCampanhas:
     def test_le_as_duas_campanhas_nao_revertidas(self):
         from data_platform.jobs.bigquery import theme_changes
 
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         _d1_llm()
         _log_audit("inc_20", CORPUS["inc_20"], CORPUS["inc_20"], campaign="tema26-llm-d1b")
 
@@ -667,7 +681,7 @@ class TestMergeDoBigQueryLeAsCampanhas:
     def test_do_mais_recente_para_o_mais_antigo(self):
         from data_platform.jobs.bigquery import theme_changes
 
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         _d1_llm()
 
         df = theme_changes.fetch_theme_changes_state(DATABASE_URL)
@@ -678,7 +692,7 @@ class TestMergeDoBigQueryLeAsCampanhas:
     def test_conta_quem_diverge_da_mudanca_mais_recente(self):
         from data_platform.jobs.bigquery import theme_changes
 
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         _d1_llm()
         assert not theme_changes.fetch_theme_changes_state(DATABASE_URL)[
             "diverges_from_audit"
@@ -692,7 +706,7 @@ class TestMergeDoBigQueryLeAsCampanhas:
     def test_contagem_por_campanha(self):
         from data_platform.jobs.bigquery import theme_changes
 
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         _d1_llm()
 
         contagem = theme_changes.count_by_campaign(DATABASE_URL)
@@ -702,7 +716,7 @@ class TestMergeDoBigQueryLeAsCampanhas:
     def test_depois_do_rollback_le_as_linhas_revertidas(self, mod):
         from data_platform.jobs.bigquery import theme_changes
 
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         _d1_llm()
         _run_module(mod, "rollback", dry_run=False)
 
@@ -721,7 +735,7 @@ class TestMergeDoBigQueryLeAsCampanhas:
     def test_estado_por_unique_id(self, mod):
         from data_platform.jobs.bigquery import theme_changes
 
-        _run_migrate("migrate", "--yes")
+        _run_migrate("migrate", "--target", "034", "--yes")
         _set_news("novo_do_worker", ("26", "26.01", "26.01.03", "26.01.03"), insert=True)
         _run_module(mod, "rollback", dry_run=False)
 
