@@ -11,6 +11,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from data_platform.jobs.graph import content_keys as ck
 from data_platform.jobs.graph.content_keys import (
     ArticleRow,
     clean_markdown,
@@ -23,8 +25,6 @@ from data_platform.jobs.graph.content_keys import (
     slot_variant,
     title_eligible,
 )
-
-from data_platform.jobs.graph import content_keys as ck
 
 T0 = datetime(2026, 10, 1, 10, 0, tzinfo=UTC)
 MIGRATION_010 = (
@@ -187,10 +187,17 @@ class TestTrocaDeSlot:
     def test_pouco_prefixo_e_sufixo_em_comum_nao_e_slot(self):
         assert not slot_variant("a b c d e f", "a x y z w f")
 
-    def test_dois_trechos_trocados_nao_e_slot(self):
-        assert not slot_variant(
+    def test_trocas_proximas_formam_um_trecho_so(self):
+        """O trecho é contíguo de ponta a ponta: duas trocas a ≤ 5 tokens contam como um slot."""
+        assert slot_variant(
             "nis de final 5 recebem nesta terca o beneficio",
             "nis de final 6 recebem nesta quarta o beneficio",
+        )
+
+    def test_trocas_distantes_nao_sao_slot(self):
+        assert not slot_variant(
+            "nis de final 5 recebem o beneficio do programa nesta terca",
+            "nis de final 6 recebem o beneficio do programa nesta quarta",
         )
 
 
