@@ -1,11 +1,14 @@
 """MERGE de dgb_gold.fato_noticias a partir da auditoria news_theme_changes (tema 26).
 
 Fluxo: lê do Postgres o estado ATUAL de tema de todo artigo que aparece na auditoria das
-campanhas (tema26 e tema26-rollback), carrega numa tabela de staging no BigQuery
-(WRITE_TRUNCATE) e faz MERGE no fato só onde código ou rótulo diverge. Reexecutável: roda na
-D0 (depois da 034) e de novo na D1 (depois da reclassificação por LLM).
+campanhas (padrão LIKE `tema26-%`: tema26-034 da migração, tema26-llm-d1 do LLM da D1 e
+tema26-rollback), carrega numa tabela de staging no BigQuery (WRITE_TRUNCATE) e faz MERGE no
+fato só onde código ou rótulo diverge. Reexecutável: roda na D0 (depois da 034) e de novo na
+D1 (depois da reclassificação por LLM).
 """
 
+import importlib.util
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -37,11 +40,23 @@ def _state(n: int = 2) -> pd.DataFrame:
     )
 
 
+MIGRATION_034 = (
+    Path(__file__).resolve().parents[4] / "scripts" / "migrations" / "034_tema26_defesa_civil.py"
+)
+
+
+def _migration_034():
+    spec = importlib.util.spec_from_file_location("migration_034", MIGRATION_034)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class TestConsultaDoEstado:
     def test_le_o_estado_atual_dos_artigos_da_auditoria(self):
         sql = tc.THEME_CHANGES_STATE_QUERY
         assert "FROM news_theme_changes" in sql
-        assert "campaign = ANY(%s)" in sql
+        assert "campaign LIKE ANY(%s)" in sql
         for coluna in THEME_COLUMNS:
             assert f"AS {coluna}" in sql
 
@@ -51,16 +66,45 @@ class TestConsultaDoEstado:
         assert "LEFT JOIN themes t2 ON n.theme_l2_id = t2.id" in sql
         assert "LEFT JOIN themes tm ON n.most_specific_theme_id = tm.id" in sql
 
-    def test_campanhas_padrao(self):
-        assert tc.DEFAULT_CAMPAIGNS == ("tema26", "tema26-rollback")
+    def test_campanhas_padrao_cobrem_todas_as_do_tema_26(self):
+        """tema26-034 (034), tema26-llm-d1 (LLM da D1), reexecuções e tema26-rollback."""
+        assert tc.DEFAULT_CAMPAIGNS == ("tema26-%",)
+
+    def test_padrao_igual_ao_da_migracao_034(self):
+        m = _migration_034()
+        assert m.CAMPAIGN_PATTERN in tc.DEFAULT_CAMPAIGNS
+        prefixo = m.CAMPAIGN_PATTERN.rstrip("%")
+        for campanha in (m.CAMPAIGN, m.LLM_CAMPAIGN, m.ROLLBACK_CAMPAIGN):
+            assert campanha.startswith(prefixo)
 
     @patch("sqlalchemy.create_engine")
     @patch("pandas.read_sql_query")
     def test_fetch_passa_as_campanhas_como_array(self, mock_read_sql, _engine):
         mock_read_sql.return_value = _state()
-        df = tc.fetch_theme_changes_state("postgresql://x", ("tema26",))
+        df = tc.fetch_theme_changes_state("postgresql://x", ("tema26-034",))
         assert len(df) == 2
-        assert mock_read_sql.call_args.kwargs["params"] == (["tema26"],)
+        assert mock_read_sql.call_args.kwargs["params"] == (["tema26-034"],)
+
+
+class TestContagemPorCampanha:
+    """O dry-run mostra de que campanhas vieram os artigos (a da D1 não passa calada)."""
+
+    def test_sql_agrupa_por_campanha_com_o_mesmo_filtro(self):
+        sql = " ".join(tc.CAMPAIGN_COUNTS_QUERY.split())
+        assert "COUNT(DISTINCT unique_id)" in sql
+        assert "FROM news_theme_changes" in sql
+        assert "campaign LIKE ANY(%s)" in sql
+        assert "GROUP BY campaign" in sql
+
+    @patch("sqlalchemy.create_engine")
+    @patch("pandas.read_sql_query")
+    def test_devolve_dict_campanha_artigos(self, mock_read_sql, _engine):
+        mock_read_sql.return_value = pd.DataFrame(
+            {"campaign": ["tema26-034", "tema26-llm-d1"], "articles": [209, 1377]}
+        )
+        contagem = tc.count_by_campaign("postgresql://x", ("tema26-%",))
+        assert contagem == {"tema26-034": 209, "tema26-llm-d1": 1377}
+        assert mock_read_sql.call_args.kwargs["params"] == (["tema26-%"],)
 
 
 class TestMergeSql:
@@ -101,6 +145,15 @@ def _client(diff_rows: int = 2, merged_rows: int = 2) -> MagicMock:
     return client
 
 
+POR_CAMPANHA = {"tema26-034": 209, "tema26-llm-d1": 1377}
+
+
+@pytest.fixture(autouse=True)
+def _contagem_por_campanha():
+    with patch.object(tc, "count_by_campaign", return_value=POR_CAMPANHA) as mock_count:
+        yield mock_count
+
+
 class TestMergeThemeChanges:
     @patch.object(tc, "fetch_theme_changes_state")
     @patch("google.cloud.bigquery.Client")
@@ -126,7 +179,8 @@ class TestMergeThemeChanges:
         stats = tc.merge_theme_changes("postgresql://x", "projeto-x")
 
         assert stats == {
-            "campaigns": ["tema26", "tema26-rollback"],
+            "campaigns": ["tema26-%"],
+            "by_campaign": POR_CAMPANHA,
             "staged": 3,
             "fato_rows_to_update": 3,
             "merged": 3,
@@ -158,6 +212,21 @@ class TestMergeThemeChanges:
         assert stats["staged"] == 0
         assert stats["merged"] == 0
         mock_client_cls.assert_not_called()
+
+    @patch.object(tc, "fetch_theme_changes_state")
+    @patch("google.cloud.bigquery.Client")
+    def test_contagem_por_campanha_usa_as_mesmas_campanhas(
+        self, mock_client_cls, mock_fetch, _contagem_por_campanha
+    ):
+        mock_fetch.return_value = _state(1)
+        mock_client_cls.return_value = _client(diff_rows=1, merged_rows=1)
+
+        stats = tc.merge_theme_changes(
+            "postgresql://x", "projeto-x", campaigns=("tema26-034",), dry_run=True
+        )
+
+        _contagem_por_campanha.assert_called_once_with("postgresql://x", ("tema26-034",))
+        assert stats["by_campaign"] == POR_CAMPANHA
 
     def test_campanha_vazia_falha(self):
         with pytest.raises(ValueError, match="campanha"):

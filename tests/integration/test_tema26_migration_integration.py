@@ -545,3 +545,31 @@ class TestContratoComODs1:
         _log_audit("inc_esd", ESPERADO_APOS_034["inc_esd"], novo)
         with pytest.raises(psycopg2.errors.UniqueViolation):
             _log_audit("inc_esd", novo, novo)
+
+
+@pytest.mark.integration
+class TestMergeDoBigQueryLeAsCampanhas:
+    """bq-merge-theme-changes lê o estado atual dos artigos de todas as campanhas tema26-*."""
+
+    def test_campanhas_padrao_incluem_a_do_llm(self):
+        from data_platform.jobs.bigquery import theme_changes
+
+        _run_migrate("migrate", "--yes")
+        _d1_llm()
+
+        df = theme_changes.fetch_theme_changes_state(DATABASE_URL, theme_changes.DEFAULT_CAMPAIGNS)
+
+        assert set(df["unique_id"]) == TOCADOS | {"clima", "militar"}
+        clima = df.set_index("unique_id").loc["clima"]
+        assert clima["theme_l1_code"] == "26"
+        assert clima["most_specific_theme_code"] == "26.02.01"
+
+    def test_contagem_por_campanha(self):
+        from data_platform.jobs.bigquery import theme_changes
+
+        _run_migrate("migrate", "--yes")
+        _d1_llm()
+
+        contagem = theme_changes.count_by_campaign(DATABASE_URL, theme_changes.DEFAULT_CAMPAIGNS)
+
+        assert contagem == {"tema26-034": len(TOCADOS), LLM_CAMPAIGN: 3}

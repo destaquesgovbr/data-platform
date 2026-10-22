@@ -177,7 +177,7 @@ class TestBqMergeThemeChangesCommand:
         mock_merge.assert_called_once_with(
             "postgresql://ro",
             "projeto-x",
-            campaigns=("tema26", "tema26-rollback"),
+            campaigns=("tema26-%",),
             dry_run=True,
         )
 
@@ -186,11 +186,16 @@ class TestBqMergeThemeChangesCommand:
         mock_merge.return_value = {"staged": 0, "fato_rows_to_update": 0, "merged": 0}
 
         result = runner.invoke(
-            app, ["bq-merge-theme-changes", "--campaign", "tema26"], env=self.ENV
+            app,
+            ["bq-merge-theme-changes", "--campaign", "tema26-034", "--campaign", "tema26-llm-d1"],
+            env=self.ENV,
         )
 
         assert result.exit_code == 0, result.output
-        assert mock_merge.call_args.kwargs == {"campaigns": ("tema26",), "dry_run": False}
+        assert mock_merge.call_args.kwargs == {
+            "campaigns": ("tema26-034", "tema26-llm-d1"),
+            "dry_run": False,
+        }
 
     @patch("data_platform.jobs.bigquery.theme_changes.merge_theme_changes")
     def test_sem_database_url_falha(self, mock_merge):
