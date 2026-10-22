@@ -38,3 +38,14 @@ Ao modificar o schema em `sync_to_bigquery.py`, sempre:
 1. Criar migration aqui
 2. Atualizar `create_tables.sql`
 3. Rodar `pytest tests/unit/jobs/bigquery/test_sync_to_bigquery.py::TestSchemaConsistency`
+
+## Tema 26 (002 + MERGE a partir da auditoria)
+
+- `002_tema26_remap_fato_noticias.sql`: remap determinístico de `fato_noticias` (códigos e
+  rótulos de l1, l2 e most_specific), com a mesma regra da migração Postgres 034. Aplicar
+  depois da 034, na D0.
+- A reclassificação por LLM (D1) não é migração: `data-platform bq-merge-theme-changes`
+  [--dry-run] [--campaign tema26 ...] lê do Postgres o estado atual dos artigos que aparecem
+  em `news_theme_changes`, carrega em `dgb_gold._stg_news_theme_changes` e faz MERGE no
+  fato onde diverge. É reexecutável (D0, D1, depois de um rollback), por isso fica fora do
+  runner forward-only.

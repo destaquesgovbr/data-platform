@@ -8,6 +8,7 @@ Commands:
 - typesense-update-schema: Update collection schema (add missing fields)
 - typesense-delete: Delete a Typesense collection
 - typesense-list: List all Typesense collections
+- bq-merge-theme-changes: MERGE theme changes (news_theme_changes audit) into BigQuery
 
 Note: Scraping commands moved to standalone scraper repo.
 Note: Enrichment commands removed — now handled by Airflow DAG enrich_news_llm (data-science repo).
@@ -199,6 +200,37 @@ def typesense_list() -> None:
         logging.info("No collections found")
     else:
         logging.info(f"Found {len(collections)} collection(s)")
+
+
+@app.command("bq-merge-theme-changes")
+def bq_merge_theme_changes(
+    campaign: list[str] = typer.Option(
+        ["tema26", "tema26-rollback"],
+        "--campaign",
+        help="Campanha da auditoria news_theme_changes (repita para várias)",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Só grava a staging e conta as linhas do fato que mudariam"
+    ),
+    db_url: str = typer.Option("", "--db-url", envvar="DATABASE_URL", show_default=False),
+    project_id: str = typer.Option("inspire-7-finep", "--project-id", envvar="GCP_PROJECT_ID"),
+) -> None:
+    """
+    MERGE dgb_gold.fato_noticias from the theme audit (theme 26: D0 and D1).
+
+    Reads (read-only) the current theme of every article in news_theme_changes for the
+    campaigns, loads it into dgb_gold._stg_news_theme_changes and merges where it differs.
+    """
+    from data_platform.jobs.bigquery import theme_changes
+
+    if not db_url:
+        logging.error("DATABASE_URL não definida")
+        raise typer.Exit(1)
+
+    stats = theme_changes.merge_theme_changes(
+        db_url, project_id, campaigns=tuple(campaign), dry_run=dry_run
+    )
+    logging.info(f"bq-merge-theme-changes: {stats}")
 
 
 if __name__ == "__main__":
