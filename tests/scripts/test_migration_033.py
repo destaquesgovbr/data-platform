@@ -71,36 +71,47 @@ class TestMigration033Interface:
 # SQL
 # ---------------------------------------------------------------------------
 class TestSelectionSQL:
-    def test_keyset_por_unique_id(self):
+    def test_keyset_pela_pk_de_news_features(self):
         norm = _normalize(_import_migration_033().SELECT_PENDING_SQL)
-        assert "n.unique_id > %(after)s" in norm
-        assert norm.endswith("order by n.unique_id limit %(limit)s")
+        assert "nf.unique_id > %(after)s" in norm
+        assert norm.endswith("order by nf.unique_id limit %(limit)s")
 
-    def test_so_artigos_com_content_e_sem_a_chave(self):
-        """Retomável: quem já tem a chave (do backfill ou do feature-worker) é pulado."""
+    def test_so_linhas_existentes_de_news_features_com_content_e_sem_a_chave(self):
+        """Só UPDATE: parte de news_features (INNER JOIN com news), nunca de news.
+
+        Notícias sem linha em news_features (~153,8 mil, quase todas pré-2022) ficam de
+        fora por decisão. Retomável: quem já tem a chave (do backfill ou do
+        feature-worker) é pulado."""
         mod = _import_migration_033()
         for sql in (mod.SELECT_PENDING_SQL, mod.COUNT_PENDING_SQL):
             norm = _normalize(sql)
-            assert "from news n left join news_features nf on nf.unique_id = n.unique_id" in norm
+            assert "from news_features nf join news n on n.unique_id = nf.unique_id" in norm
+            assert "left join" not in norm
             assert "n.content is not null" in norm
             assert "n.content <> ''" in norm
-            assert "not coalesce(nf.features ? %(key)s, false)" in norm
+            assert "not (nf.features ? %(key)s)" in norm
 
     def test_select_traz_unique_id_e_content(self):
         norm = _normalize(_import_migration_033().SELECT_PENDING_SQL)
-        assert norm.startswith("select n.unique_id, n.content from news n")
+        assert norm.startswith("select nf.unique_id, n.content from news_features nf")
 
 
-class TestUpsertSQL:
-    def test_merge_jsonb_por_lote_com_execute_values(self):
+class TestUpdateSQL:
+    def test_merge_jsonb_por_lote_com_execute_values_sem_insert(self):
         mod = _import_migration_033()
-        norm = _normalize(mod.UPSERT_SQL)
+        norm = _normalize(mod.UPDATE_SQL)
         assert norm == (
-            "insert into news_features (unique_id, features) values %s "
-            "on conflict (unique_id) do update set "
-            "features = news_features.features || excluded.features"
+            "update news_features as nf set features = nf.features || v.features "
+            "from (values %s) as v (unique_id, features) "
+            "where nf.unique_id = v.unique_id"
         )
-        assert mod.UPSERT_TEMPLATE == "(%s, %s::jsonb)"
+        assert "insert" not in norm
+        assert mod.UPDATE_TEMPLATE == "(%s, %s::jsonb)"
+
+    def test_nao_ha_mais_upsert(self):
+        mod = _import_migration_033()
+        assert not hasattr(mod, "UPSERT_SQL")
+        assert not hasattr(mod, "UPSERT_TEMPLATE")
 
 
 class TestRollbackSQL:
@@ -209,7 +220,8 @@ class TestMigrateExecution:
         assert ev.call_count == 2
         first_values = ev.call_args_list[0].args[2]
         assert [uid for uid, _ in first_values] == ["a"]
-        assert ev.call_args_list[0].kwargs["template"] == mod.UPSERT_TEMPLATE
+        assert ev.call_args_list[0].args[1] == mod.UPDATE_SQL
+        assert ev.call_args_list[0].kwargs["template"] == mod.UPDATE_TEMPLATE
         assert conn.commit.call_count == 2
         assert result["rows_updated"] == 2
         assert result["too_short"] == 1

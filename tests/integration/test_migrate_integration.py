@@ -594,7 +594,10 @@ def _run_033(dry_run: bool = False, batch_size: int | None = None) -> dict:
 
 @pytest.mark.integration
 class TestBackfillFleschPtbrMigration:
-    """033: backfill de readability_flesch_ptbr em news_features (DP-1)."""
+    """033: backfill de readability_flesch_ptbr nas linhas existentes de news_features (DP-1).
+
+    Só UPDATE: notícia sem linha em news_features fica de fora (não ganha linha nova).
+    """
 
     @pytest.fixture(autouse=True)
     def _corpus(self):
@@ -609,13 +612,17 @@ class TestBackfillFleschPtbrMigration:
         _insert_news("c_curto", "Texto curto.")
         _insert_news("d_ja_tem", _TEXTO_LONGO)
         _insert_news("e_sem_content", None)
+        _insert_news("f_com_features", _TEXTO_LONGO + " Segunda frase do texto.")
         _execute(
             "INSERT INTO news_features (unique_id, features) VALUES "
             """('a_com_features', '{"word_count": 22, "readability_flesch": 38.38}'), """
-            """('d_ja_tem', '{"readability_flesch_ptbr": 999}')"""
+            """('c_curto', '{"word_count": 2}'), """
+            """('d_ja_tem', '{"readability_flesch_ptbr": 999}'), """
+            """('e_sem_content', '{}'), """
+            """('f_com_features', '{}')"""
         )
         self.expected_a = compute_readability_flesch_ptbr(_TEXTO_LONGO)
-        self.expected_b = compute_readability_flesch_ptbr(_TEXTO_LONGO + " Segunda frase do texto.")
+        self.expected_f = compute_readability_flesch_ptbr(_TEXTO_LONGO + " Segunda frase do texto.")
 
     def test_033_grava_a_chave_preservando_as_demais(self):
         result = _run_033()
@@ -626,19 +633,28 @@ class TestBackfillFleschPtbrMigration:
             "readability_flesch": 38.38,
             "readability_flesch_ptbr": self.expected_a,
         }
-        assert features["b_sem_linha"] == {"readability_flesch_ptbr": self.expected_b}
-        assert "c_curto" not in features
-        assert "e_sem_content" not in features
+        assert features["f_com_features"] == {"readability_flesch_ptbr": self.expected_f}
+        assert features["c_curto"] == {"word_count": 2}
+        assert features["e_sem_content"] == {}
         assert features["d_ja_tem"] == {"readability_flesch_ptbr": 999}
         assert result["rows_updated"] == 2
         assert result["too_short"] == 1
+
+    def test_033_nao_cria_linha_para_noticia_sem_features(self):
+        """Decisão: as ~153,8 mil notícias sem linha em news_features ficam de fora."""
+        result = _run_033()
+
+        assert "b_sem_linha" not in _features()
+        assert len(_features()) == 5
+        assert result["scanned"] == 3
 
     def test_033_pagina_em_lotes_pequenos(self):
         result = _run_033(batch_size=1)
 
         features = _features()
         assert features["a_com_features"]["readability_flesch_ptbr"] == self.expected_a
-        assert features["b_sem_linha"]["readability_flesch_ptbr"] == self.expected_b
+        assert features["f_com_features"]["readability_flesch_ptbr"] == self.expected_f
+        assert "b_sem_linha" not in features
         assert result["scanned"] == 3
 
     def test_033_retomavel(self):
@@ -665,5 +681,6 @@ class TestBackfillFleschPtbrMigration:
 
         features = _features()
         assert features["a_com_features"] == {"word_count": 22, "readability_flesch": 38.38}
-        assert features["b_sem_linha"] == {}
+        assert features["f_com_features"] == {}
         assert features["d_ja_tem"] == {}
+        assert "b_sem_linha" not in features
