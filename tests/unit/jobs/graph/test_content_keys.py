@@ -417,6 +417,118 @@ class TestModelosPorUF:
         assert keys["agenciagov-bahia"] == "mec-bahia"
 
 
+TITULO_CIN = "Governo do Brasil mobiliza estados para ampliar a emissão da CIN"
+UFS_CIN = ("amazonas", "bahia", "ceara", "goias", "para", "parana")
+
+
+class TestMesmoTituloNoMesmoOrgao:
+    """O mesmo título no mesmo órgão não dispensa as guardas (revisão do PR, 22/10).
+
+    Com o título igual, a E1 e a E2 juntavam sem guarda: o G1 só contava irmãos de título
+    diferente e o G2 só valia com títulos diferentes. Casos de produção (mar–jun/2026): gestao
+    'mobiliza estados... CIN' (6 UFs, J 0,79–0,89, mesmo dia), mdr 'MIDR reconhece a situação de
+    emergência em cinco cidades' (29 e 30/04, J 0,69), ans 'Participações sociais em andamento'
+    (2,17 dias, J 0,69) e tesouronacional (14 e 15/04, J 0,49). As capturas repetidas do scraper
+    (J ≈ 1, ≤ 1 dia) continuam juntando.
+    """
+
+    def _cin(self) -> list[ArticleRow]:
+        return [
+            _row(f"gestao-{uf}", "gestao", TITULO_CIN, _modelo(uf), i * 0.05)
+            for i, uf in enumerate(UFS_CIN)
+        ]
+
+    def test_variantes_por_uf_com_o_mesmo_titulo_nao_juntam(self):
+        """G1: irmão de mesmo título conta quando J < 0,95 (variante, não recaptura)."""
+        assert 0.8 <= _js(_modelo("amazonas"), _modelo("bahia"))[0] < 0.95
+
+        keys = _keys(*self._cin())
+
+        assert keys == {f"gestao-{uf}": None for uf in UFS_CIN}
+
+    def test_republicacao_de_uma_variante_com_o_mesmo_titulo_junta_so_a_sua_uf(self):
+        republicada = _row("secom-bahia", "secom", TITULO_CIN, _modelo("bahia"), 3)
+
+        keys = _keys(*self._cin(), republicada)
+
+        assert keys == {
+            **{f"gestao-{uf}": None for uf in UFS_CIN if uf != "bahia"},
+            "gestao-bahia": "gestao-bahia",
+            "secom-bahia": "gestao-bahia",
+        }
+
+    def test_mesmo_titulo_com_j_medio_nao_junta(self):
+        """G2 na E1: mdr com listas de cidades diferentes no mesmo título (J 0,69)."""
+        palavras = _p("midr", 0, 300)
+        dia1 = _t(palavras)
+        dia2 = _t(palavras[:100], _p("cidade", 0, 40), palavras[140:])
+        assert 0.5 <= _js(dia1, dia2)[0] < 0.8
+        titulo = "MIDR reconhece a situação de emergência em cinco cidades"
+
+        keys = _keys(
+            _row("mdr-29", "mdr", titulo, dia1),
+            _row("mdr-30", "mdr", titulo, dia2, 20),
+        )
+        entre_orgaos = _keys(
+            _row("mdr-29", "mdr", titulo, dia1),
+            _row("secom-30", "secom", titulo, dia2, 20),
+        )
+
+        assert keys == {"mdr-29": None, "mdr-30": None}
+        assert entre_orgaos == {"mdr-29": "mdr-29", "secom-30": "mdr-29"}
+
+    def test_titulo_generico_no_mesmo_orgao_exige_j_alto_e_ate_1_dia(self):
+        """G2 na E1 com título fora da E2: ans 'Participações sociais em andamento'."""
+        palavras = _p("ans", 0, 300)
+        a = _t(palavras)
+        b = _t(palavras[:100], _p("consulta", 0, 40), palavras[140:])
+        assert 0.5 <= _js(a, b)[0] < 0.8
+        titulo = "Participações sociais em andamento"
+
+        keys = _keys(_row("ans-1", "ans", titulo, a), _row("ans-2", "ans", titulo, b, 52))
+
+        assert keys == {"ans-1": None, "ans-2": None}
+
+    def test_mesmo_titulo_com_j_baixo_nao_junta_pelo_titulo(self):
+        """G2 na E2: tesouronacional, comunicados diferentes com o mesmo título (J 0,49)."""
+        a = _t(_p("tesouro", 0, 300))
+        b = _t(_p("tesouro", 0, 150), _p("leilao", 0, 150))
+        assert 0.1 <= _js(a, b)[0] < 0.5
+        titulo = "Tesouro Nacional divulga o resultado do leilão de títulos públicos"
+
+        keys = _keys(
+            _row("tn-14", "tesouronacional", titulo, a),
+            _row("tn-15", "tesouronacional", titulo, b, 22),
+        )
+
+        assert keys == {"tn-14": None, "tn-15": None}
+
+    def test_recaptura_editada_com_j_alto_junta(self):
+        """Duas capturas do mesmo artigo, editado entre elas (J 0,8–0,95, ≤ 1 dia): junta."""
+        primeira = _t(BASE)
+        editada = _t(BASE[:190], _p("atualizacao", 0, 10))
+        assert 0.8 <= _js(primeira, editada)[0] < 0.95
+        titulo = "INSS antecipa pagamento do seguro-defeso a pescadores"
+
+        keys = _keys(
+            _row("inss-a", "inss", titulo, primeira),
+            _row("inss-b", "inss", titulo, editada, 5),
+        )
+
+        assert keys == {"inss-a": "inss-a", "inss-b": "inss-a"}
+
+    def test_tela_de_login_e_recaptura_no_mesmo_orgao_junta_pelo_titulo(self):
+        """Sem J (um lado inutilizável), só a E2 decide: as guardas não se aplicam."""
+        titulo = "INSS antecipa pagamento do seguro-defeso a pescadores"
+
+        keys = _keys(
+            _row("inss-a", "inss", titulo, LOGIN_WALL),
+            _row("inss-b", "inss", titulo, _t(BASE), 5),
+        )
+
+        assert keys == {"inss-a": "inss-a", "inss-b": "inss-a"}
+
+
 class TestMesmoOrgao:
     def test_notas_recorrentes_com_troca_de_slot_nao_juntam(self):
         """Agência Brasil 'NIS de final 5/6': J ≥ 0,8 em 1 dia, título só troca o dígito."""
