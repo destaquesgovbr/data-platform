@@ -972,3 +972,41 @@ class TestRunContentKeys:
         conn.rollback.assert_called_once()
         conn.commit.assert_not_called()
         conn.close.assert_called_once()
+
+
+class TestSemAColunaContentKey:
+    """Código antes da 035 (ou 035 revertida): a task da DAG sai com aviso, sem quebrar."""
+
+    def _conn(self, existe: bool) -> tuple[MagicMock, MagicMock]:
+        cursor = MagicMock()
+        cursor.fetchone.return_value = (existe,)
+        conn = MagicMock()
+        conn.cursor.return_value = cursor
+        return conn, cursor
+
+    @pytest.mark.parametrize("existe", [True, False])
+    def test_detecta_a_coluna(self, existe):
+        conn, cursor = self._conn(existe)
+
+        assert ck.has_content_key_column(conn) is existe
+
+        sql = " ".join(cursor.execute.call_args.args[0].split()).lower()
+        assert "information_schema.columns" in sql
+        assert "table_name = 'news'" in sql and "column_name = 'content_key'" in sql
+        cursor.close.assert_called_once()
+
+    def test_run_content_keys_sem_a_coluna_pula_com_aviso(self, caplog):
+        conn, _ = self._conn(False)
+
+        with (
+            patch("psycopg2.connect", return_value=conn),
+            patch.object(ck, "compute_content_keys") as compute,
+        ):
+            result = ck.run_content_keys("postgresql://u@h/db")
+
+        compute.assert_not_called()
+        conn.commit.assert_not_called()
+        conn.close.assert_called_once()
+        assert result["status"] == "skipped"
+        assert "035" in result["reason"]
+        assert "035" in caplog.text

@@ -22,6 +22,7 @@ from data_platform.jobs.graph.content_keys import compute_content_keys, run_cont
 from data_platform.jobs.graph.edges import project_entity_graph
 from tests.integration.test_migrate_integration import (
     DATABASE_URL,
+    MIGRATIONS_DIR,
     _apply_all_migrations,
     _execute,
     _reset_database,
@@ -347,3 +348,31 @@ class TestComputeContentKeys:
 
         assert result["target"] == 3
         assert _content_keys() == {"mec-1": "mec-1", "mds-1": "mec-1", "mec-2": None}
+
+
+@pytest.mark.integration
+class TestSemAColunaContentKey:
+    """Código mergeado antes da 035 (ou 035 revertida): o grafo cai no content_hash e a task da
+    chave sai com aviso, em vez de os dois quebrarem por "column content_key does not exist"."""
+
+    def _reverter_035(self) -> None:
+        _execute((MIGRATIONS_DIR / "035_add_news_content_key_rollback.sql").read_text())
+
+    def test_grafo_cai_no_content_hash(self):
+        _three_articles_two_share_content()
+        self._reverter_035()
+
+        result = project_entity_graph(DATABASE_URL)
+
+        # o mesmo resultado de antes da 035: h1 (a1 + a2) e a3
+        assert _co_mention_edges() == {("Q1", "Q2"): (3, 3, 2)}
+        assert result["total_unique_content"] == 2
+        assert _entity_stats()["Q1"][:2] == (3, 2)
+
+    def test_run_content_keys_pula_com_aviso(self):
+        _republicacao()
+        self._reverter_035()
+
+        result = run_content_keys(DATABASE_URL, now=_T0 + timedelta(days=1))
+
+        assert result["status"] == "skipped"
