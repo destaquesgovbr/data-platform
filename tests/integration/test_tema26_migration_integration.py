@@ -1,0 +1,416 @@
+"""
+Integração da migração 034 (tema 26) contra PostgreSQL real, pelo runner.
+
+Banco descartável de test_migrate_integration.py (MIGRATION_TEST_DATABASE_URL): baseline
++ `stamp 033`, para que `migrate` rode só a 034. O corpus semeado reproduz os padrões de
+produção de 21/10 (contagens de base, seção C): hierarquias coerentes em 19.03/19.04,
+só-L2, as 4 incoerentes que envolvem o 19 e artigos fora do escopo.
+"""
+
+import importlib.util
+from pathlib import Path
+
+import psycopg2
+import pytest
+
+from tests.integration.test_migrate_integration import (
+    DATABASE_URL,
+    _execute,
+    _reset_database,
+    _run_migrate,
+)
+
+MIGRATION = Path(__file__).parents[2] / "scripts" / "migrations" / "034_tema26_defesa_civil.py"
+
+THEMES = [
+    ("04", "Segurança Pública", 1, None),
+    ("05", "Meio Ambiente e Sustentabilidade", 1, None),
+    ("15", "Desenvolvimento Social", 1, None),
+    ("19", "Defesa e Forças Armadas", 1, None),
+    ("20", "Políticas Públicas e Governança", 1, None),
+    ("04.03", "Prevenção e Combate ao Crime", 2, "04"),
+    ("05.02", "Mudanças Climáticas", 2, "05"),
+    ("15.02", "Combate à Pobreza", 2, "15"),
+    ("19.01", "Segurança Nacional", 2, "19"),
+    ("19.02", "Missões Militares", 2, "19"),
+    ("19.03", "Defesa Civil", 2, "19"),
+    ("19.04", "Situações de Emergência", 2, "19"),
+    ("19.05", "Políticas e Estratégias de Defesa", 2, "19"),
+    ("20.02", "Gestão Pública", 2, "20"),
+    ("04.03.01", "Prevenção à Violência", 3, "04.03"),
+    ("05.02.01", "Catástrofes Climáticas", 3, "05.02"),
+    ("15.02.03", "Apoio Emergencial", 3, "15.02"),
+    ("19.01.02", "Proteção de Infraestruturas Críticas", 3, "19.01"),
+    ("19.02.01", "Operações de Paz", 3, "19.02"),
+    ("19.03.01", "Preparação para Desastres", 3, "19.03"),
+    ("19.03.02", "Planejamento de Evacuação", 3, "19.03"),
+    ("19.03.03", "Resposta a Desastres", 3, "19.03"),
+    ("19.03.04", "Monitoramento de Riscos Naturais", 3, "19.03"),
+    ("19.03.05", "Gestão de Abrigos", 3, "19.03"),
+    ("19.04.01", "Resgate e Salvamento", 3, "19.04"),
+    ("19.04.02", "Logística de Emergência", 3, "19.04"),
+    ("19.04.03", "Ações Humanitárias", 3, "19.04"),
+    ("19.04.04", "Reconstrução Pós-Desastre", 3, "19.04"),
+    ("19.04.05", "Assistência a Deslocados Internos", 3, "19.04"),
+    ("19.05.01", "Planejamento de Defesa Nacional", 3, "19.05"),
+    ("20.02.03", "Transparência", 3, "20.02"),
+]
+
+# unique_id → (l1, l2, l3, most_specific) antes da 034
+CORPUS = {
+    "dc1": ("19", "19.03", "19.03.03", "19.03.03"),
+    "dc2": ("19", "19.03", "19.03.03", "19.03.03"),
+    "dc3": ("19", "19.03", "19.03.01", "19.03.01"),
+    "em1": ("19", "19.04", "19.04.03", "19.04.03"),
+    "so_l2": ("19", "19.03", None, "19.03"),
+    "inc_15": ("15", "19.04", "19.04.04", "19.04.04"),
+    "inc_esd": ("19", "19.02", "19.03.01", "19.03.01"),
+    "inc_bh": ("19", "19.03", "19.04.01", "19.04.01"),
+    "inc_20": ("19", "20.02", "20.02.03", "20.02.03"),
+    "militar": ("19", "19.01", "19.01.02", "19.01.02"),
+    "clima": ("05", "05.02", "05.02.01", "05.02.01"),
+    "sem_tema": (None, None, None, None),
+}
+
+ESPERADO_APOS_034 = {
+    "dc1": ("26", "26.01", "26.01.03", "26.01.03"),
+    "dc2": ("26", "26.01", "26.01.03", "26.01.03"),
+    "dc3": ("26", "26.01", "26.01.01", "26.01.01"),
+    "em1": ("26", "26.02", "26.02.03", "26.02.03"),
+    "so_l2": ("26", "26.01", None, "26.01"),
+    "inc_15": ("26", "26.02", "26.02.04", "26.02.04"),
+    "inc_esd": ("19", "19.02", None, "19.02"),
+    "inc_bh": ("26", "26.02", "26.02.01", "26.02.01"),
+    "inc_20": ("19", "20.02", "20.02.03", "20.02.03"),
+    "militar": ("19", "19.01", "19.01.02", "19.01.02"),
+    "clima": ("05", "05.02", "05.02.01", "05.02.01"),
+    "sem_tema": (None, None, None, None),
+}
+
+TOCADOS = {"dc1", "dc2", "dc3", "em1", "so_l2", "inc_15", "inc_esd", "inc_bh"}
+
+LEGADO = [
+    "19.03",
+    "19.03.01",
+    "19.03.02",
+    "19.03.03",
+    "19.03.04",
+    "19.03.05",
+    "19.04",
+    "19.04.01",
+    "19.04.02",
+    "19.04.03",
+    "19.04.04",
+    "19.04.05",
+]
+
+
+@pytest.fixture(scope="module")
+def mod():
+    spec = importlib.util.spec_from_file_location("migration_034", MIGRATION)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _seed_themes(themes) -> None:
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            for code, label, level, parent in themes:
+                cur.execute(
+                    "INSERT INTO themes (code, label, full_name, level, parent_code) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (code, label, f"{code} {label}", level, parent),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _set_news(unique_id: str, codes: tuple, insert: bool = False) -> None:
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            ids = []
+            for code in codes:
+                if code is None:
+                    ids.append(None)
+                else:
+                    cur.execute("SELECT id FROM themes WHERE code = %s", (code,))
+                    ids.append(cur.fetchone()[0])
+            if insert:
+                cur.execute(
+                    "INSERT INTO news (unique_id, agency_id, title, published_at, agency_key, "
+                    "theme_l1_id, theme_l2_id, theme_l3_id, most_specific_theme_id) "
+                    "SELECT %s, id, 'Título', '2026-10-01T12:00:00+00:00', key, %s, %s, %s, %s "
+                    "FROM agencies WHERE key = 'mdr'",
+                    (unique_id, *ids),
+                )
+            else:
+                cur.execute(
+                    "UPDATE news SET theme_l1_id = %s, theme_l2_id = %s, theme_l3_id = %s, "
+                    "most_specific_theme_id = %s WHERE unique_id = %s",
+                    (*ids, unique_id),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _news_codes() -> dict[str, tuple]:
+    rows = _execute(
+        "SELECT n.unique_id, t1.code, t2.code, t3.code, tm.code FROM news n "
+        "LEFT JOIN themes t1 ON t1.id = n.theme_l1_id "
+        "LEFT JOIN themes t2 ON t2.id = n.theme_l2_id "
+        "LEFT JOIN themes t3 ON t3.id = n.theme_l3_id "
+        "LEFT JOIN themes tm ON tm.id = n.most_specific_theme_id"
+    )
+    return {uid: (l1, l2, l3, ms) for uid, l1, l2, l3, ms in rows}
+
+
+def _theme_codes() -> set[str]:
+    return {code for (code,) in _execute("SELECT code FROM themes")}
+
+
+def _audit_table_exists() -> bool:
+    return _execute("SELECT to_regclass('news_theme_changes') IS NOT NULL") == [(True,)]
+
+
+def _audit(campaign: str = "tema26") -> list[tuple]:
+    return _execute(
+        "SELECT unique_id, old_l1_code, old_l2_code, old_l3_code, old_most_specific_code, "
+        "new_l1_code, new_l2_code, new_l3_code, new_most_specific_code, source, note, "
+        "reverted_at IS NOT NULL "
+        f"FROM news_theme_changes WHERE campaign = '{campaign}' ORDER BY id"
+    )
+
+
+def _log_audit(unique_id: str, old: tuple, new: tuple, source: str = "ds1_llm") -> None:
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO news_theme_changes (campaign, unique_id, old_l1_code, old_l2_code, "
+                "old_l3_code, old_most_specific_code, new_l1_code, new_l2_code, new_l3_code, "
+                "new_most_specific_code, source) "
+                "VALUES ('tema26', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (unique_id, *old, *new, source),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _run_module(mod, action: str, dry_run: bool) -> dict:
+    """Chama migrate/rollback do módulo numa conexão própria, com o commit do runner."""
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        result = getattr(mod, action)(conn, dry_run=dry_run)
+        if dry_run:
+            conn.rollback()
+        else:
+            conn.commit()
+        return result
+    finally:
+        conn.close()
+
+
+def _seed_corpus() -> None:
+    _execute("INSERT INTO agencies (key, name) VALUES ('mdr', 'MDR')")
+    _seed_themes(THEMES)
+    for unique_id, codes in CORPUS.items():
+        _set_news(unique_id, codes, insert=True)
+
+
+@pytest.fixture(autouse=True)
+def seeded_database():
+    _reset_database()
+    result = _run_migrate("stamp", "033", "--yes")
+    assert result.returncode == 0, result.stdout + result.stderr
+    _seed_corpus()
+    yield
+
+
+@pytest.mark.integration
+class TestDryRun:
+    def test_runner_dry_run_nao_muda_nada(self):
+        result = _run_migrate("migrate", "--dry-run")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "034_tema26_defesa_civil" in result.stdout
+        assert _news_codes() == CORPUS
+        assert not _audit_table_exists()
+        assert "26" not in _theme_codes()
+
+    def test_dry_run_conta_por_codigo_e_por_regra(self, mod):
+        stats = _run_module(mod, "migrate", dry_run=True)
+
+        assert stats["dry_run"] is True
+        assert stats["articles"] == len(TOCADOS)
+        assert stats["by_rule"] == {"remap": 5, "hierarquia_reconstruida": 2, "l3_descartado": 1}
+        assert stats["transitions"]["theme_l1"] == {"19→26": 6, "15→26": 1}
+        assert stats["transitions"]["theme_l2"] == {
+            "19.03→26.01": 4,
+            "19.04→26.02": 2,
+            "19.03→26.02": 1,
+        }
+        assert stats["transitions"]["theme_l3"] == {
+            "19.03.03→26.01.03": 2,
+            "19.03.01→26.01.01": 1,
+            "19.04.03→26.02.03": 1,
+            "19.04.04→26.02.04": 1,
+            "19.03.01→∅": 1,
+            "19.04.01→26.02.01": 1,
+        }
+        assert stats["legacy_refs_before"] == {
+            "19.03": 5,
+            "19.03.01": 2,
+            "19.03.03": 2,
+            "19.04": 2,
+            "19.04.01": 1,
+            "19.04.03": 1,
+            "19.04.04": 1,
+        }
+        assert stats["themes_inserted"] == 13
+        assert stats["legacy_themes_deleted"] == 12
+        assert stats["inconsistent_l1_19_26_after"] == 1  # inc_20, fica para a D1
+        assert _news_codes() == CORPUS
+        assert "26" not in _theme_codes()
+
+
+@pytest.mark.integration
+class TestApply:
+    def test_runner_aplica_remap_e_troca_os_temas(self):
+        result = _run_migrate("migrate", "--yes")
+        assert result.returncode == 0, result.stdout + result.stderr
+
+        assert _news_codes() == ESPERADO_APOS_034
+        temas = _theme_codes()
+        assert not temas & set(LEGADO)
+        assert {"19", "19.01", "19.02", "19.05", "26", "26.01", "26.02.05"} <= temas
+
+    def test_temas_26_com_rotulos_pais_e_full_name(self, mod):
+        _run_migrate("migrate", "--yes")
+        rows = _execute(
+            "SELECT code, label, level, parent_code, full_name FROM themes "
+            "WHERE code LIKE '26%' ORDER BY code COLLATE \"C\""
+        )
+        assert [r[:4] for r in rows] == sorted(mod.THEMES_26, key=lambda t: t[0])
+        assert all(full == f"{code} {label}" for code, label, _l, _p, full in rows)
+
+    def test_auditoria_uma_linha_por_artigo_tocado(self):
+        _run_migrate("migrate", "--yes")
+        audit = _audit()
+        assert {row[0] for row in audit} == TOCADOS
+        assert len(audit) == len(TOCADOS)
+        for uid, *codes, source, note, reverted in audit:
+            assert tuple(codes[:4]) == CORPUS[uid]
+            assert tuple(codes[4:]) == ESPERADO_APOS_034[uid]
+            assert source == "034_remap"
+            assert note in {"remap", "hierarquia_reconstruida", "l3_descartado"}
+            assert reverted is False
+
+    def test_artigos_fora_do_escopo_nao_sao_tocados(self):
+        antes = dict(_execute("SELECT unique_id, updated_at FROM news"))
+        _run_migrate("migrate", "--yes")
+        depois = dict(_execute("SELECT unique_id, updated_at FROM news"))
+        for uid in set(CORPUS) - TOCADOS:
+            assert depois[uid] == antes[uid], uid
+
+    def test_reaplicar_e_no_op(self, mod):
+        _run_migrate("migrate", "--yes")
+        stats = _run_module(mod, "migrate", dry_run=False)
+        assert stats["articles"] == 0
+        assert stats["themes_inserted"] == 0
+        assert _news_codes() == ESPERADO_APOS_034
+        assert len(_audit()) == len(TOCADOS)
+
+    def test_codigo_legado_fora_do_contrato_aborta(self, mod):
+        _seed_themes([("19.03.06", "Inesperado", 3, "19.03")])
+        with pytest.raises(ValueError, match="19.03.06"):
+            _run_module(mod, "migrate", dry_run=False)
+        assert _news_codes() == CORPUS
+
+    def test_banco_vazio_so_cria_o_26(self, mod):
+        _reset_database()
+        stats = _run_module(mod, "migrate", dry_run=False)
+        assert stats["articles"] == 0
+        assert _theme_codes() == {code for code, *_ in mod.THEMES_26}
+        stats = _run_module(mod, "rollback", dry_run=False)
+        assert _theme_codes() == set()
+
+
+@pytest.mark.integration
+class TestRollback:
+    def test_runner_rollback_volta_ao_estado_original(self):
+        _run_migrate("migrate", "--yes")
+        result = _run_migrate("rollback", "034", "--yes")
+        assert result.returncode == 0, result.stdout + result.stderr
+
+        assert _news_codes() == CORPUS
+        temas = _theme_codes()
+        assert set(LEGADO) <= temas
+        assert not {code for code in temas if code.startswith("26")}
+        legado = _execute(
+            "SELECT code, label, parent_code FROM themes "
+            "WHERE code LIKE '19.03%' OR code LIKE '19.04%'"
+        )
+        assert {(c, lbl, p) for c, lbl, _lv, p in THEMES if c in LEGADO} == set(legado)
+
+    def test_rollback_marca_a_campanha_e_registra_o_que_desfez(self):
+        _run_migrate("migrate", "--yes")
+        _run_migrate("rollback", "034", "--yes")
+        assert all(row[-1] for row in _audit())
+        desfeito = _audit("tema26-rollback")
+        assert {row[0] for row in desfeito} == TOCADOS
+        assert {row[9] for row in desfeito} == {"034_rollback"}
+
+    def test_rollback_desfaz_tambem_a_reclassificacao_por_llm(self, mod):
+        _run_migrate("migrate", "--yes")
+        # D1: o LLM move o inc_esd (ficou no 19) e um artigo de 05 para o 26
+        novo_esd = ("26", "26.01", "26.01.03", "26.01.03")
+        _set_news("inc_esd", novo_esd)
+        _log_audit("inc_esd", ESPERADO_APOS_034["inc_esd"], novo_esd)
+        novo_clima = ("26", "26.02", "26.02.01", "26.02.01")
+        _set_news("clima", novo_clima)
+        _log_audit("clima", CORPUS["clima"], novo_clima)
+
+        stats = _run_module(mod, "rollback", dry_run=False)
+
+        assert _news_codes() == CORPUS
+        assert stats["by_reason"] == {"revertido": 9}
+
+    def test_artigo_no_26_fora_da_auditoria_volta_pelo_mapa_inverso(self, mod):
+        _run_migrate("migrate", "--yes")
+        _set_news("novo_do_worker", ("26", "26.01", "26.01.03", "26.01.03"), insert=True)
+
+        stats = _run_module(mod, "rollback", dry_run=False)
+
+        assert _news_codes()["novo_do_worker"] == ("19", "19.03", "19.03.03", "19.03.03")
+        assert stats["by_reason"]["mapa_inverso"] == 1
+
+    def test_artigo_alterado_depois_e_fora_do_26_fica(self, mod):
+        _run_migrate("migrate", "--yes")
+        _set_news("dc1", ("05", "05.02", "05.02.01", "05.02.01"))
+
+        stats = _run_module(mod, "rollback", dry_run=False)
+
+        assert _news_codes()["dc1"] == ("05", "05.02", "05.02.01", "05.02.01")
+        assert stats["by_reason"]["mantido"] == 1
+
+    def test_dry_run_do_rollback_nao_muda_nada(self, mod):
+        _run_migrate("migrate", "--yes")
+        stats = _run_module(mod, "rollback", dry_run=True)
+        assert stats["dry_run"] is True
+        assert stats["by_reason"] == {"revertido": len(TOCADOS)}
+        assert _news_codes() == ESPERADO_APOS_034
+        assert not any(row[-1] for row in _audit())
+
+    def test_reaplicar_depois_do_rollback(self):
+        _run_migrate("migrate", "--yes")
+        _run_migrate("rollback", "034", "--yes")
+        result = _run_migrate("migrate", "--yes")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _news_codes() == ESPERADO_APOS_034
+        ativos = [row for row in _audit() if not row[-1]]
+        assert {row[0] for row in ativos} == TOCADOS
