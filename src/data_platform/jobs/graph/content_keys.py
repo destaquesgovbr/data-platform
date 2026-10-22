@@ -17,12 +17,18 @@ artigos: recall 92% e precisao 99% entre orgaos):
   >= 50 shingles) ou (dt <= 7 dias com J >= 0,8). J = Jaccard; C = contencao (comum / menor).
 - E2 (titulo): titulos normalizados iguais, >= 4 tokens, fora da lista de exclusao, dt <= 2 dias
   e (algum conteudo inutilizavel, ou J >= 0,1, ou C >= 0,3).
-- Guardas (so quando os titulos diferem):
+- Guardas, quando os titulos diferem ou quando o titulo e o mesmo no mesmo orgao (com os dois
+  conteudos utilizaveis; vale para E1 e E2):
   - G1, familia de modelo: membro = >= 2 irmaos do mesmo orgao com J >= 0,6, dt <= 1 dia e titulo
-    diferente (Enem/Censo por UF). Descarta E1 se os dois sao membros, ou se um e e J < 0,95.
-    Variantes por UF de um mesmo modelo sao conteudos DISTINTOS (decisao de produto, 21/10).
+    diferente, ou o mesmo titulo com J < 0,95 (Enem/Censo por UF; CIN por UF com o titulo do
+    modelo). Descarta o par se os dois sao membros, ou se um e e J < 0,95. Variantes por UF de
+    um mesmo modelo sao conteudos DISTINTOS (decisao de produto, 21/10).
   - G2, mesmo orgao: exige J >= 0,8, dt <= 1 dia e titulos que nao sejam troca de "slot"
     (notas recorrentes: "NIS de final 5/6", "Pe-de-Meia: nascidos em ...").
+  - O relatorio (§6.3) aplicava as guardas so com titulos diferentes; o mesmo titulo no mesmo
+    orgao juntava variantes por UF e comunicados recorrentes (revisao do PR, 22/10). As
+    capturas repetidas do scraper (J ~ 1, <= 1 dia) seguem juntando; o mesmo titulo entre
+    orgaos diferentes segue sem guarda.
 - Agrupamento por lider (estrela, nao componente conexo): em ordem de (published_at, unique_id),
   cada artigo entra no grupo do lider com quem tem aresta direta (o de maior J); sem aresta com
   nenhum lider, vira lider.
@@ -99,7 +105,7 @@ E2_TITLE_BLOCK_RE = re.compile(r"acompanhe a agenda|nis de final|recebem parcela
 G1_SIBLING_MIN_JACCARD = 0.6
 G1_SIBLING_MAX_DAYS = 1
 G1_MIN_SIBLINGS = 2
-G1_MEMBER_MIN_JACCARD = 0.95
+G1_MEMBER_MIN_JACCARD = 0.95  # "o mesmo texto": membro ainda junta; mesmo titulo nao e irmao
 
 # G2 (mesmo orgao) e troca de slot no titulo
 G2_MIN_JACCARD = 0.8
@@ -290,21 +296,26 @@ def _e1_similar(p: _Pair) -> bool:
 
 
 def _siblings(a: _Doc, b: _Doc, p: _Pair) -> bool:
+    """Irmaos do G1: mesmo orgao, J >= 0,6, dt <= 1 dia e titulo diferente — ou o mesmo titulo
+    com J < 0,95 (variante por UF com o titulo do modelo; a recaptura, J ~ 1, nao conta)."""
     return (
         a.agency == b.agency
         and p.jaccard >= G1_SIBLING_MIN_JACCARD
         and p.days <= G1_SIBLING_MAX_DAYS
-        and a.ntitle != b.ntitle
+        and (a.ntitle != b.ntitle or p.jaccard < G1_MEMBER_MIN_JACCARD)
     )
 
 
 def _is_edge(a: _Doc, b: _Doc, p: _Pair, family: set[int]) -> bool:
-    if p.title_edge:
-        return True
-    if not (a.usable and b.usable) or not _e1_similar(p):
+    if not (a.usable and b.usable):
+        # Sem J confiavel (tela de login, trecho curto), so a E2 decide, sem guardas.
+        return p.title_edge
+    if not (p.title_edge or _e1_similar(p)):
         return False
-    if a.ntitle == b.ntitle:
-        return True
+    if a.ntitle == b.ntitle and a.agency != b.agency:
+        return True  # mesmo titulo entre orgaos: republicacao (mec-Sergipe -> inep-Sergipe)
+    # Daqui em diante: titulos diferentes, ou o mesmo titulo no mesmo orgao (variantes por UF
+    # com o titulo do modelo e notas recorrentes tambem repetem o titulo).
     a_member, b_member = a.idx in family, b.idx in family
     if a_member and b_member:
         return False
@@ -434,7 +445,7 @@ def plan_content_keys(
                 pairs[(j, doc.idx)] = p
         window.add(doc)
 
-    # G1: familias de modelo (>= 2 irmaos do mesmo orgao com titulo diferente)
+    # G1: familias de modelo (>= 2 irmaos do mesmo orgao; ver _siblings)
     sibling_count: Counter[int] = Counter()
     for (j, i), p in pairs.items():
         if _siblings(docs[j], docs[i], p):
