@@ -160,3 +160,43 @@ class TestTypesenseListCommand:
 
 
 # Note: migrate command tests deferred - requires refactoring cli.py to be testable
+
+
+class TestBqMergeThemeChangesCommand:
+    """bq-merge-theme-changes: MERGE do fato_noticias a partir da auditoria do tema 26."""
+
+    ENV = {"DATABASE_URL": "postgresql://ro", "GCP_PROJECT_ID": "projeto-x"}
+
+    @patch("data_platform.jobs.bigquery.theme_changes.merge_theme_changes")
+    def test_dry_run_com_campanhas_padrao(self, mock_merge):
+        mock_merge.return_value = {"staged": 1, "fato_rows_to_update": 1, "merged": 0}
+
+        result = runner.invoke(app, ["bq-merge-theme-changes", "--dry-run"], env=self.ENV)
+
+        assert result.exit_code == 0, result.output
+        mock_merge.assert_called_once_with(
+            "postgresql://ro",
+            "projeto-x",
+            campaigns=("tema26", "tema26-rollback"),
+            dry_run=True,
+        )
+
+    @patch("data_platform.jobs.bigquery.theme_changes.merge_theme_changes")
+    def test_campanha_explicita(self, mock_merge):
+        mock_merge.return_value = {"staged": 0, "fato_rows_to_update": 0, "merged": 0}
+
+        result = runner.invoke(
+            app, ["bq-merge-theme-changes", "--campaign", "tema26"], env=self.ENV
+        )
+
+        assert result.exit_code == 0, result.output
+        assert mock_merge.call_args.kwargs == {"campaigns": ("tema26",), "dry_run": False}
+
+    @patch("data_platform.jobs.bigquery.theme_changes.merge_theme_changes")
+    def test_sem_database_url_falha(self, mock_merge):
+        result = runner.invoke(
+            app, ["bq-merge-theme-changes"], env={"DATABASE_URL": "", "GCP_PROJECT_ID": "p"}
+        )
+
+        assert result.exit_code != 0
+        mock_merge.assert_not_called()
