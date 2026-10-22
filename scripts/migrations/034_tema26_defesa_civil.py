@@ -49,8 +49,14 @@ Depois do apply: sync do Typesense (incremental desde 2025-09-01), BigQuery 002 
 `data-platform bq-merge-theme-changes`. Runbook completo no PR do DP-2.
 """
 
+import json
+import os
+import sys
 from collections import Counter
 from dataclasses import dataclass
+
+from loguru import logger
+from psycopg2.extras import execute_values
 
 CAMPAIGN = "tema26"
 SOURCE = "034_remap"
@@ -213,3 +219,390 @@ def transition_counts(pairs: list[tuple[ThemeCodes, ThemeCodes]]) -> dict[str, d
             if before != after:
                 counts[column][f"{before or '∅'}→{after or '∅'}"] += 1
     return {column: dict(counter.most_common()) for column, counter in counts.items()}
+
+
+# ---------------------------------------------------------------------------
+# SQL
+# ---------------------------------------------------------------------------
+
+LOCK_THEMES_SQL = """
+    SET LOCAL lock_timeout = '10s';
+    LOCK TABLE themes IN EXCLUSIVE MODE;
+"""
+
+CREATE_AUDIT_SQL = """
+CREATE TABLE IF NOT EXISTS news_theme_changes (
+    id                      BIGSERIAL PRIMARY KEY,
+    campaign                VARCHAR(50)  NOT NULL,
+    unique_id               VARCHAR(120) NOT NULL,
+    old_l1_code             VARCHAR(20),
+    old_l2_code             VARCHAR(20),
+    old_l3_code             VARCHAR(20),
+    old_most_specific_code  VARCHAR(20),
+    new_l1_code             VARCHAR(20),
+    new_l2_code             VARCHAR(20),
+    new_l3_code             VARCHAR(20),
+    new_most_specific_code  VARCHAR(20),
+    source                  VARCHAR(50)  NOT NULL,
+    note                    TEXT,
+    changed_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    reverted_at             TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_news_theme_changes_campaign_uid
+    ON news_theme_changes (campaign, unique_id);
+CREATE INDEX IF NOT EXISTS idx_news_theme_changes_changed_at
+    ON news_theme_changes (changed_at);
+COMMENT ON TABLE news_theme_changes IS
+    'Auditoria de mudanças de tema em news (códigos, não ids). Campanha tema26: '
+    'migração 034 (source 034_remap) e reclassificação por LLM (DS-1). '
+    'reverted_at preenchido pelo rollback da 034.';
+"""
+
+UPSERT_THEME_SQL = """
+    INSERT INTO themes (code, label, full_name, level, parent_code)
+    VALUES (%s, %s, %s, %s, %s)
+    ON CONFLICT (code) DO UPDATE SET
+        label = EXCLUDED.label,
+        full_name = EXCLUDED.full_name,
+        level = EXCLUDED.level,
+        parent_code = EXCLUDED.parent_code
+    RETURNING (xmax = 0) AS inserted
+"""
+
+THEME_IDS_SQL = "SELECT code, id FROM themes"
+
+LEGACY_PREFIX_SQL = r"SELECT code FROM themes WHERE code ~ '^19\.0[34](\.|$)'"
+
+_NEWS_CODES_SELECT = """
+    SELECT n.unique_id, t1.code, t2.code, t3.code, tm.code
+    FROM news n
+    LEFT JOIN themes t1 ON t1.id = n.theme_l1_id
+    LEFT JOIN themes t2 ON t2.id = n.theme_l2_id
+    LEFT JOIN themes t3 ON t3.id = n.theme_l3_id
+    LEFT JOIN themes tm ON tm.id = n.most_specific_theme_id
+"""
+
+_REFERENCES_IDS = """
+    n.theme_l1_id = ANY(%(ids)s) OR n.theme_l2_id = ANY(%(ids)s)
+    OR n.theme_l3_id = ANY(%(ids)s) OR n.most_specific_theme_id = ANY(%(ids)s)
+"""
+
+SELECT_TOUCHED_SQL = (
+    _NEWS_CODES_SELECT + "WHERE " + _REFERENCES_IDS + "ORDER BY n.unique_id FOR UPDATE OF n"
+)
+
+SELECT_ROLLBACK_SCOPE_SQL = (
+    _NEWS_CODES_SELECT
+    + "WHERE n.unique_id = ANY(%(uids)s) OR "
+    + _REFERENCES_IDS
+    + "ORDER BY n.unique_id FOR UPDATE OF n"
+)
+
+COUNT_REFERENCES_SQL = "SELECT COUNT(*) FROM news n WHERE " + _REFERENCES_IDS
+
+INSERT_AUDIT_SQL = """
+    INSERT INTO news_theme_changes (
+        campaign, unique_id,
+        old_l1_code, old_l2_code, old_l3_code, old_most_specific_code,
+        new_l1_code, new_l2_code, new_l3_code, new_most_specific_code,
+        source, note
+    ) VALUES %s
+"""
+
+UPDATE_NEWS_SQL = """
+    UPDATE news AS n SET
+        theme_l1_id = v.l1,
+        theme_l2_id = v.l2,
+        theme_l3_id = v.l3,
+        most_specific_theme_id = v.ms
+    FROM (VALUES %s) AS v (unique_id, l1, l2, l3, ms)
+    WHERE n.unique_id = v.unique_id
+"""
+UPDATE_NEWS_TEMPLATE = "(%s, %s::int, %s::int, %s::int, %s::int)"
+
+DELETE_THEMES_SQL = "DELETE FROM themes WHERE code = ANY(%s)"
+
+# Hierarquias incoerentes que sobram em 19/26 depois do remap (fora do escopo da 034).
+INCONSISTENT_19_26_SQL = """
+    SELECT COUNT(*) FROM news n
+    JOIN themes t1 ON t1.id = n.theme_l1_id
+    LEFT JOIN themes t2 ON t2.id = n.theme_l2_id
+    LEFT JOIN themes t3 ON t3.id = n.theme_l3_id
+    WHERE t1.code IN ('19', '26')
+      AND ((t2.id IS NOT NULL AND t2.parent_code IS DISTINCT FROM t1.code)
+           OR (t3.id IS NOT NULL AND t3.parent_code IS DISTINCT FROM t2.code))
+"""
+
+CAMPAIGN_FIRST_OLD_SQL = """
+    SELECT DISTINCT ON (unique_id) unique_id,
+        old_l1_code, old_l2_code, old_l3_code, old_most_specific_code
+    FROM news_theme_changes
+    WHERE campaign = %s AND reverted_at IS NULL
+    ORDER BY unique_id, id ASC
+"""
+
+CAMPAIGN_LAST_NEW_SQL = """
+    SELECT DISTINCT ON (unique_id) unique_id,
+        new_l1_code, new_l2_code, new_l3_code, new_most_specific_code
+    FROM news_theme_changes
+    WHERE campaign = %s AND reverted_at IS NULL
+    ORDER BY unique_id, id DESC
+"""
+
+MARK_REVERTED_SQL = """
+    UPDATE news_theme_changes SET reverted_at = NOW()
+    WHERE campaign = %s AND reverted_at IS NULL
+"""
+
+DRY_RUN_SAVEPOINT = "tema26_034_dry_run"
+
+
+# ---------------------------------------------------------------------------
+# Execução
+# ---------------------------------------------------------------------------
+
+
+def _upsert_themes(cursor, themes) -> tuple[int, int]:
+    inserted = updated = 0
+    for code, label, level, parent in themes:
+        cursor.execute(UPSERT_THEME_SQL, (code, label, f"{code} {label}", level, parent))
+        if cursor.fetchone()[0]:
+            inserted += 1
+        else:
+            updated += 1
+    return inserted, updated
+
+
+def _theme_ids(cursor) -> dict[str, int]:
+    cursor.execute(THEME_IDS_SQL)
+    return dict(cursor.fetchall())
+
+
+def _rows_to_codes(rows) -> dict[str, ThemeCodes]:
+    return {row[0]: ThemeCodes(*row[1:]) for row in rows}
+
+
+def _ids_for(codes: ThemeCodes, ids: dict[str, int]) -> tuple:
+    missing = [code for code in codes.values() if code is not None and code not in ids]
+    if missing:
+        raise ValueError(f"códigos sem linha em themes: {sorted(set(missing))}")
+    return tuple(ids[code] if code is not None else None for code in codes.values())
+
+
+def _write_changes(
+    cursor,
+    changes: list[tuple[str, ThemeCodes, ThemeCodes, str]],
+    ids: dict[str, int],
+    campaign: str,
+    source: str,
+) -> None:
+    """Auditoria + UPDATE de news para [(unique_id, antigo, novo, nota)]."""
+    if not changes:
+        return
+    execute_values(
+        cursor,
+        INSERT_AUDIT_SQL,
+        [
+            (campaign, uid, *old.values(), *new.values(), source, note)
+            for uid, old, new, note in changes
+        ],
+        page_size=1000,
+    )
+    execute_values(
+        cursor,
+        UPDATE_NEWS_SQL,
+        [(uid, *_ids_for(new, ids)) for uid, _old, new, _note in changes],
+        template=UPDATE_NEWS_TEMPLATE,
+        page_size=1000,
+    )
+
+
+def _delete_by_level(cursor, themes, levels) -> int:
+    deleted = 0
+    for level in levels:
+        codes = [code for code, _label, lvl, _parent in themes if lvl == level]
+        cursor.execute(DELETE_THEMES_SQL, (codes,))
+        deleted += cursor.rowcount
+    return deleted
+
+
+def _count_references(cursor, ids: list[int]) -> int:
+    if not ids:
+        return 0
+    cursor.execute(COUNT_REFERENCES_SQL, {"ids": ids})
+    return cursor.fetchone()[0]
+
+
+def _apply(cursor) -> dict:
+    cursor.execute(LOCK_THEMES_SQL)
+    cursor.execute(CREATE_AUDIT_SQL)
+
+    cursor.execute(LEGACY_PREFIX_SQL)
+    unexpected = sorted({code for (code,) in cursor.fetchall()} - LEGACY_CODES)
+    if unexpected:
+        raise ValueError(f"códigos em 19.03/19.04 fora do contrato do tema 26: {unexpected}")
+
+    inserted, updated = _upsert_themes(cursor, THEMES_26)
+    ids = _theme_ids(cursor)
+    legacy_ids = [ids[code] for code in sorted(LEGACY_CODES) if code in ids]
+
+    touched: dict[str, ThemeCodes] = {}
+    if legacy_ids:
+        cursor.execute(SELECT_TOUCHED_SQL, {"ids": legacy_ids})
+        touched = _rows_to_codes(cursor.fetchall())
+
+    changes = []
+    rules: Counter = Counter()
+    refs_before: Counter = Counter()
+    for uid, old in touched.items():
+        new, rule = remap(old)
+        changes.append((uid, old, new, rule))
+        rules[rule] += 1
+        for code in set(old.values()) & LEGACY_CODES:
+            refs_before[code] += 1
+
+    _write_changes(cursor, changes, ids, CAMPAIGN, SOURCE)
+
+    remaining = _count_references(cursor, legacy_ids)
+    if remaining:
+        raise RuntimeError(f"{remaining} artigos ainda apontam para 19.03/19.04 depois do remap")
+    deleted = _delete_by_level(cursor, LEGACY_THEMES, levels=(3, 2))
+
+    cursor.execute(INCONSISTENT_19_26_SQL)
+    inconsistent = cursor.fetchone()[0]
+
+    return {
+        "campaign": CAMPAIGN,
+        "themes_inserted": inserted,
+        "themes_updated": updated,
+        "articles": len(changes),
+        "by_rule": dict(rules.most_common()),
+        "legacy_refs_before": dict(sorted(refs_before.items())),
+        "transitions": transition_counts([(old, new) for _uid, old, new, _r in changes]),
+        "by_new_most_specific": dict(
+            Counter(new.most_specific for _uid, _old, new, _r in changes).most_common()
+        ),
+        "legacy_themes_deleted": deleted,
+        "inconsistent_l1_19_26_after": inconsistent,
+    }
+
+
+def _revert(cursor) -> dict:
+    cursor.execute(LOCK_THEMES_SQL)
+    cursor.execute(CREATE_AUDIT_SQL)
+
+    ids = _theme_ids(cursor)
+    legacy_inserted = 0
+    if "19" in ids:
+        legacy_inserted, _ = _upsert_themes(cursor, LEGACY_THEMES)
+        ids = _theme_ids(cursor)
+    ids_26 = [ids[code] for code in sorted(CODES_26) if code in ids]
+
+    cursor.execute(CAMPAIGN_FIRST_OLD_SQL, (CAMPAIGN,))
+    first_old = _rows_to_codes(cursor.fetchall())
+    cursor.execute(CAMPAIGN_LAST_NEW_SQL, (CAMPAIGN,))
+    last_new = _rows_to_codes(cursor.fetchall())
+
+    current: dict[str, ThemeCodes] = {}
+    if first_old or ids_26:
+        cursor.execute(SELECT_ROLLBACK_SCOPE_SQL, {"uids": sorted(first_old), "ids": ids_26})
+        current = _rows_to_codes(cursor.fetchall())
+
+    changes = []
+    reasons: Counter = Counter()
+    for uid, now in current.items():
+        if uid in first_old:
+            target, reason = rollback_target(now, first_old[uid], last_new[uid])
+        else:
+            target, reason = inverse(now), "mapa_inverso"
+        reasons[reason] += 1
+        if target is not None and target != now:
+            changes.append((uid, now, target, reason))
+
+    _write_changes(cursor, changes, ids, ROLLBACK_CAMPAIGN, ROLLBACK_SOURCE)
+    cursor.execute(MARK_REVERTED_SQL, (CAMPAIGN,))
+    marked = cursor.rowcount
+
+    remaining = _count_references(cursor, ids_26)
+    if remaining:
+        raise RuntimeError(f"{remaining} artigos ainda apontam para o 26 depois do rollback")
+    deleted = _delete_by_level(cursor, THEMES_26, levels=(3, 2, 1))
+
+    return {
+        "campaign": CAMPAIGN,
+        "legacy_themes_restored": legacy_inserted,
+        "articles": len(changes),
+        "by_reason": dict(reasons.most_common()),
+        "transitions": transition_counts([(old, new) for _uid, old, new, _r in changes]),
+        "campaign_rows_reverted": marked,
+        "themes_26_deleted": deleted,
+    }
+
+
+def _run(conn, action, dry_run: bool, label: str) -> dict:
+    """Executa `action` na transação do runner; no dry-run, num SAVEPOINT desfeito."""
+    cursor = conn.cursor()
+    try:
+        if dry_run:
+            cursor.execute(f"SAVEPOINT {DRY_RUN_SAVEPOINT}")
+        stats = action(cursor)
+        stats["dry_run"] = dry_run
+        if dry_run:
+            cursor.execute(f"ROLLBACK TO SAVEPOINT {DRY_RUN_SAVEPOINT}")
+            cursor.execute(f"RELEASE SAVEPOINT {DRY_RUN_SAVEPOINT}")
+        # O runner descarta o histórico do dry-run (rollback): o log é onde as contagens ficam.
+        logger.info(
+            f"034 {label}{' dry-run' if dry_run else ''}: " + json.dumps(stats, ensure_ascii=False)
+        )
+        return stats
+    finally:
+        cursor.close()
+
+
+def describe() -> str:
+    return "Tema 26 Defesa Civil e Gestão de Desastres: remap de 19.03/19.04 com auditoria"
+
+
+def migrate(conn, dry_run: bool = False) -> dict:
+    return _run(conn, _apply, dry_run, "migrate")
+
+
+def rollback(conn, dry_run: bool = False) -> dict:
+    return _run(conn, _revert, dry_run, "rollback")
+
+
+if __name__ == "__main__":
+    import argparse
+
+    import psycopg2
+
+    parser = argparse.ArgumentParser(description=describe())
+    parser.add_argument("--dry-run", action="store_true", help="Executa e desfaz; só contagens")
+    parser.add_argument("--confirm", action="store_true", help="Aplica (commit)")
+    parser.add_argument("--rollback", action="store_true", help="Desfaz pela auditoria")
+    args = parser.parse_args()
+
+    if not args.dry_run and not args.confirm:
+        print("Must specify --dry-run or --confirm")
+        sys.exit(1)
+
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        print("DATABASE_URL not set")
+        sys.exit(1)
+
+    conn = psycopg2.connect(database_url)
+    try:
+        fn = rollback if args.rollback else migrate
+        result = fn(conn, dry_run=args.dry_run)
+        if args.dry_run:
+            conn.rollback()
+        else:
+            conn.commit()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    except Exception as e:
+        conn.rollback()
+        print(f"Error: {e}")
+        sys.exit(1)
+    finally:
+        conn.close()

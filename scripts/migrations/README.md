@@ -51,6 +51,16 @@ migration and leave a later backfill for its own window, use `--target`, e.g.
 `migrate --target 032` (leaves `033_backfill_readability_flesch_ptbr.py` pending), and
 dry-run the backfill first: its preview reports the pending count and a projected run time.
 
+## Theme changes (034)
+
+`034_tema26_defesa_civil.py` creates theme 26 (Defesa Civil e Gestão de Desastres), remaps
+`news` from 19.03*/19.04* to 26.01*/26.02* in one transaction and deletes the old codes. Every
+change goes to the `news_theme_changes` audit table (codes, campaign `tema26`), which the LLM
+reclassification (data-science) also writes to. Its dry-run applies everything inside a
+savepoint and rolls it back, logging the counts per code and per rule; its rollback works from
+the audit table. Never use `scripts/populate_themes.py` in production (it deletes `themes` and
+reinserts with new ids).
+
 ## Current Migrations
 
 | # | File | Type | Description |

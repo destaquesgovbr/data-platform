@@ -14,6 +14,7 @@ on:
       - 'tests/integration/test_trend_detection_integration.py'
       - 'tests/integration/test_backfill_features_window_integration.py'
       - 'tests/integration/test_entity_graph_integration.py'
+      - 'tests/integration/test_tema26_migration_integration.py'
   workflow_dispatch:
 
 jobs:
@@ -71,4 +72,5 @@ jobs:
           tests/integration/test_trend_detection_integration.py
           tests/integration/test_backfill_features_window_integration.py
           tests/integration/test_entity_graph_integration.py
+          tests/integration/test_tema26_migration_integration.py
           -v --tb=short --no-cov
