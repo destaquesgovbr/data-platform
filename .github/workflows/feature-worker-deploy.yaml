@@ -5,6 +5,8 @@ on:
     branches: [ "main" ]
     paths:
       - 'src/data_platform/workers/feature_worker/**'
+      # Flesch pt-BR compartilhado com o Composer (fill_flesch_ptbr): o worker importa daqui
+      - 'src/data_platform/jobs/features/**'
       - 'docker/feature-worker/**'
       - 'pyproject.toml'
       - 'poetry.lock'
