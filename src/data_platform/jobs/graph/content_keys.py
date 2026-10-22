@@ -24,11 +24,12 @@ artigos: recall 92% e precisao 99% entre orgaos):
     modelo). Descarta o par se os dois sao membros, ou se um e e J < 0,95. Variantes por UF de
     um mesmo modelo sao conteudos DISTINTOS (decisao de produto, 21/10).
   - G2, mesmo orgao: exige J >= 0,8, dt <= 1 dia e titulos que nao sejam troca de "slot"
-    (notas recorrentes: "NIS de final 5/6", "Pe-de-Meia: nascidos em ...").
+    (notas recorrentes: "NIS de final 5/6", "Pe-de-Meia: nascidos em ..."). Com o mesmo
+    titulo e J >= 0,95 (o mesmo texto: recaptura ou repostagem do proprio orgao) basta a E1,
+    ate 7 dias.
   - O relatorio (§6.3) aplicava as guardas so com titulos diferentes; o mesmo titulo no mesmo
-    orgao juntava variantes por UF e comunicados recorrentes (revisao do PR, 22/10). As
-    capturas repetidas do scraper (J ~ 1, <= 1 dia) seguem juntando; o mesmo titulo entre
-    orgaos diferentes segue sem guarda.
+    orgao juntava variantes por UF e comunicados recorrentes (revisao do PR, 22/10). O mesmo
+    titulo entre orgaos diferentes segue sem guarda.
 - Agrupamento por lider (estrela, nao componente conexo): em ordem de (published_at, unique_id),
   cada artigo entra no grupo do lider com quem tem aresta direta (o de maior J); sem aresta com
   nenhum lider, vira lider.
@@ -322,6 +323,8 @@ def _is_edge(a: _Doc, b: _Doc, p: _Pair, family: set[int]) -> bool:
     if (a_member or b_member) and p.jaccard < G1_MEMBER_MIN_JACCARD:
         return False
     if a.agency == b.agency:
+        if a.ntitle == b.ntitle and p.jaccard >= G1_MEMBER_MIN_JACCARD:
+            return True  # o mesmo texto e o mesmo titulo: recaptura ou repostagem do orgao
         if p.jaccard < G2_MIN_JACCARD or p.days > G2_MAX_DAYS:
             return False
         if slot_variant(a.ntitle, b.ntitle):
