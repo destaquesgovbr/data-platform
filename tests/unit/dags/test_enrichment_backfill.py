@@ -227,12 +227,25 @@ class TestConfiguracaoDoDag:
             "daily_token_quota": {HAIKU_45: 20000000},
             "quota_fraction": 0.8,
             "dry_run": False,
+            "theme_code": None,
         }
 
     def test_param_select_restrito_aos_modos_do_script(self, monkeypatch):
         _, captured = _load(monkeypatch)
         schema = captured["dag_kwargs"]["params"]["select"].schema
-        assert schema["enum"] == ["mock", "null-theme", "null-summary"]
+        assert schema["enum"] == [
+            "mock",
+            "null-theme",
+            "null-summary",
+            "theme-code",
+            "theme26-candidates",
+        ]
+
+    def test_param_theme_code_opcional_com_formato_de_codigo(self, monkeypatch):
+        _, captured = _load(monkeypatch)
+        schema = captured["dag_kwargs"]["params"]["theme_code"].schema
+        assert schema["type"] == ["null", "string"]
+        assert schema["pattern"] == r"^\d{2}(\.\d{2}){0,2}$"
 
 
 # --------------------------------------------------------------------------
@@ -420,3 +433,99 @@ class TestValidacaoDosParams:
         module, captured = _load(monkeypatch)
         with pytest.raises(ValueError, match="date_to"):
             module.build_overrides(_default_params(captured) | {"select": select, "date_to": ""})
+
+
+# --------------------------------------------------------------------------
+# Tema 26 (D1): reclassificação por código de tema e candidatos por regra
+# --------------------------------------------------------------------------
+
+
+class TestSelecoesDoTema26:
+    """Contrato com o reenrich_combined_window.py do DS-1 (data-science).
+
+    - `--select theme-code --theme-code <c>`: artigos com tema no código <c> (L1, L2 ou L3);
+    - `--select theme26-candidates`: L1 19, mais os de 04/05.02.01/15.02.03 do MDR ou com
+      "defesa civil", "calamidade", "situação de emergência", "estado de emergência" ou
+      "desastre" no título/conteúdo.
+    Nenhuma das duas disputa artigo com o worker ao vivo (só pegam artigo já com tema),
+    então date_to é opcional, como no mock.
+    """
+
+    def _params(self, captured, **override) -> dict:
+        return _default_params(captured) | {"date_from": "2025-09-01", "date_to": None} | override
+
+    def test_theme_code_passa_o_codigo_depois_do_select(self, monkeypatch):
+        module, captured = _load(monkeypatch)
+        overrides = module.build_overrides(
+            self._params(captured, select="theme-code", theme_code="19")
+        )
+        assert _container(overrides)["args"] == [
+            "--select",
+            "theme-code",
+            "--theme-code",
+            "19",
+            "--date-from",
+            "2025-09-01",
+            "--limit",
+            "400",
+            "--workers",
+            "2",
+        ]
+
+    @pytest.mark.parametrize("codigo", ["19", "05.02", "05.02.01", " 15.02.03 "])
+    def test_theme_code_aceita_l1_l2_e_l3(self, monkeypatch, codigo):
+        module, captured = _load(monkeypatch)
+        overrides = module.build_overrides(
+            self._params(captured, select="theme-code", theme_code=codigo)
+        )
+        args = _container(overrides)["args"]
+        assert args[args.index("--theme-code") + 1] == codigo.strip()
+
+    @pytest.mark.parametrize("codigo", [None, "", "  "])
+    def test_theme_code_obrigatorio_com_select_theme_code(self, monkeypatch, codigo):
+        module, captured = _load(monkeypatch)
+        with pytest.raises(ValueError, match="theme_code"):
+            module.build_overrides(self._params(captured, select="theme-code", theme_code=codigo))
+
+    @pytest.mark.parametrize("codigo", ["9", "19.3", "abc", "19.03.01.01", "19-03", 19])
+    def test_theme_code_com_formato_invalido_falha(self, monkeypatch, codigo):
+        module, captured = _load(monkeypatch)
+        with pytest.raises(ValueError, match="theme_code"):
+            module.build_overrides(self._params(captured, select="theme-code", theme_code=codigo))
+
+    @pytest.mark.parametrize("select", ["mock", "null-theme", "null-summary", "theme26-candidates"])
+    def test_theme_code_so_vale_com_select_theme_code(self, monkeypatch, select):
+        module, captured = _load(monkeypatch)
+        params = self._params(captured, select=select, theme_code="19", date_to="2026-10-21")
+        with pytest.raises(ValueError, match="theme_code"):
+            module.build_overrides(params)
+
+    def test_candidatos_do_tema_26_sem_date_to(self, monkeypatch):
+        module, captured = _load(monkeypatch)
+        overrides = module.build_overrides(self._params(captured, select="theme26-candidates"))
+        assert _container(overrides)["args"] == [
+            "--select",
+            "theme26-candidates",
+            "--date-from",
+            "2025-09-01",
+            "--limit",
+            "400",
+            "--workers",
+            "2",
+        ]
+
+    def test_candidatos_do_tema_26_com_date_to_e_dry_run(self, monkeypatch):
+        module, captured = _load(monkeypatch)
+        overrides = module.build_overrides(
+            self._params(captured, select="theme26-candidates", date_to="2026-11-11", dry_run=True)
+        )
+        args = _container(overrides)["args"]
+        assert args[args.index("--date-to") + 1] == "2026-11-11"
+        assert args[-1] == "--dry-run"
+
+    def test_env_do_job_nao_muda(self, monkeypatch):
+        module, captured = _load(monkeypatch)
+        overrides = module.build_overrides(
+            self._params(captured, select="theme-code", theme_code="19")
+        )
+        assert _env(overrides)["BACKFILL_SCRIPT"] == "reenrich_combined_window.py"
