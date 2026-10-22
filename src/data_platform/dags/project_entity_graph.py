@@ -42,7 +42,8 @@ logger = logging.getLogger(__name__)
 
     0. **`news.content_key`** (chave de quase-duplicata H5, DP-1b): recalcula os ultimos
        10 dias (lendo 7 dias antes como contexto) e grava so o que mudou. Se falhar, o
-       grafo roda assim mesmo com a chave anterior.
+       grafo roda assim mesmo com a chave anterior. Sem a coluna (migracao 035 pendente ou
+       revertida), a task sai com aviso e o grafo conta pelo `content_hash`.
     1. **Rebuild `news_entities`** de `news_features.features->'entities'`
        (apenas `canonical_id` NAO-NULL), join `news` p/ `published_at`.
     2. **Recompute `entity_edges` co_mention** via self-join (`a.entity_id < b.entity_id`,

@@ -532,6 +532,27 @@ UPDATE_CONTENT_KEYS_SQL = """
 """
 _UPDATE_TEMPLATE = "(%s, %s::text)"
 
+# A coluna vem da migracao 035. Sem ela (codigo em producao antes da 035, ou 035 revertida), a
+# task da DAG sai com aviso e o grafo cai no content_hash (edges.article_content_key_sql).
+HAS_CONTENT_KEY_COLUMN_SQL = """
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'news' AND column_name = 'content_key'
+    )
+"""
+MISSING_COLUMN_REASON = "news.content_key ausente: migracao 035 nao aplicada (ou revertida)"
+
+
+def has_content_key_column(conn: Any) -> bool:
+    """news.content_key existe (migracao 035 aplicada)?"""
+    cursor = conn.cursor()
+    try:
+        cursor.execute(HAS_CONTENT_KEY_COLUMN_SQL)
+        row = cursor.fetchone()
+        return bool(row and row[0])
+    finally:
+        cursor.close()
+
 
 def build_select_articles(
     start: datetime | None, end: datetime | None
@@ -628,13 +649,21 @@ def compute_content_keys(
 def run_content_keys(
     db_url: str, days: int = RECOMPUTE_DAYS, now: datetime | None = None
 ) -> dict[str, Any]:
-    """Tarefa da DAG: recalcula os ultimos `days` dias numa transacao."""
+    """Tarefa da DAG: recalcula os ultimos `days` dias numa transacao.
+
+    Sem a coluna (035 pendente ou revertida) sai com aviso e status "skipped": a ordem entre o
+    merge e a 035 nao derruba a DAG, e o grafo segue no content_hash.
+    """
     import psycopg2
 
     since = (now or datetime.now(UTC)) - timedelta(days=days)
     conn = psycopg2.connect(db_url)
     conn.autocommit = False
     try:
+        if not has_content_key_column(conn):
+            logger.warning("content_keys: %s; nada a calcular", MISSING_COLUMN_REASON)
+            conn.rollback()
+            return {"status": "skipped", "reason": MISSING_COLUMN_REASON}
         result = compute_content_keys(conn, since=since)
         conn.commit()
         return result

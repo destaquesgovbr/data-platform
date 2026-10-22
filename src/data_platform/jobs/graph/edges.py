@@ -12,6 +12,8 @@ Saida: news_entities (mencao normalizada) -> entity_edges (co-mencao + estrutura
 
 import logging
 
+from data_platform.jobs.graph.content_keys import MISSING_COLUMN_REASON, has_content_key_column
+
 logger = logging.getLogger(__name__)
 
 # Threshold de co-mencao: so arestas sustentadas por >= 2 artigos viram aresta.
@@ -38,6 +40,28 @@ ARTICLE_CONTENT_KEY_SQL = """
     SELECT n.unique_id, COALESCE(n.content_key, n.content_hash, n.unique_id) AS content_key
     FROM news n
 """
+
+# Sem news.content_key (codigo em producao antes da 035, ou 035 revertida): so o hash exato, como
+# antes do DP-1b. O grafo nao depende da ordem entre o merge e a migracao.
+ARTICLE_CONTENT_KEY_FALLBACK_SQL = """
+    SELECT n.unique_id, COALESCE(n.content_hash, n.unique_id) AS content_key
+    FROM news n
+"""
+
+
+def article_content_key_sql(conn) -> str:
+    """ARTICLE_CONTENT_KEY_SQL se news.content_key existe; senao o fallback, com aviso."""
+    if has_content_key_column(conn):
+        return ARTICLE_CONTENT_KEY_SQL
+    logger.warning(
+        "grafo: %s; contando conteudos distintos pelo content_hash", MISSING_COLUMN_REASON
+    )
+    return ARTICLE_CONTENT_KEY_FALLBACK_SQL
+
+
+def _with_content_key(sql: str, content_key_sql: str) -> str:
+    """Troca o fragmento ARTICLE_CONTENT_KEY_SQL embutido em `sql` por `content_key_sql`."""
+    return sql.replace(ARTICLE_CONTENT_KEY_SQL, content_key_sql)
 
 
 # ---------------------------------------------------------------------------
@@ -136,16 +160,21 @@ RECOMPUTE_CO_MENTION_EDGES_SQL = (
 )
 
 
-def recompute_co_mention_edges(conn, min_weight: int = CO_MENTION_MIN_WEIGHT) -> int:
+def recompute_co_mention_edges(
+    conn,
+    min_weight: int = CO_MENTION_MIN_WEIGHT,
+    content_key_sql: str = ARTICLE_CONTENT_KEY_SQL,
+) -> int:
     """Recomputa as arestas kind='co_mention' (idempotente: DELETE da kind + INSERT).
 
+    `content_key_sql`: chave de conteudo por artigo (ver article_content_key_sql).
     Retorna o numero de arestas inseridas.
     """
     cursor = conn.cursor()
     try:
         cursor.execute(DELETE_CO_MENTION_EDGES_SQL, {"kind": KIND_CO_MENTION})
         cursor.execute(
-            RECOMPUTE_CO_MENTION_EDGES_SQL,
+            _with_content_key(RECOMPUTE_CO_MENTION_EDGES_SQL, content_key_sql),
             {"kind": KIND_CO_MENTION, "min_weight": min_weight},
         )
         inserted = cursor.rowcount
@@ -308,18 +337,19 @@ UPSERT_ENTITY_GRAPH_META_SQL = (
 )
 
 
-def recompute_entity_stats(conn) -> dict:
+def recompute_entity_stats(conn, content_key_sql: str = ARTICLE_CONTENT_KEY_SQL) -> dict:
     """Recomputa entity_stats e entity_graph_meta a partir de news_entities.
 
-    Roda depois do rebuild de news_entities, na mesma transacao. Retorna as contagens.
+    Roda depois do rebuild de news_entities, na mesma transacao. `content_key_sql`: chave de
+    conteudo por artigo (ver article_content_key_sql). Retorna as contagens.
     """
     cursor = conn.cursor()
     try:
         cursor.execute(DELETE_STALE_ENTITY_STATS_SQL)
         stale_removed = cursor.rowcount
-        cursor.execute(UPSERT_ENTITY_STATS_SQL)
+        cursor.execute(_with_content_key(UPSERT_ENTITY_STATS_SQL, content_key_sql))
         entity_stats = cursor.rowcount
-        cursor.execute(UPSERT_ENTITY_GRAPH_META_SQL)
+        cursor.execute(_with_content_key(UPSERT_ENTITY_GRAPH_META_SQL, content_key_sql))
         total_articles, total_unique_content = cursor.fetchone()
         logger.info(
             "entity_stats recomputadas: %s entidades (%s removidas); corpus: %s artigos, "
@@ -359,10 +389,13 @@ def project_entity_graph(db_url: str, min_weight: int = CO_MENTION_MIN_WEIGHT) -
     conn = psycopg2.connect(db_url)
     conn.autocommit = False
     try:
+        content_key_sql = article_content_key_sql(conn)
         mentions = rebuild_news_entities(conn)
-        co_mention = recompute_co_mention_edges(conn, min_weight=min_weight)
+        co_mention = recompute_co_mention_edges(
+            conn, min_weight=min_weight, content_key_sql=content_key_sql
+        )
         structural = recompute_structural_edges(conn)
-        stats = recompute_entity_stats(conn)
+        stats = recompute_entity_stats(conn, content_key_sql=content_key_sql)
         conn.commit()
         return {
             "status": "ok",
