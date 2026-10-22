@@ -1,11 +1,15 @@
 """
-Backfill de readability_flesch_ptbr em news_features para os artigos existentes (DP-1).
+Backfill de readability_flesch_ptbr nas linhas existentes de news_features (DP-1).
 
-Pagina news por unique_id (keyset, lotes de BATCH_SIZE). Para cada artigo com content e
-sem a chave em news_features.features, calcula compute_readability_flesch_ptbr (a mesma
-função do feature-worker) e grava o lote num único INSERT ... ON CONFLICT DO UPDATE com
-merge JSONB (||), via execute_values, com commit por lote. As demais chaves da linha
-ficam; artigo sem linha em news_features ganha uma só com a chave nova.
+Só UPDATE: pagina news_features por unique_id (keyset na PK, lotes de BATCH_SIZE, INNER
+JOIN com news para ler o content). Para cada linha com content e sem a chave, calcula
+compute_readability_flesch_ptbr (a mesma função do feature-worker) e grava o lote num
+único UPDATE ... FROM (VALUES ...) com merge JSONB (||), via execute_values, com commit
+por lote. As demais chaves da linha ficam.
+
+Notícia sem linha em news_features não ganha linha nova: as ~153,8 mil notícias nessa
+situação (quase todas anteriores a 2022) ficam de fora por decisão (somariam +75% de
+linhas à tabela). Artigos novos recebem a chave do feature-worker.
 
 Retomável: a seleção pula quem já tem a chave (do backfill ou do feature-worker já
 deployado). Textos com menos de 10 palavras não ganham a chave (contados em too_short)
@@ -42,33 +46,34 @@ FEATURE_KEY = "readability_flesch_ptbr"
 BATCH_SIZE = 2000
 SAMPLE_SIZE = 1000
 
+# features é NOT NULL (migração 004): sem COALESCE.
 _PENDING_FILTER = """
-    FROM news n
-    LEFT JOIN news_features nf ON nf.unique_id = n.unique_id
+    FROM news_features nf
+    JOIN news n ON n.unique_id = nf.unique_id
     WHERE n.content IS NOT NULL
       AND n.content <> ''
-      AND NOT COALESCE(nf.features ? %(key)s, FALSE)
+      AND NOT (nf.features ? %(key)s)
 """
 
 COUNT_PENDING_SQL = "SELECT COUNT(*)" + _PENDING_FILTER
 
 SELECT_PENDING_SQL = (
-    "SELECT n.unique_id, n.content"
+    "SELECT nf.unique_id, n.content"
     + _PENDING_FILTER
     + """
-      AND n.unique_id > %(after)s
-    ORDER BY n.unique_id
+      AND nf.unique_id > %(after)s
+    ORDER BY nf.unique_id
     LIMIT %(limit)s
 """
 )
 
-UPSERT_SQL = """
-    INSERT INTO news_features (unique_id, features)
-    VALUES %s
-    ON CONFLICT (unique_id) DO UPDATE SET
-        features = news_features.features || EXCLUDED.features
+UPDATE_SQL = """
+    UPDATE news_features AS nf
+    SET features = nf.features || v.features
+    FROM (VALUES %s) AS v (unique_id, features)
+    WHERE nf.unique_id = v.unique_id
 """
-UPSERT_TEMPLATE = "(%s, %s::jsonb)"
+UPDATE_TEMPLATE = "(%s, %s::jsonb)"
 
 COUNT_WITH_KEY_SQL = "SELECT COUNT(*) FROM news_features WHERE features ? %(key)s"
 
@@ -103,7 +108,10 @@ def project_seconds(sample_seconds: float, sample_size: int, pending: int) -> fl
 
 
 def describe() -> str:
-    return "Backfill de readability_flesch_ptbr (Flesch pt-BR, Martins/1996) em news_features"
+    return (
+        "Backfill de readability_flesch_ptbr (Flesch pt-BR, Martins/1996) nas linhas "
+        "existentes de news_features (só UPDATE)"
+    )
 
 
 def migrate(conn, dry_run: bool = False) -> dict:
@@ -136,7 +144,10 @@ def migrate(conn, dry_run: bool = False) -> dict:
             return preview
 
         if pending == 0:
-            return {"rows_updated": 0, "message": f"Nenhum artigo pendente sem {FEATURE_KEY}"}
+            return {
+                "rows_updated": 0,
+                "message": f"Nenhuma linha de news_features pendente sem {FEATURE_KEY}",
+            }
 
         t0 = time.time()
         after = ""
@@ -152,7 +163,7 @@ def migrate(conn, dry_run: bool = False) -> dict:
             values, short = build_batch(rows)
             if values:
                 execute_values(
-                    cursor, UPSERT_SQL, values, template=UPSERT_TEMPLATE, page_size=BATCH_SIZE
+                    cursor, UPDATE_SQL, values, template=UPDATE_TEMPLATE, page_size=BATCH_SIZE
                 )
             conn.commit()
 
