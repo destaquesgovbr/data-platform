@@ -413,7 +413,8 @@ def plan_content_keys(
     `rows` vem em ordem de (published_at, unique_id) e inclui o contexto (antes de `since`) e o
     lookahead (a partir de `until`). O contexto entra semeado pela chave gravada (NULL ou a
     propria = lider; outra = membro de outro grupo) e so e gravado quando um lider ganha o
-    primeiro membro; o lookahead completa as familias do G1 e nao e gravado.
+    primeiro membro; o lookahead completa os grupos e as familias do G1 dos artigos do alvo e
+    nao e gravado.
     """
     since_ts = since.timestamp() if since else None
     until_ts = until.timestamp() if until else None
@@ -538,10 +539,12 @@ def read_window(
     since: datetime | None, until: datetime | None, context_days: int
 ) -> tuple[datetime | None, datetime | None]:
     """Intervalo lido: contexto antes de `since` (+1 dia para completar as familias do G1 dos
-    artigos do contexto) e 1 dia depois de `until` (familias dos ultimos artigos do alvo)."""
+    artigos do contexto) e lookahead depois de `until`: todo membro possivel de um lider do alvo
+    (<= MAX_PAIR_DAYS) mais 1 dia para as familias desses membros. Sem o lookahead inteiro, um
+    lider no fim do bloco perde o membro do bloco seguinte e a re-execucao alterna NULL/chave."""
     family_days = timedelta(days=G1_SIBLING_MAX_DAYS)
     start = since - timedelta(days=context_days) - family_days if since else None
-    end = until + family_days if until else None
+    end = until + timedelta(days=MAX_PAIR_DAYS) + family_days if until else None
     return start, end
 
 
