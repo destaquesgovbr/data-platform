@@ -1,7 +1,9 @@
 """test-data/themes_tree_enriched_full.yaml segue o contrato do tema 26 (DP-2/TH-1).
 
-O arquivo espelha o themes_tree_enriched_full.yaml do repo themes, que é a fonte da
-tabela `themes` (588 códigos em 21/10/2026, idênticos ao YAML). Contrato:
+O arquivo é cópia byte a byte do themes_tree_enriched_full.yaml do repo themes, que é a
+fonte da tabela `themes` (588 códigos em 21/10/2026, idênticos ao YAML). O dono do
+conteúdo é o repo themes; aqui só se copia (o sha256 fica fixado em
+SHA256_THEMES_FULL para o drift não voltar). Contrato:
 
   - L1 '26' "Defesa Civil e Gestão de Desastres";
   - L2 '26.01' "Defesa Civil", com L3 26.01.01–05 = os L3 de 19.03.01–05 (mesmos rótulos);
@@ -13,12 +15,19 @@ A migração 034 grava esses mesmos códigos e rótulos no banco
 (tests/unit/test_migration_034_tema26.py confere os dois lados).
 """
 
+import hashlib
 import re
 from pathlib import Path
 
 import yaml
 
 YAML_PATH = Path(__file__).resolve().parents[2] / "test-data" / "themes_tree_enriched_full.yaml"
+
+# sha256 do themes_tree_enriched_full.yaml da versão 3.2 no repo themes
+# (destaquesgovbr/themes#4, branch feature/tema-26-defesa-civil, commit 7b7c002).
+# Para atualizar: copie o arquivo do repo themes para test-data/ (cp, sem reformatar)
+# e troque este hash pelo `shasum -a 256` do arquivo copiado.
+SHA256_THEMES_FULL = "32a2fa43149ecd6bb1e8f5b26a341b3ee1b539750eb0c5d35120b2e2a32c92b0"
 
 CONTRATO_26 = {
     "26": ("Defesa Civil e Gestão de Desastres", 1, None),
@@ -51,6 +60,16 @@ def _flatten(themes: list[dict], level: int = 1, parent: str | None = None) -> l
 
 def _by_code() -> dict[str, dict]:
     return {t["code"]: t for t in _flatten(_load()["themes"])}
+
+
+def test_test_data_e_copia_byte_a_byte_do_repo_themes():
+    """Duas versões 3.2 diferentes da taxonomia na D0 seriam drift; o repo themes manda."""
+    digest = hashlib.sha256(YAML_PATH.read_bytes()).hexdigest()
+    assert digest == SHA256_THEMES_FULL, (
+        "test-data/themes_tree_enriched_full.yaml não é cópia byte a byte do "
+        "themes_tree_enriched_full.yaml do repo themes; copie o arquivo de lá "
+        "(ou, se o themes mudou, atualize SHA256_THEMES_FULL)"
+    )
 
 
 def test_todos_os_codigos_sao_strings():
