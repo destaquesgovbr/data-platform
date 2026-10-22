@@ -8,12 +8,14 @@ on:
       - 'scripts/migrations/**'
       - 'scripts/backfill_features_window.py'
       - 'src/data_platform/jobs/graph/**'
+      - 'src/data_platform/jobs/features/**'
       - 'src/data_platform/jobs/trend_detection/**'
       - 'src/data_platform/workers/feature_worker/**'
       - 'tests/integration/test_migrate_integration.py'
       - 'tests/integration/test_trend_detection_integration.py'
       - 'tests/integration/test_backfill_features_window_integration.py'
       - 'tests/integration/test_entity_graph_integration.py'
+      - 'tests/integration/test_flesch_ptbr_fill_integration.py'
   workflow_dispatch:
 
 jobs:
@@ -71,4 +73,5 @@ jobs:
           tests/integration/test_trend_detection_integration.py
           tests/integration/test_backfill_features_window_integration.py
           tests/integration/test_entity_graph_integration.py
+          tests/integration/test_flesch_ptbr_fill_integration.py
           -v --tb=short --no-cov

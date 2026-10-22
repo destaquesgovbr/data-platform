@@ -6,6 +6,8 @@ on:
     paths:
       - 'src/data_platform/dags/**'
       - 'src/data_platform/jobs/**'
+      # Versão do pyphen publicada nos plugins (fill_flesch_ptbr)
+      - 'poetry.lock'
   workflow_dispatch:
 
 permissions:
@@ -59,6 +61,7 @@ jobs:
           mkdir -p /tmp/plugins/data_platform/typesense
           cp src/data_platform/jobs/__init__.py /tmp/plugins/data_platform/jobs/
           cp -r src/data_platform/jobs/bigquery /tmp/plugins/data_platform/jobs/
+          cp -r src/data_platform/jobs/features /tmp/plugins/data_platform/jobs/
           cp -r src/data_platform/jobs/graph /tmp/plugins/data_platform/jobs/
           cp -r src/data_platform/jobs/integrity /tmp/plugins/data_platform/jobs/
           cp -r src/data_platform/jobs/similarity /tmp/plugins/data_platform/jobs/
@@ -73,8 +76,22 @@ jobs:
           # Create package __init__.py
           touch /tmp/plugins/data_platform/__init__.py
 
+      # O Composer não tem pyphen (pacotes PyPI do ambiente vêm do Terraform). A task
+      # fill_flesch_ptbr (aggregate_engagement) precisa dele: instala a versão travada no
+      # poetry.lock (a mesma do feature-worker, puro Python) na raiz dos plugins, que está no
+      # sys.path dos workers. Trocar a versão muda o dicionário e os valores do Flesch pt-BR.
+      - name: Vendor pyphen into plugins
+        run: |
+          PYPHEN_VERSION=$(python3 -c "import tomllib; print(next(p['version'] for p in tomllib.load(open('poetry.lock', 'rb'))['package'] if p['name'] == 'pyphen'))")
+          echo "pyphen==${PYPHEN_VERSION}"
+          python3 -m pip install --no-deps --target /tmp/plugins_vendor "pyphen==${PYPHEN_VERSION}" --no-compile
+          test -f /tmp/plugins_vendor/pyphen/dictionaries/hyph_pt_BR.dic
+
       - name: Deploy plugins to GCS
         run: |
           gsutil -m rsync -r -d \
             /tmp/plugins/data_platform/ \
             ${{ steps.composer.outputs.plugins_bucket }}/data_platform/
+          gsutil -m rsync -r -d \
+            /tmp/plugins_vendor/pyphen/ \
+            ${{ steps.composer.outputs.plugins_bucket }}/pyphen/
