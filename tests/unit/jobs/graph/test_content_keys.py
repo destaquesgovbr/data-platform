@@ -531,6 +531,15 @@ class TestTituloEConteudoQuebrado:
 
         assert set(keys.values()) == {None}
 
+    def test_titulo_generico_com_o_mesmo_texto_junta_pelo_conteudo(self):
+        """O título genérico só não liga pela E2; texto igual liga pela E1 (sem guardas)."""
+        keys = _keys(
+            _row("pf-1", "pf", "Nota à imprensa", _t(BASE)),
+            _row("mj-1", "mj", "Nota à imprensa", _t(BASE), 2),
+        )
+
+        assert keys == {"pf-1": "pf-1", "mj-1": "pf-1"}
+
     def test_agenda_diaria_com_mesmo_titulo_nao_junta(self):
         """TV Brasil: a agenda diária repete o título e parte do texto (J ≥ 0,1)."""
         titulo = "Eleições 2026: acompanhe a agenda dos candidatos à Presidência"
