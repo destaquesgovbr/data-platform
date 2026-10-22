@@ -746,10 +746,14 @@ class TestSelectEUpdate:
 
         assert start == T0 - timedelta(days=8)
         assert end is None
-        assert ck.read_window(T0, until=T0 + timedelta(days=90), context_days=7)[1] == (
-            T0 + timedelta(days=91)
-        )
         assert ck.read_window(None, until=None, context_days=7) == (None, None)
+
+    def test_lookahead_cobre_todo_membro_possivel_do_alvo(self):
+        """Membro está a <= 7 dias do líder; +1 dia completa as famílias desses membros. Sem
+        isso, um líder no fim do bloco perde o membro na re-execução e alterna NULL/chave."""
+        _, end = ck.read_window(T0, until=T0 + timedelta(days=90), context_days=7)
+
+        assert end == T0 + timedelta(days=98)
 
 
 class TestComputeContentKeys:
