@@ -204,11 +204,11 @@ def typesense_list() -> None:
 
 @app.command("bq-merge-theme-changes")
 def bq_merge_theme_changes(
-    campaign: list[str] = typer.Option(
-        ["tema26-%"],
-        "--campaign",
-        help="Campanha (ou padrão LIKE) da auditoria news_theme_changes; repita para "
-        "várias. Padrão tema26-%: tema26-034, tema26-llm-d1 e tema26-rollback",
+    reverted: bool = typer.Option(
+        False,
+        "--reverted",
+        help="Depois do rollback da 034: leva ao fato o estado atual dos artigos com linhas "
+        "revertidas e de toda linha do fato que ainda aponta para o 26",
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Só grava a staging e conta as linhas do fato que mudariam"
@@ -219,9 +219,11 @@ def bq_merge_theme_changes(
     """
     MERGE dgb_gold.fato_noticias from the theme audit (theme 26: D0 and D1).
 
-    Reads (read-only) the current theme of every article in news_theme_changes for the
-    campaigns (LIKE patterns), loads it into dgb_gold._stg_news_theme_changes and merges
-    where it differs. Logs the articles per campaign (by_campaign).
+    Reads (read-only) the current theme of every article with a non-reverted row in
+    news_theme_changes for the two campaigns of the contract (tema26-llm-d1, tema26-034),
+    most recent change first, loads it into dgb_gold._stg_news_theme_changes and merges
+    where it differs. Logs the articles per campaign (by_campaign) and how many diverge from
+    their most recent audited change. --reverted: after the 034 rollback.
     """
     from data_platform.jobs.bigquery import theme_changes
 
@@ -230,7 +232,7 @@ def bq_merge_theme_changes(
         raise typer.Exit(1)
 
     stats = theme_changes.merge_theme_changes(
-        db_url, project_id, campaigns=tuple(campaign), dry_run=dry_run
+        db_url, project_id, reverted=reverted, dry_run=dry_run
     )
     logging.info(f"bq-merge-theme-changes: {stats}")
 
