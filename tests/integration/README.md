@@ -113,7 +113,7 @@ make populate-master
 
 This populates:
 - **158 agencies** from `test-data/agencies.yaml`
-- **588 themes** from `test-data/themes_tree_enriched_full.yaml`
+- **589 themes** (taxonomia 3.2: 24 L1, 106 L2, 459 L3) from `test-data/themes_tree_enriched_full.yaml`, cópia byte a byte do repo themes
 
 ---
 
