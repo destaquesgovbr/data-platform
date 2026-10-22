@@ -55,14 +55,18 @@ dry-run the backfill first: its preview reports the pending count and a projecte
 
 `034_tema26_defesa_civil.py` creates theme 26 (Defesa Civil e Gestão de Desastres), remaps
 `news` from 19.03*/19.04* to 26.01*/26.02* in one transaction and deletes the old codes. Every
-change goes to the `news_theme_changes` audit table (codes, one row per article and campaign:
-`UNIQUE (campaign, unique_id)`). The migration writes campaign `tema26-034` (source
-`migration-034`); the LLM reclassification (data-science#49) writes `tema26-llm-d1` (source
-`llm:<model_id>`). Its dry-run applies everything inside a savepoint and rolls it back, logging
-the counts per code and per rule; its rollback reads every `tema26-*` campaign (except
-`tema26-rollback`, where it logs what it undid) in `changed_at` order, so it also undoes the
-LLM reclassification. Never use `scripts/populate_themes.py` in production (it deletes `themes` and
-reinserts with new ids).
+change goes to the `news_theme_changes` audit table, exactly as in the 22/10 contract: `id`,
+`campaign`, `unique_id`, the 4 old and 4 new theme codes (codes, not ids), `source`, `note`,
+`changed_at`, `reverted_at`, plus `UNIQUE (campaign, unique_id)` (one row per article and
+campaign). There are two campaigns: the migration writes `tema26-034` (source `migration-034`,
+`note` = the remap rule) and the LLM reclassification (data-science#49) writes `tema26-llm-d1`
+(source `llm:<model_id>`). Its dry-run applies everything inside a savepoint and rolls it
+back, logging the counts per code and per rule. Its rollback reads only those two campaigns,
+from the most recent `changed_at` to the oldest (on a tie, the LLM row first), restores each
+article to its state before the first change and only sets `reverted_at` on the rows it read
+(no new audit rows); articles in theme 26 without audit rows are undone by the inverse map and
+listed as `unaudited_inverse_map` in the log. Never use `scripts/populate_themes.py` in
+production (it deletes `themes` and reinserts with new ids).
 
 ## Current Migrations
 

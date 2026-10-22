@@ -24,7 +24,8 @@ import yaml
 YAML_PATH = Path(__file__).resolve().parents[2] / "test-data" / "themes_tree_enriched_full.yaml"
 
 # sha256 do themes_tree_enriched_full.yaml da versão 3.2 no repo themes
-# (destaquesgovbr/themes#4, branch feature/tema-26-defesa-civil, commit 7b7c002).
+# (destaquesgovbr/themes#4, branch feature/tema-26-defesa-civil: commit 7b7c002, o último
+# que toca o arquivo; idêntico no head 683bfed, conferido em 22/10).
 # Para atualizar: copie o arquivo do repo themes para test-data/ (cp, sem reformatar)
 # e troque este hash pelo `shasum -a 256` do arquivo copiado.
 SHA256_THEMES_FULL = "32a2fa43149ecd6bb1e8f5b26a341b3ee1b539750eb0c5d35120b2e2a32c92b0"
