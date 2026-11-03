@@ -16,7 +16,6 @@ import base64
 import binascii
 import json
 import logging
-import re
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -24,21 +23,19 @@ from starlette.concurrency import run_in_threadpool
 
 from data_platform.workers.alert_relay.formatter import format_alert
 from data_platform.workers.alert_relay.secrets import SecretUnavailable, telegram_config
-from data_platform.workers.alert_relay.telegram import send_message
+from data_platform.workers.alert_relay.telegram import sanitize, send_message
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-_BOT_TOKEN_RE = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
-
 
 class RedactBotToken(logging.Filter):
-    """Redige bot<id>:<token> de qualquer registro (defesa em profundidade: o principal é
-    o httpx/httpcore em WARNING, em telegram.py)."""
+    """Redige o token do bot de qualquer registro (defesa em profundidade: o principal é
+    httpx/httpcore/urllib3 em WARNING e sanitize() nas descrições, em telegram.py)."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        redacted = _BOT_TOKEN_RE.sub("bot<redigido>", message)
+        redacted = sanitize(message)
         if redacted != message:
             record.msg, record.args = redacted, None
         return True
