@@ -16,6 +16,7 @@ import base64
 import binascii
 import json
 import logging
+import re
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -27,6 +28,25 @@ from data_platform.workers.alert_relay.telegram import send_message
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+_BOT_TOKEN_RE = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
+
+
+class RedactBotToken(logging.Filter):
+    """Redige bot<id>:<token> de qualquer registro (defesa em profundidade: o principal é
+    o httpx/httpcore em WARNING, em telegram.py)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = _BOT_TOKEN_RE.sub("bot<redigido>", message)
+        if redacted != message:
+            record.msg, record.args = redacted, None
+        return True
+
+
+for _handler in logging.getLogger().handlers:
+    if not any(isinstance(f, RedactBotToken) for f in _handler.filters):
+        _handler.addFilter(RedactBotToken())
 
 app = FastAPI(title="Alert Relay", version="1.0.0")
 

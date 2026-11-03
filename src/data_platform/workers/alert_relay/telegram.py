@@ -4,9 +4,15 @@ O token compõe a URL da Bot API: ela nunca é logada nem devolvida. Erros de re
 viram só o nome da exceção (a mensagem do httpx pode conter a URL).
 """
 
+import logging
 from dataclasses import dataclass
 
 import httpx
+
+# O httpx/httpcore logam a URL da requisição (INFO/DEBUG) — e a URL da Bot API contém
+# o token. Silenciados aqui, no import, para valer em qualquer entrypoint.
+for _name in ("httpx", "httpcore"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
 
 _API = "https://api.telegram.org"
 _RETRYABLE = {401, 403, 404, 408, 409, 429}
