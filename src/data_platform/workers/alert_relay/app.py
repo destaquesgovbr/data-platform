@@ -23,10 +23,27 @@ from starlette.concurrency import run_in_threadpool
 
 from data_platform.workers.alert_relay.formatter import format_alert
 from data_platform.workers.alert_relay.secrets import SecretUnavailable, telegram_config
-from data_platform.workers.alert_relay.telegram import send_message
+from data_platform.workers.alert_relay.telegram import sanitize, send_message
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+
+class RedactBotToken(logging.Filter):
+    """Redige o token do bot de qualquer registro (defesa em profundidade: o principal é
+    httpx/httpcore/urllib3 em WARNING e sanitize() nas descrições, em telegram.py)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = sanitize(message)
+        if redacted != message:
+            record.msg, record.args = redacted, None
+        return True
+
+
+for _handler in logging.getLogger().handlers:
+    if not any(isinstance(f, RedactBotToken) for f in _handler.filters):
+        _handler.addFilter(RedactBotToken())
 
 app = FastAPI(title="Alert Relay", version="1.0.0")
 

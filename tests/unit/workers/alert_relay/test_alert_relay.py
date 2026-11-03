@@ -335,3 +335,137 @@ class TestApp:
     def test_json_invalido_faz_ack(self, client):
         resp = client.post("/process", content=b"{", headers={"content-type": "application/json"})
         assert resp.status_code == 200
+
+
+# =============================================================================
+# O token não pode vazar em log de biblioteca (httpx loga a URL em INFO)
+# =============================================================================
+
+
+def _real_httpx_post(status=200, body=None):
+    """httpx.post de verdade (Client + MockTransport): exercita o logger do httpx."""
+    real_client = httpx.Client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json=body or {"ok": True, "result": {"message_id": 1}})
+
+    def post(url, **kwargs):
+        timeout = kwargs.pop("timeout", None)
+        with real_client(transport=httpx.MockTransport(handler), timeout=timeout) as c:
+            return c.post(url, **kwargs)
+
+    return post
+
+
+class TestTokenForaDosLogs:
+    def test_httpx_real_nao_loga_a_url_com_token(self, monkeypatch, caplog):
+        monkeypatch.setattr(telegram.httpx, "post", _real_httpx_post())
+        with caplog.at_level(logging.INFO):  # mesmo nível do app em produção
+            res = telegram.send_message(TOKEN, CHAT, "oi")
+        assert res.ok
+        assert TOKEN not in caplog.text
+        assert "api.telegram.org/bot" not in caplog.text
+
+    def test_process_ponta_a_ponta_sem_token_no_log(self, client, config_ok, monkeypatch, caplog):
+        monkeypatch.setattr(telegram.httpx, "post", _real_httpx_post())
+        with caplog.at_level(logging.DEBUG):
+            resp = client.post("/process", json=_envelope({"text": "oi"}))
+        assert resp.status_code == 200
+        assert "alert_relay_sent status=200" in caplog.text
+        assert TOKEN not in caplog.text
+
+    def test_filtro_redige_token_de_bot_em_qualquer_log(self):
+        from data_platform.workers.alert_relay.app import RedactBotToken
+
+        record = logging.LogRecord(
+            "x",
+            logging.INFO,
+            __file__,
+            1,
+            "POST https://api.telegram.org/bot%s/sendMessage",
+            (TOKEN,),
+            None,
+        )
+        assert RedactBotToken().filter(record) is True
+        assert TOKEN not in record.getMessage()
+        assert "/bot***/sendMessage" in record.getMessage()
+
+    def test_filtro_esta_nos_handlers_do_root(self):
+        from data_platform.workers.alert_relay.app import RedactBotToken
+
+        handlers = logging.getLogger().handlers
+        assert any(isinstance(f, RedactBotToken) for h in handlers for f in h.filters)
+
+
+def _transport_post(handler):
+    """httpx.post real sobre um MockTransport com o handler dado (respostas ou exceções)."""
+    real_client = httpx.Client
+
+    def post(url, **kwargs):
+        timeout = kwargs.pop("timeout", None)
+        with real_client(transport=httpx.MockTransport(handler), timeout=timeout) as c:
+            return c.post(url, **kwargs)
+
+    return post
+
+
+class TestTokenForaDosLogsNosErros:
+    """Caminhos de erro com httpx real: 4xx/5xx do Telegram e timeout."""
+
+    @pytest.mark.parametrize("status", [400, 401, 403, 404, 429, 500, 502])
+    def test_status_de_erro_sem_token(self, monkeypatch, caplog, status):
+        def handler(request):
+            return httpx.Response(status, json={"ok": False, "description": f"erro {request.url}"})
+
+        monkeypatch.setattr(telegram.httpx, "post", _transport_post(handler))
+        with caplog.at_level(logging.DEBUG):
+            res = telegram.send_message(TOKEN, CHAT, "oi")
+        assert not res.ok and res.status == status
+        assert TOKEN not in caplog.text
+        assert TOKEN not in res.description
+
+    @pytest.mark.parametrize("exc", [httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError])
+    def test_timeout_e_rede_sem_token(self, monkeypatch, caplog, exc):
+        def handler(request):
+            raise exc(f"falhou em {request.url}", request=request)
+
+        monkeypatch.setattr(telegram.httpx, "post", _transport_post(handler))
+        with caplog.at_level(logging.DEBUG):
+            res = telegram.send_message(TOKEN, CHAT, "oi")
+        assert not res.ok and res.retryable and res.status == 0
+        assert TOKEN not in caplog.text
+        assert TOKEN not in res.description
+
+    def test_excecao_inesperada_nao_propaga_com_url(self, monkeypatch):
+        def boom(url, **kwargs):
+            raise ValueError(f"url inválida: {url}")
+
+        monkeypatch.setattr(telegram.httpx, "post", boom)
+        res = telegram.send_message(TOKEN, CHAT, "oi")
+        assert not res.ok and res.retryable
+        assert TOKEN not in res.description
+
+    def test_process_com_erro_do_telegram_sem_token(self, client, config_ok, monkeypatch, caplog):
+        def handler(request):
+            return httpx.Response(500, json={"ok": False, "description": str(request.url)})
+
+        monkeypatch.setattr(telegram.httpx, "post", _transport_post(handler))
+        with caplog.at_level(logging.DEBUG):
+            resp = client.post("/process", json=_envelope({"text": "oi"}))
+        assert resp.status_code == 503
+        assert TOKEN not in caplog.text and TOKEN not in resp.text
+
+    def test_sanitize_troca_bot_na_url(self):
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        err = httpx.HTTPStatusError(
+            f"Server error for url '{url}'",
+            request=httpx.Request("POST", url),
+            response=httpx.Response(500),
+        )
+        clean = telegram.sanitize(str(err))
+        assert TOKEN not in clean
+        assert "/bot***/sendMessage" in clean
+
+    def test_loggers_de_bibliotecas_http_em_warning(self):
+        for name in ("httpx", "httpcore", "urllib3"):
+            assert logging.getLogger(name).getEffectiveLevel() >= logging.WARNING, name

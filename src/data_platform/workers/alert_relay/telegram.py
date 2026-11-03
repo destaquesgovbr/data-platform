@@ -4,9 +4,26 @@ O token compõe a URL da Bot API: ela nunca é logada nem devolvida. Erros de re
 viram só o nome da exceção (a mensagem do httpx pode conter a URL).
 """
 
+import logging
+import re
 from dataclasses import dataclass
 
 import httpx
+
+# httpx/httpcore (e urllib3, usado pelo google-auth) logam a URL da requisição em
+# INFO/DEBUG — e a URL da Bot API contém o token. Silenciados no import, para valer em
+# qualquer entrypoint.
+for _name in ("httpx", "httpcore", "urllib3"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
+
+_BOT_IN_URL = re.compile(r"/bot[^/\s'\"]+/")
+_BOT_TOKEN = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
+
+
+def sanitize(text: str) -> str:
+    """Remove o token de qualquer texto: /bot<...>/ → /bot***/ e bot<id>:<token> → bot***."""
+    return _BOT_TOKEN.sub("bot***", _BOT_IN_URL.sub("/bot***/", text))
+
 
 _API = "https://api.telegram.org"
 _RETRYABLE = {401, 403, 404, 408, 409, 429}
@@ -47,10 +64,10 @@ def send_message(
             # HTML que o Telegram não aceitou: tenta de novo como texto puro.
             body.pop("parse_mode", None)
             status, data = _post(token, body, timeout)
-    except httpx.HTTPError as e:
+    except Exception as e:  # noqa: BLE001 — httpx.InvalidURL etc. carregam a URL; só o tipo
         return SendResult(0, False, type(e).__name__, True)
 
     ok = status == 200 and bool(data.get("ok"))
-    description = str(data.get("description", ""))[:300]
+    description = sanitize(str(data.get("description", "")))[:300]
     retryable = not ok and (status >= 500 or status in _RETRYABLE)
     return SendResult(status, ok, description, retryable)
