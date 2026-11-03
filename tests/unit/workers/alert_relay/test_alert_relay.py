@@ -335,3 +335,63 @@ class TestApp:
     def test_json_invalido_faz_ack(self, client):
         resp = client.post("/process", content=b"{", headers={"content-type": "application/json"})
         assert resp.status_code == 200
+
+
+# =============================================================================
+# O token não pode vazar em log de biblioteca (httpx loga a URL em INFO)
+# =============================================================================
+
+
+def _real_httpx_post(status=200, body=None):
+    """httpx.post de verdade (Client + MockTransport): exercita o logger do httpx."""
+    real_client = httpx.Client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json=body or {"ok": True, "result": {"message_id": 1}})
+
+    def post(url, **kwargs):
+        timeout = kwargs.pop("timeout", None)
+        with real_client(transport=httpx.MockTransport(handler), timeout=timeout) as c:
+            return c.post(url, **kwargs)
+
+    return post
+
+
+class TestTokenForaDosLogs:
+    def test_httpx_real_nao_loga_a_url_com_token(self, monkeypatch, caplog):
+        monkeypatch.setattr(telegram.httpx, "post", _real_httpx_post())
+        with caplog.at_level(logging.INFO):  # mesmo nível do app em produção
+            res = telegram.send_message(TOKEN, CHAT, "oi")
+        assert res.ok
+        assert TOKEN not in caplog.text
+        assert "api.telegram.org/bot" not in caplog.text
+
+    def test_process_ponta_a_ponta_sem_token_no_log(self, client, config_ok, monkeypatch, caplog):
+        monkeypatch.setattr(telegram.httpx, "post", _real_httpx_post())
+        with caplog.at_level(logging.DEBUG):
+            resp = client.post("/process", json=_envelope({"text": "oi"}))
+        assert resp.status_code == 200
+        assert "alert_relay_sent status=200" in caplog.text
+        assert TOKEN not in caplog.text
+
+    def test_filtro_redige_token_de_bot_em_qualquer_log(self):
+        from data_platform.workers.alert_relay.app import RedactBotToken
+
+        record = logging.LogRecord(
+            "x",
+            logging.INFO,
+            __file__,
+            1,
+            "POST https://api.telegram.org/bot%s/sendMessage",
+            (TOKEN,),
+            None,
+        )
+        assert RedactBotToken().filter(record) is True
+        assert TOKEN not in record.getMessage()
+        assert "bot<redigido>/sendMessage" in record.getMessage()
+
+    def test_filtro_esta_nos_handlers_do_root(self):
+        from data_platform.workers.alert_relay.app import RedactBotToken
+
+        handlers = logging.getLogger().handlers
+        assert any(isinstance(f, RedactBotToken) for h in handlers for f in h.filters)
