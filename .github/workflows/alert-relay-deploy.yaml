@@ -1,0 +1,29 @@
+name: Deploy Alert Relay
+
+# dgb.ops.alerts (Pub/Sub) → canal do Telegram da equipe. O serviço Cloud Run, o
+# tópico, o canal do Cloud Monitoring e os secrets vêm do infra (ops-alerts.tf);
+# este workflow só troca a imagem.
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/data_platform/workers/alert_relay/**'
+      - 'docker/alert-relay/**'
+      - 'pyproject.toml'
+      - 'poetry.lock'
+      - '.github/workflows/alert-relay-deploy.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    uses: destaquesgovbr/reusable-workflows/.github/workflows/cloud-run-deploy.yml@v2
+    with:
+      dockerfile: docker/alert-relay/Dockerfile
+      ar_repository: destaquesgovbr-alert-relay
+      image_name: alert-relay
+      cloud_run_service: destaquesgovbr-alert-relay

@@ -43,7 +43,10 @@ def _incident(state="open", **over):
             "type": "cloud_run_revision",
             "labels": {"revision_name": "destaquesgovbr-enrichment-worker-00028-wqr"},
         },
-        "documentation": {"content": "Verifique artigos sem content_embedding.", "mime_type": "text/markdown"},
+        "documentation": {
+            "content": "Verifique artigos sem content_embedding.",
+            "mime_type": "text/markdown",
+        },
     }
     inc.update(over)
     return {"incident": inc, "version": "1.2"}
@@ -67,7 +70,6 @@ def _envelope(payload, attributes=None):
 
 
 class TestFormatter:
-
     def test_incidente_aberto(self):
         text, meta = formatter.format_alert(json.dumps(_incident()).encode(), {})
         assert meta == {
@@ -80,7 +82,10 @@ class TestFormatter:
         assert "enrichment-worker: instância morta pelo liveness" in text
         assert "LIVENESS HTTP probe failed &gt; 0" in text  # escapado (HTML)
         assert "destaquesgovbr-enrichment-worker-00028-wqr" in text
-        assert '<a href="https://console.cloud.google.com/monitoring/alerting/incidents/0.abc">' in text
+        assert (
+            '<a href="https://console.cloud.google.com/monitoring/alerting/incidents/0.abc">'
+            in text
+        )
         assert "Verifique artigos sem content_embedding." in text
         assert "UTC" in text
 
@@ -91,8 +96,12 @@ class TestFormatter:
         assert "ALERTA" not in text
 
     def test_mensagem_generica(self):
-        payload = {"title": "Scraping", "text": "3 agências sem execução <24h>", "severity": "warning",
-                   "source": "monitor_scraping_health"}
+        payload = {
+            "title": "Scraping",
+            "text": "3 agências sem execução <24h>",
+            "severity": "warning",
+            "source": "monitor_scraping_health",
+        }
         text, meta = formatter.format_alert(json.dumps(payload).encode(), {})
         assert meta["kind"] == "text"
         assert "<b>Scraping</b>" in text
@@ -135,7 +144,6 @@ class _Resp:
 
 
 class TestTelegram:
-
     def test_envia_chat_e_thread(self, monkeypatch):
         post = MagicMock(return_value=_Resp(200, {"ok": True, "result": {"message_id": 7}}))
         monkeypatch.setattr(telegram.httpx, "post", post)
@@ -157,17 +165,20 @@ class TestTelegram:
     @pytest.mark.parametrize("status", [429, 500, 502, 401, 403, 404])
     def test_status_retentaveis(self, monkeypatch, status):
         monkeypatch.setattr(
-            telegram.httpx, "post",
+            telegram.httpx,
+            "post",
             MagicMock(return_value=_Resp(status, {"ok": False, "description": "x"})),
         )
         res = telegram.send_message(TOKEN, CHAT, "oi")
         assert not res.ok and res.retryable and res.status == status
 
     def test_400_tenta_de_novo_sem_parse_mode(self, monkeypatch):
-        post = MagicMock(side_effect=[
-            _Resp(400, {"ok": False, "description": "Bad Request: can't parse entities"}),
-            _Resp(200, {"ok": True}),
-        ])
+        post = MagicMock(
+            side_effect=[
+                _Resp(400, {"ok": False, "description": "Bad Request: can't parse entities"}),
+                _Resp(200, {"ok": True}),
+            ]
+        )
         monkeypatch.setattr(telegram.httpx, "post", post)
         res = telegram.send_message(TOKEN, CHAT, "<b>quebrado")
         assert res.ok
@@ -175,8 +186,11 @@ class TestTelegram:
 
     def test_400_persistente_nao_e_retentavel(self, monkeypatch):
         monkeypatch.setattr(
-            telegram.httpx, "post",
-            MagicMock(return_value=_Resp(400, {"ok": False, "description": "Bad Request: chat not found"})),
+            telegram.httpx,
+            "post",
+            MagicMock(
+                return_value=_Resp(400, {"ok": False, "description": "Bad Request: chat not found"})
+            ),
         )
         res = telegram.send_message(TOKEN, CHAT, "oi")
         assert not res.ok and not res.retryable and res.status == 400
@@ -198,7 +212,6 @@ class TestTelegram:
 
 
 class TestSecrets:
-
     @pytest.fixture(autouse=True)
     def _clear(self):
         secrets.clear_cache()
@@ -258,7 +271,6 @@ def config_ok(monkeypatch):
 
 
 class TestApp:
-
     def test_health(self, client):
         resp = client.get("/health")
         assert resp.status_code == 200 and resp.json() == {"status": "ok"}
@@ -280,7 +292,8 @@ class TestApp:
 
     def test_falha_retentavel_responde_503(self, client, config_ok, monkeypatch, caplog):
         monkeypatch.setattr(
-            app_module, "send_message",
+            app_module,
+            "send_message",
             MagicMock(return_value=telegram.SendResult(429, False, "Too Many Requests", True)),
         )
         with caplog.at_level(logging.INFO):
@@ -290,7 +303,8 @@ class TestApp:
 
     def test_400_persistente_faz_ack(self, client, config_ok, monkeypatch):
         monkeypatch.setattr(
-            app_module, "send_message",
+            app_module,
+            "send_message",
             MagicMock(return_value=telegram.SendResult(400, False, "Bad Request", False)),
         )
         resp = client.post("/process", json=_envelope({"text": "oi"}))
