@@ -9,8 +9,8 @@ BACKFILL_QUOTA_FRACTION x cota diaria do modelo).
 Schedule diario as 02:00 (defasado do ner_backfill, que roda as 04:00). O governador
 e o teto PRIMARIO; os args `--since`/`--limit` sao apenas guard secundario por execucao.
 
-Espelha o padrao de generate_video_thumbnails (dispara Cloud Run) e sync_graph_to_neo4j
-(import de airflow protegido + config via Variable.get com fallback).
+Espelha o padrao de generate_video_thumbnails (dispara Cloud Run), com import de airflow
+protegido e config via Variable.get com fallback.
 """
 
 import logging

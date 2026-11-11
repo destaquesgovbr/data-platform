@@ -2,8 +2,7 @@
 
 Airflow + provider google nao estao instalados localmente e o modulo executa
 dag_instance = canonicalize_backfill() no import (apos try/except ImportError),
-entao usamos testes estruturais via AST (mesmo padrao de test_sync_graph_to_neo4j
-e test_generate_video_thumbnails).
+entao usamos testes estruturais via AST (mesmo padrao de test_generate_video_thumbnails).
 """
 
 import ast
