@@ -118,12 +118,37 @@ Valida que artigos recentes possuem imagens acessíveis e conteúdo íntegro. Us
 Workflow: `.github/workflows/composer-deploy-dags.yaml`
 
 ```bash
-# Automático: push em src/data_platform/dags/ dispara deploy
+# Automático: push em src/data_platform/{dags,jobs,typesense}/, cloud_run.py, poetry.lock
+# ou no próprio workflow dispara deploy
 # Manual:
 gh workflow run composer-deploy-dags.yaml
 ```
 
-O deploy usa `gsutil rsync -r -d` para o subdiretório `data-platform/` do bucket de DAGs. Ver [Decentralized DAGs](../architecture/decentralized-dags.md) para convenção completa.
+Desde a Fase 3 da migração do Composer o deploy publica nos dois buckets, o do Composer
+(`southamerica-east1-destaque-227e22da-bucket`) e o do Airflow próprio (`destaquesgovbr-airflow`),
+com `gcloud storage rsync --recursive --delete-unmatched-destination-objects`:
+
+1. **Plugins** (job `deploy-plugins`, primeiro): `plugins/data_platform/` (os módulos de
+   `jobs/`, `typesense/` e `cloud_run.py` importados pelas DAGs) e `plugins/pyphen/`, em cada
+   bucket de `AIRFLOW_DAG_BUCKETS` (env do workflow), depois de um `py_compile` (Python 3.11)
+   das DAGs e dos plugins.
+2. **DAGs** (job `deploy-dags`, depois dos plugins): `dags/data-platform/` via
+   `reusable-workflows/.github/workflows/airflow-deploy-dags.yml@v3`, que recebe a mesma lista
+   (output `buckets` do job de plugins; o default de `buckets` do v3 não vale aqui).
+
+`AIRFLOW_DAG_BUCKETS` é a única lista do deploy. Um deploy roda por vez (grupo de concorrência
+`data-platform-airflow-deploy`): o em andamento termina e só o mais novo espera na fila.
+
+A validação completa do v3 (Airflow 3.1.8 com constraints) roda com os plugins já publicados.
+Se ela falhar (ex.: na instalação do Airflow), os plugins novos ficam nos buckets com as DAGs
+antigas: rodar de novo os jobs que falharam (`gh run rerun <id> --failed`) logo em seguida.
+
+Na Fase 7 (desligar o Composer) o bucket do Composer sai de `AIRFLOW_DAG_BUCKETS`, **antes** de o
+bucket ser apagado: com o bucket na lista e já apagado o rsync dos plugins falha e as DAGs não são
+publicadas em lugar nenhum. No Airflow próprio as DAGs nascem pausadas
+(`dags_are_paused_at_creation=True`) e só são despausadas na virada (Fase 5).
+
+Ver [Decentralized DAGs](../architecture/decentralized-dags.md) para convenção completa.
 
 ---
 

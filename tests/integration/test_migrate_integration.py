@@ -10,6 +10,7 @@ Requires: PostgreSQL with pgvector extension (docker compose up).
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import psycopg2
@@ -126,12 +127,14 @@ CREATE TABLE IF NOT EXISTS schema_version (
 """
 
 
-def _run_migrate(*args: str, needs_db: bool = True) -> subprocess.CompletedProcess:
+def _run_migrate(
+    *args: str, needs_db: bool = True, timeout: float = 120
+) -> subprocess.CompletedProcess:
     """Run the migrate.py script with given arguments."""
     cmd = [sys.executable, str(MIGRATE_SCRIPT), *args]
     if needs_db:
         cmd.extend(["--db-url", DATABASE_URL])
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
 def _apply_concurrent_migration(version: str):
@@ -593,6 +596,130 @@ class TestNewsContentKeyMigration:
         result = _run_migrate("migrate", "--yes")
         assert result.returncode == 0, f"Re-apply failed:\n{result.stdout}\n{result.stderr}"
         assert _columns("news")["content_key"] == ("text", "YES")
+
+
+# INSERT do scraper antes da 037 (record_scrape_run em postgres_manager.py): colunas nomeadas,
+# sem articles_new.
+_INSERT_SCRAPE_RUN_LEGADO = (
+    "INSERT INTO scrape_runs (agency_key, status, error_category, error_message, "
+    "articles_scraped, articles_saved, execution_time_seconds, scraped_at, fallback_triggered) "
+    "VALUES ('{agency}', 'success', NULL, NULL, 12, 12, 3.5, NOW(), false)"
+)
+
+
+@pytest.mark.integration
+class TestScrapeRunsArticlesNewMigration:
+    """037: scrape_runs.articles_new, as notícias realmente novas de cada chamada (Passo 1).
+
+    articles_saved continua "linhas gravadas" (inserções + atualizações). Lido pelo scraper
+    (agências sem notícias e relatório de cobertura) como COALESCE(articles_new, articles_saved).
+    """
+
+    def test_037_adiciona_articles_new_inteiro_nulo(self):
+        _apply_all_migrations()
+
+        assert _columns("scrape_runs")["articles_new"] == ("integer", "YES")
+
+    def test_037_execucoes_existentes_ficam_nulas(self):
+        """Sem default: NULL é "não medido", não "zero notícias novas"."""
+        result = _run_migrate("migrate", "--target", "036", "--yes")
+        assert result.returncode == 0, f"Setup failed:\n{result.stdout}\n{result.stderr}"
+        _execute(_INSERT_SCRAPE_RUN_LEGADO.format(agency="mec"))
+
+        _apply_all_migrations()
+
+        rows = _execute("SELECT articles_saved, articles_new FROM scrape_runs")
+        assert rows == [(12, None)]
+
+    def test_037_insert_legado_continua_valido(self):
+        """O scraper em produção nomeia as colunas: segue gravando, com articles_new nulo."""
+        _apply_all_migrations()
+        _execute(_INSERT_SCRAPE_RUN_LEGADO.format(agency="mec"))
+        _execute(
+            "INSERT INTO scrape_runs (agency_key, status, articles_scraped, articles_saved, "
+            "articles_new) VALUES ('agencia_brasil', 'success', 40, 40, 3)"
+        )
+
+        rows = _execute("SELECT agency_key, articles_new FROM scrape_runs ORDER BY agency_key")
+        assert rows == [("agencia_brasil", 3), ("mec", None)]
+
+    def test_037_indice_parcial_espelha_o_da_008(self):
+        """Mesmas colunas e predicado do idx_scrape_runs_success_articles, sobre articles_new."""
+        _apply_all_migrations()
+
+        indexes = _indexes("scrape_runs")
+        espelho = (
+            indexes["idx_scrape_runs_success_articles"]
+            .replace("idx_scrape_runs_success_articles", "idx_scrape_runs_success_articles_new")
+            .replace("articles_saved", "articles_new")
+        )
+        assert indexes["idx_scrape_runs_success_articles_new"] == espelho
+
+    def test_037_comenta_a_coluna(self):
+        _apply_all_migrations()
+
+        rows = _execute(
+            "SELECT col_description('scrape_runs'::regclass, attnum) FROM pg_attribute "
+            "WHERE attrelid = 'scrape_runs'::regclass AND attname = 'articles_new'"
+        )
+        assert "inseridas em news" in rows[0][0]
+        assert "NULL" in rows[0][0]
+
+    def test_037_rollback_remove_coluna_e_indice_e_reaplica(self):
+        _apply_all_migrations()
+
+        result = _run_migrate("rollback", "037", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+        assert "articles_new" not in _columns("scrape_runs")
+        assert "idx_scrape_runs_success_articles_new" not in _indexes("scrape_runs")
+        assert "idx_scrape_runs_success_articles" in _indexes("scrape_runs")
+
+        result = _run_migrate("migrate", "--yes")
+        assert result.returncode == 0, f"Re-apply failed:\n{result.stdout}\n{result.stderr}"
+        assert _columns("scrape_runs")["articles_new"] == ("integer", "YES")
+        assert "idx_scrape_runs_success_articles_new" in _indexes("scrape_runs")
+
+    @pytest.mark.parametrize(
+        ("comando", "aplicada_antes"),
+        [(("migrate", "--target", "037"), False), (("rollback", "037"), True)],
+        ids=["migrate", "rollback"],
+    )
+    def test_037_desiste_do_lock_em_vez_de_enfileirar_o_scraper(self, comando, aplicada_antes):
+        """lock_timeout: atrás de uma transação aberta em scrape_runs a 037 falha inteira.
+
+        Sem ele o pedido de ACCESS EXCLUSIVE esperaria sem prazo, e todo INSERT do scraper e
+        toda leitura do monitor entrariam na fila atrás dele.
+        """
+        if aplicada_antes:
+            _apply_all_migrations()
+        else:
+            result = _run_migrate("migrate", "--target", "036", "--yes")
+            assert result.returncode == 0, f"Setup failed:\n{result.stdout}\n{result.stderr}"
+
+        leitor = psycopg2.connect(DATABASE_URL)
+        try:
+            with leitor.cursor() as cur:
+                # ACCESS SHARE até o fim da transação, como um SELECT do monitor em andamento.
+                cur.execute("SELECT count(*) FROM scrape_runs")
+            inicio = time.monotonic()
+            try:
+                result = _run_migrate(*comando, "--yes", timeout=60)
+            except subprocess.TimeoutExpired:
+                pytest.fail(f"`{' '.join(comando)}` esperou o lock sem prazo (sem lock_timeout)")
+            espera = time.monotonic() - inicio
+        finally:
+            leitor.rollback()
+            leitor.close()
+
+        assert result.returncode != 0
+        assert "lock timeout" in result.stdout + result.stderr
+        assert espera < 45
+        assert ("articles_new" in _columns("scrape_runs")) is aplicada_antes
+
+        # Sem a transação concorrente a mesma operação passa.
+        result = _run_migrate(*comando, "--yes")
+        assert result.returncode == 0, f"Retry failed:\n{result.stdout}\n{result.stderr}"
+        assert ("articles_new" in _columns("scrape_runs")) is not aplicada_antes
 
 
 _TEXTO_LONGO = (

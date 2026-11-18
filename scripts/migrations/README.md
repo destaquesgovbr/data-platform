@@ -80,6 +80,28 @@ listed as `unaudited_inverse_map` in the log. Apply it with `migrate --target 03
 Never use `scripts/populate_themes.py` in production (it deletes `themes` and reinserts with
 new ids).
 
+## scrape_runs.articles_new (037)
+
+`037_add_scrape_runs_articles_new.sql` adds `scrape_runs.articles_new INTEGER NULL` (rows truly
+inserted in `news` by that scraper call; `articles_saved` keeps meaning inserted + updated) and
+the partial index `idx_scrape_runs_success_articles_new`, the 008 stale-agency index over the new
+column. Additive and metadata-only; the scraper in production names its INSERT columns, so it
+keeps working, with `articles_new` NULL.
+
+**Order:** apply 037 in production (`db-migrate`, `migrate --target 037` after `status`)
+**before** deploying a scraper that writes `articles_new`. Without the column every
+`scrape_runs` INSERT fails, the error is only logged, and the monitor loses every agency's runs.
+Roll back in the reverse order: scraper first, then `rollback 037`.
+
+Both directions take ACCESS EXCLUSIVE on `scrape_runs` and set `lock_timeout = '10s'` (as 032 and
+035 do): behind a long transaction on the table they fail whole, with `lock timeout`, instead of
+queueing every scraper INSERT behind them. Just run them again.
+
+A reader that spans old and new rows with `COALESCE(articles_new, articles_saved) > 0` uses
+neither partial index (the table is small, ~126k rows at most, so a scan is fine). Once the
+90-day retention has replaced every pre-037 row, the query can filter `articles_new > 0` and use
+the new index.
+
 ## Current Migrations
 
 | # | File | Type | Description |
