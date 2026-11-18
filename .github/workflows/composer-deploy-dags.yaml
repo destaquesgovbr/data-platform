@@ -6,8 +6,12 @@ on:
     paths:
       - 'src/data_platform/dags/**'
       - 'src/data_platform/jobs/**'
+      # Também vão para os plugins (importados pelas DAGs)
+      - 'src/data_platform/typesense/**'
+      - 'src/data_platform/cloud_run.py'
       # Versão do pyphen publicada nos plugins (fill_flesch_ptbr)
       - 'poetry.lock'
+      - '.github/workflows/composer-deploy-dags.yaml'
   workflow_dispatch:
 
 permissions:
@@ -16,19 +20,17 @@ permissions:
 
 env:
   PROJECT_ID: inspire-7-finep
-  COMPOSER_ENVIRONMENT: destaquesgovbr-composer
-  COMPOSER_REGION: southamerica-east1
+  # Buckets que recebem os plugins: o do Composer e o do Airflow próprio (Fase 3 da migração
+  # do Composer). As DAGs vão para os mesmos dois pelo default de `buckets` do
+  # airflow-deploy-dags.yml@v3 (o contexto env não chega ao `with:` de workflow reutilizável).
+  # Fase 7 (desligar o Composer): tirar o bucket do Composer daqui e do default do reusable.
+  AIRFLOW_DAG_BUCKETS: "southamerica-east1-destaque-227e22da-bucket destaquesgovbr-airflow"
 
 jobs:
-  deploy-dags:
-    uses: destaquesgovbr/reusable-workflows/.github/workflows/composer-deploy-dags.yml@v1
-    with:
-      dags_local_path: src/data_platform/dags
-      dags_bucket_subdir: data-platform
-
+  # Plugins antes das DAGs: no primeiro deploy no bucket novo as DAGs chegariam antes dos
+  # módulos que elas importam.
   deploy-plugins:
-    name: Deploy plugins to Composer
-    needs: deploy-dags
+    name: Deploy plugins (Composer e Airflow próprio)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -44,15 +46,6 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: inspire-7-finep
-
-      - name: Get Composer plugins bucket
-        id: composer
-        run: |
-          DAGS_BUCKET=$(gcloud composer environments describe ${{ env.COMPOSER_ENVIRONMENT }} \
-            --location=${{ env.COMPOSER_REGION }} \
-            --format="value(config.dagGcsPrefix)")
-          PLUGINS_BUCKET=$(echo "$DAGS_BUCKET" | sed 's|/dags$|/plugins|')
-          echo "plugins_bucket=$PLUGINS_BUCKET" >> $GITHUB_OUTPUT
 
       - name: Prepare plugins directory
         run: |
@@ -87,11 +80,26 @@ jobs:
           python3 -m pip install --no-deps --target /tmp/plugins_vendor "pyphen==${PYPHEN_VERSION}" --no-compile
           test -f /tmp/plugins_vendor/pyphen/dictionaries/hyph_pt_BR.dic
 
+      # Mesmo layout nos dois buckets: gs://<bucket>/plugins/{data_platform,pyphen}/. O
+      # docker-compose do Airflow próprio sincroniza gs://<bucket>/plugins para
+      # /opt/airflow/plugins (no sys.path), como o Composer faz com /home/airflow/gcs/plugins.
       - name: Deploy plugins to GCS
         run: |
-          gsutil -m rsync -r -d \
-            /tmp/plugins/data_platform/ \
-            ${{ steps.composer.outputs.plugins_bucket }}/data_platform/
-          gsutil -m rsync -r -d \
-            /tmp/plugins_vendor/pyphen/ \
-            ${{ steps.composer.outputs.plugins_bucket }}/pyphen/
+          test -n "${AIRFLOW_DAG_BUCKETS// /}"
+          for bucket in ${AIRFLOW_DAG_BUCKETS}; do
+            echo "::group::gs://${bucket}/plugins"
+            gcloud storage rsync --recursive --delete-unmatched-destination-objects \
+              /tmp/plugins/data_platform/ \
+              "gs://${bucket}/plugins/data_platform/"
+            gcloud storage rsync --recursive --delete-unmatched-destination-objects \
+              /tmp/plugins_vendor/pyphen/ \
+              "gs://${bucket}/plugins/pyphen/"
+            echo "::endgroup::"
+          done
+
+  deploy-dags:
+    needs: deploy-plugins
+    uses: destaquesgovbr/reusable-workflows/.github/workflows/airflow-deploy-dags.yml@v3
+    with:
+      dags_local_path: src/data_platform/dags
+      dags_bucket_subdir: data-platform

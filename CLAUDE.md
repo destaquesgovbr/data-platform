@@ -300,7 +300,7 @@ make docker-down  # Para serviços
 | Workflow | Trigger | Descrição |
 |----------|---------|-----------|
 | `main-workflow.yaml` | Push/PR | Lint, test, type check |
-| `composer-deploy-dags.yaml` | Push `dags/` | Deploy DAGs ao Composer |
+| `composer-deploy-dags.yaml` | Push `dags/`, `jobs/`, `typesense/` | Deploy de plugins e DAGs nos buckets do Composer e do Airflow próprio |
 | `bronze-writer-deploy.yaml` | Push | Deploy bronze-writer |
 | `feature-worker-deploy.yaml` | Push | Deploy feature-worker |
 | `thumbnail-worker-deploy.yaml` | Push | Deploy thumbnail-worker |
