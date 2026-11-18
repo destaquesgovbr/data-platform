@@ -93,6 +93,10 @@ keeps working, with `articles_new` NULL.
 `scrape_runs` INSERT fails, the error is only logged, and the monitor loses every agency's runs.
 Roll back in the reverse order: scraper first, then `rollback 037`.
 
+Both directions take ACCESS EXCLUSIVE on `scrape_runs` and set `lock_timeout = '10s'` (as 032 and
+035 do): behind a long transaction on the table they fail whole, with `lock timeout`, instead of
+queueing every scraper INSERT behind them. Just run them again.
+
 A reader that spans old and new rows with `COALESCE(articles_new, articles_saved) > 0` uses
 neither partial index (the table is small, ~126k rows at most, so a scan is fine). Once the
 90-day retention has replaced every pre-037 row, the query can filter `articles_new > 0` and use

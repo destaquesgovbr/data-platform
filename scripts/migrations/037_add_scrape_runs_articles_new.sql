@@ -12,6 +12,12 @@
 -- execuções de todas as agências.
 -- Ref: scraper/_plan/rearquitetura-ingestao.md (Passo 1, item 5)
 
+-- ADD COLUMN nulo é instantâneo, mas pede ACCESS EXCLUSIVE em scrape_runs, mantido até o
+-- COMMIT (inclusive durante a varredura do CREATE INDEX abaixo): não esperar atrás de
+-- transações longas, enfileirando o INSERT do scraper e as leituras do monitor. Sem o lock em
+-- 10s a migração falha inteira (nada fica aplicado) e é só repetir.
+SET LOCAL lock_timeout = '10s';
+
 ALTER TABLE scrape_runs
     ADD COLUMN IF NOT EXISTS articles_new INTEGER;
 

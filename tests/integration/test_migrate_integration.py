@@ -10,6 +10,7 @@ Requires: PostgreSQL with pgvector extension (docker compose up).
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import psycopg2
@@ -126,12 +127,14 @@ CREATE TABLE IF NOT EXISTS schema_version (
 """
 
 
-def _run_migrate(*args: str, needs_db: bool = True) -> subprocess.CompletedProcess:
+def _run_migrate(
+    *args: str, needs_db: bool = True, timeout: float = 120
+) -> subprocess.CompletedProcess:
     """Run the migrate.py script with given arguments."""
     cmd = [sys.executable, str(MIGRATE_SCRIPT), *args]
     if needs_db:
         cmd.extend(["--db-url", DATABASE_URL])
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
 def _apply_concurrent_migration(version: str):
@@ -675,6 +678,48 @@ class TestScrapeRunsArticlesNewMigration:
         assert result.returncode == 0, f"Re-apply failed:\n{result.stdout}\n{result.stderr}"
         assert _columns("scrape_runs")["articles_new"] == ("integer", "YES")
         assert "idx_scrape_runs_success_articles_new" in _indexes("scrape_runs")
+
+    @pytest.mark.parametrize(
+        ("comando", "aplicada_antes"),
+        [(("migrate", "--target", "037"), False), (("rollback", "037"), True)],
+        ids=["migrate", "rollback"],
+    )
+    def test_037_desiste_do_lock_em_vez_de_enfileirar_o_scraper(self, comando, aplicada_antes):
+        """lock_timeout: atrás de uma transação aberta em scrape_runs a 037 falha inteira.
+
+        Sem ele o pedido de ACCESS EXCLUSIVE esperaria sem prazo, e todo INSERT do scraper e
+        toda leitura do monitor entrariam na fila atrás dele.
+        """
+        if aplicada_antes:
+            _apply_all_migrations()
+        else:
+            result = _run_migrate("migrate", "--target", "036", "--yes")
+            assert result.returncode == 0, f"Setup failed:\n{result.stdout}\n{result.stderr}"
+
+        leitor = psycopg2.connect(DATABASE_URL)
+        try:
+            with leitor.cursor() as cur:
+                # ACCESS SHARE até o fim da transação, como um SELECT do monitor em andamento.
+                cur.execute("SELECT count(*) FROM scrape_runs")
+            inicio = time.monotonic()
+            try:
+                result = _run_migrate(*comando, "--yes", timeout=60)
+            except subprocess.TimeoutExpired:
+                pytest.fail(f"`{' '.join(comando)}` esperou o lock sem prazo (sem lock_timeout)")
+            espera = time.monotonic() - inicio
+        finally:
+            leitor.rollback()
+            leitor.close()
+
+        assert result.returncode != 0
+        assert "lock timeout" in result.stdout + result.stderr
+        assert espera < 45
+        assert ("articles_new" in _columns("scrape_runs")) is aplicada_antes
+
+        # Sem a transação concorrente a mesma operação passa.
+        result = _run_migrate(*comando, "--yes")
+        assert result.returncode == 0, f"Retry failed:\n{result.stdout}\n{result.stderr}"
+        assert ("articles_new" in _columns("scrape_runs")) is not aplicada_antes
 
 
 _TEXTO_LONGO = (
