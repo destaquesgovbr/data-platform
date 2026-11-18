@@ -181,6 +181,47 @@ CREATE TABLE sync_log (
 
 ---
 
+### scrape_runs
+
+One row per agency per scraper call, written only by the scraper (`record_scrape_run`).
+90-day retention (`cleanup_old_scrape_runs` DAG, scraper repo). Migrations 008, 026 and 037.
+
+```sql
+CREATE TABLE scrape_runs (
+    id                      SERIAL PRIMARY KEY,
+    agency_key              VARCHAR(100) NOT NULL,
+    status                  VARCHAR(20) NOT NULL CHECK (status IN ('success', 'error')),
+    error_category          VARCHAR(50),        -- ErrorCategory value (scraper)
+    error_message           TEXT,
+    articles_scraped        INTEGER DEFAULT 0,
+    articles_saved          INTEGER DEFAULT 0,  -- rows written: inserted + updated
+    execution_time_seconds  REAL,
+    scraped_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    fallback_triggered      BOOLEAN DEFAULT FALSE,  -- 026
+    articles_new            INTEGER                 -- 037: rows truly inserted in news
+);
+```
+
+**Indexes**:
+- `idx_scrape_runs_agency_scraped` on `(agency_key, scraped_at DESC)`
+- `idx_scrape_runs_status` on `(status, scraped_at DESC)`
+- `idx_scrape_runs_scraped_agency` on `(scraped_at DESC, agency_key)`
+- `idx_scrape_runs_success_articles` on `(agency_key, scraped_at DESC)` WHERE `status = 'success' AND articles_saved > 0`
+- `idx_scrape_runs_success_articles_new` on `(agency_key, scraped_at DESC)` WHERE `status = 'success' AND articles_new > 0` (037)
+- `idx_scrape_runs_fallback` on `(fallback_triggered, scraped_at DESC)` WHERE `fallback_triggered = true`
+
+**Key fields**:
+- `articles_saved`: what the insert wrote, new rows **plus** existing rows matched by
+  `(agency_key, url)` and updated. Inflated by re-scrapes (EBC re-reads the whole day on every
+  run; the Plone 6 fallback starts with no known URLs).
+- `articles_new`: rows actually inserted in `news` by that call (the insert phase `RETURNING`;
+  with `allow_update=true`, only rows with `xmax = 0`). NULL = not measured (rows before 037 or
+  from a scraper that does not fill it yet), not zero. Readers that span both use
+  `COALESCE(articles_new, articles_saved)`.
+
+---
+
 ### schema_version
 
 Tracks schema migrations.

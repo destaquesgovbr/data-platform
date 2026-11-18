@@ -93,7 +93,7 @@ data-platform/
 │   ├── unit/
 │   └── integration/
 ├── scripts/
-│   ├── migrations/                 # Database migrations (001-012)
+│   ├── migrations/                 # Database migrations (001-037; 030/031 reservadas)
 │   └── bigquery/                   # BigQuery table creation SQL
 ├── docker/                         # Dockerfiles
 │   ├── postgres/                   # PostgreSQL init scripts
