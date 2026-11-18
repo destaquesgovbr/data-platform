@@ -205,10 +205,12 @@ class TestConfiguracaoDoDag:
         assert captured["dag_kwargs"]["catchup"] is False
         assert captured["dag_kwargs"]["max_active_runs"] == 1
 
-    def test_nao_nasce_pausado(self, monkeypatch):
-        """O DAG assume o B5 sozinho apos o deploy (Composer cria DAGs pausados por padrao)."""
+    def test_nasce_com_o_padrao_do_ambiente(self, monkeypatch):
+        """Sem is_paused_upon_creation: no Airflow proprio (dags_are_paused_at_creation=True)
+        nasce pausado e nao roda junto com o Composer ate a virada (Fase 5); com False
+        dispararia o mesmo Job nos dois e gastaria a cota de LLM em dobro."""
         _, captured = _load(monkeypatch)
-        assert captured["dag_kwargs"]["is_paused_upon_creation"] is False
+        assert "is_paused_upon_creation" not in captured["dag_kwargs"]
 
     def test_retry_unico_e_timeout_dentro_do_job(self, monkeypatch):
         _, captured = _load(monkeypatch)

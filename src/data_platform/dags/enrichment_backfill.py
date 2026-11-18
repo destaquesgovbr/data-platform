@@ -48,6 +48,13 @@ cortaria ~70% do L1 19. select=theme-code + theme_code=19 pega so o L1 19.
 Desligar: pausar o DAG na UI do Airflow (o estado de pausa persiste entre deploys) ou
 remover este arquivo por PR. Quando a campanha termina os runs viram no-op
 ("nada pendente"), entao pausar e so economia de execucoes do Job.
+
+Pausa: o DAG nasce com o padrao do ambiente (dags_are_paused_at_creation), sem
+is_paused_upon_creation. No Composer ele ja existe e segue despausado (a flag so vale na
+criacao). No Airflow proprio (Fase 3 da migracao do Composer, deploy nos dois buckets) ele
+nasce pausado e so e despausado na virada (Fase 5), junto com a pausa no Composer: com a
+flag em False rodaria nos dois ao mesmo tempo, disparando o mesmo Job e gastando a cota de
+LLM em dobro.
 """
 
 import datetime as dt
@@ -259,7 +266,7 @@ def build_overrides(params: Mapping[str, Any]) -> dict:
     start_date=dt.datetime(2025, 1, 1),
     catchup=False,
     max_active_runs=1,
-    is_paused_upon_creation=False,
+    # Sem is_paused_upon_creation: nasce com o padrao do ambiente (ver "Pausa" no docstring).
     tags=["silver", "enrichment", "backfill"],
     default_args={
         "owner": "data-platform",
