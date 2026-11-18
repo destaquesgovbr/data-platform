@@ -18,12 +18,22 @@ permissions:
   contents: read
   id-token: write
 
+# Um deploy por vez, inteiro (plugins e DAGs): os dois rsync apagam no destino, e sem isso os
+# plugins de um run e as DAGs de outro se misturariam nos buckets. Com cancel-in-progress
+# false o run em andamento termina e só o mais novo fica na fila. O nome não pode ser o do
+# grupo do job de deploy do v3 (airflow-deploy-dags-<repo>-<subpasta>): seria um deadlock.
+concurrency:
+  group: data-platform-airflow-deploy
+  cancel-in-progress: false
+
 env:
   PROJECT_ID: inspire-7-finep
-  # Buckets que recebem os plugins: o do Composer e o do Airflow próprio (Fase 3 da migração
-  # do Composer). As DAGs vão para os mesmos dois pelo default de `buckets` do
-  # airflow-deploy-dags.yml@v3 (o contexto env não chega ao `with:` de workflow reutilizável).
-  # Fase 7 (desligar o Composer): tirar o bucket do Composer daqui e do default do reusable.
+  # Única lista de buckets do deploy (plugins e DAGs): o do Composer e o do Airflow próprio
+  # (Fase 3 da migração do Composer). O contexto env não chega ao `with:` de workflow
+  # reutilizável, então o job de plugins a repassa ao airflow-deploy-dags.yml@v3 como output,
+  # e o default de `buckets` do v3 não vale aqui.
+  # Fase 7 (desligar o Composer): tirar o bucket do Composer desta linha (antes de apagar o
+  # bucket, senão o rsync dos plugins falha e o deploy das DAGs não roda).
   AIRFLOW_DAG_BUCKETS: "southamerica-east1-destaque-227e22da-bucket destaquesgovbr-airflow"
 
 jobs:
@@ -35,8 +45,22 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    outputs:
+      buckets: ${{ steps.buckets.outputs.buckets }}
     steps:
+      # Sem a guarda o laço do rsync não roda e o job fica verde sem publicar nada.
+      - name: Conferir buckets
+        id: buckets
+        run: |
+          test -n "${AIRFLOW_DAG_BUCKETS// /}"
+          echo "buckets=${AIRFLOW_DAG_BUCKETS}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+
+      # A versão da imagem do Airflow próprio (infra/airflow/Dockerfile) e da validação do v3.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - uses: google-github-actions/auth@v2
         with:
@@ -69,6 +93,19 @@ jobs:
           # Create package __init__.py
           touch /tmp/plugins/data_platform/__init__.py
 
+      # A validação do v3 (job deploy-dags) só roda com os plugins já publicados. Este passo
+      # barra ao menos erro de sintaxe nas DAGs e nos plugins antes de publicar qualquer coisa.
+      # Se a validação do v3 falhar depois (ex.: na instalação do Airflow), os plugins novos
+      # ficam nos buckets com as DAGs antigas: rodar de novo os jobs que falharam.
+      - name: Validar sintaxe das DAGs e dos plugins (py_compile)
+        env:
+          # Os .pyc vão para fora de /tmp/plugins, que é publicado.
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/pycache
+        run: |
+          find src/data_platform/dags /tmp/plugins/data_platform -type f -name '*.py' \
+            -not -path '*/__pycache__/*' -print0 | sort -z | xargs -0 python -m py_compile
+          test -z "$(find /tmp/plugins -name __pycache__ -print -quit)"
+
       # O Composer não tem pyphen (pacotes PyPI do ambiente vêm do Terraform). A task
       # fill_flesch_ptbr (aggregate_engagement) precisa dele: instala a versão travada no
       # poetry.lock (a mesma do feature-worker, puro Python) na raiz dos plugins, que está no
@@ -85,7 +122,6 @@ jobs:
       # /opt/airflow/plugins (no sys.path), como o Composer faz com /home/airflow/gcs/plugins.
       - name: Deploy plugins to GCS
         run: |
-          test -n "${AIRFLOW_DAG_BUCKETS// /}"
           for bucket in ${AIRFLOW_DAG_BUCKETS}; do
             echo "::group::gs://${bucket}/plugins"
             gcloud storage rsync --recursive --delete-unmatched-destination-objects \
@@ -103,3 +139,4 @@ jobs:
     with:
       dags_local_path: src/data_platform/dags
       dags_bucket_subdir: data-platform
+      buckets: ${{ needs.deploy-plugins.outputs.buckets }}
