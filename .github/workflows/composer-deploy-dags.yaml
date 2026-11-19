@@ -1,4 +1,4 @@
-name: Deploy DAGs to Composer
+name: Deploy DAGs to Airflow
 
 on:
   push:
@@ -28,19 +28,21 @@ concurrency:
 
 env:
   PROJECT_ID: inspire-7-finep
-  # Única lista de buckets do deploy (plugins e DAGs): o do Composer e o do Airflow próprio
-  # (Fase 3 da migração do Composer). O contexto env não chega ao `with:` de workflow
-  # reutilizável, então o job de plugins a repassa ao airflow-deploy-dags.yml@v3 como output,
-  # e o default de `buckets` do v3 não vale aqui.
-  # Fase 7 (desligar o Composer): tirar o bucket do Composer desta linha (antes de apagar o
-  # bucket, senão o rsync dos plugins falha e o deploy das DAGs não roda).
-  AIRFLOW_DAG_BUCKETS: "southamerica-east1-destaque-227e22da-bucket destaquesgovbr-airflow"
+  # Única lista de buckets do deploy (plugins e DAGs): só o do Airflow próprio (VM
+  # destaquesgovbr-airflow), cujo dag-sync espelha dags/ e plugins/ na VM a cada 60 s. O
+  # Composer foi desligado na Fase 7 da migração e o bucket dele
+  # (southamerica-east1-destaque-227e22da-bucket) não recebe mais nada. O contexto env não
+  # chega ao `with:` de workflow reutilizável, então o job de plugins repassa a lista ao
+  # airflow-deploy-dags.yml@v3 como output, e o default de `buckets` do v3 não vale aqui.
+  # Um bucket na lista que não exista mais faz o rsync dos plugins falhar, e as DAGs não são
+  # publicadas em lugar nenhum.
+  AIRFLOW_DAG_BUCKETS: "destaquesgovbr-airflow"
 
 jobs:
   # Plugins antes das DAGs: no primeiro deploy no bucket novo as DAGs chegariam antes dos
   # módulos que elas importam.
   deploy-plugins:
-    name: Deploy plugins (Composer e Airflow próprio)
+    name: Deploy plugins (Airflow próprio)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -73,7 +75,7 @@ jobs:
 
       - name: Prepare plugins directory
         run: |
-          # Only deploy job modules needed by Composer DAGs
+          # Only deploy job modules needed by the DAGs
           mkdir -p /tmp/plugins/data_platform/jobs
           mkdir -p /tmp/plugins/data_platform/typesense
           cp src/data_platform/jobs/__init__.py /tmp/plugins/data_platform/jobs/
@@ -106,10 +108,11 @@ jobs:
             -not -path '*/__pycache__/*' -print0 | sort -z | xargs -0 python -m py_compile
           test -z "$(find /tmp/plugins -name __pycache__ -print -quit)"
 
-      # O Composer não tem pyphen (pacotes PyPI do ambiente vêm do Terraform). A task
-      # fill_flesch_ptbr (aggregate_engagement) precisa dele: instala a versão travada no
-      # poetry.lock (a mesma do feature-worker, puro Python) na raiz dos plugins, que está no
-      # sys.path dos workers. Trocar a versão muda o dicionário e os valores do Flesch pt-BR.
+      # A imagem do Airflow próprio não tem pyphen (infra/airflow/requirements.txt o deixa de
+      # fora de propósito). A task fill_flesch_ptbr (aggregate_engagement) precisa dele:
+      # instala a versão travada no poetry.lock (a mesma do feature-worker, puro Python) na
+      # raiz dos plugins, que está no sys.path das tasks. Trocar a versão muda o dicionário e
+      # os valores do Flesch pt-BR.
       - name: Vendor pyphen into plugins
         run: |
           PYPHEN_VERSION=$(python3 -c "import tomllib; print(next(p['version'] for p in tomllib.load(open('poetry.lock', 'rb'))['package'] if p['name'] == 'pyphen'))")
@@ -117,9 +120,8 @@ jobs:
           python3 -m pip install --no-deps --target /tmp/plugins_vendor "pyphen==${PYPHEN_VERSION}" --no-compile
           test -f /tmp/plugins_vendor/pyphen/dictionaries/hyph_pt_BR.dic
 
-      # Mesmo layout nos dois buckets: gs://<bucket>/plugins/{data_platform,pyphen}/. O
-      # docker-compose do Airflow próprio sincroniza gs://<bucket>/plugins para
-      # /opt/airflow/plugins (no sys.path), como o Composer faz com /home/airflow/gcs/plugins.
+      # Layout gs://<bucket>/plugins/{data_platform,pyphen}/. O dag-sync do docker compose da
+      # VM sincroniza gs://<bucket>/plugins para /opt/airflow/plugins, que está no sys.path.
       - name: Deploy plugins to GCS
         run: |
           for bucket in ${AIRFLOW_DAG_BUCKETS}; do

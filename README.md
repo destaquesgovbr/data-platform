@@ -46,7 +46,7 @@ Enriquecimento IA (Bedrock) + Embeddings
 PostgreSQL (Cloud SQL) ← Fonte de verdade (Silver)
     ↓
 ┌──────────────────────────────────────────────────────────────────┐
-│                     Airflow DAGs (Composer)                       │
+│                 Airflow DAGs (Airflow próprio, VM)                │
 ├─────────────────┬──────────────┬─────────────────────────────────┤
 │ sync_pg_to_     │ compute_     │ aggregate_engagement            │
 │ bigquery        │ trending     │ compute_clusters                │
@@ -113,7 +113,7 @@ data-platform/
 
 ---
 
-## Airflow DAGs (Cloud Composer)
+## Airflow DAGs (Airflow próprio)
 
 | DAG | Schedule | Camada | Descrição |
 |-----|----------|--------|-----------|
@@ -125,7 +125,9 @@ data-platform/
 | `sync_umami_to_bigquery` | Diário 9 AM | Gold | Umami analytics → BigQuery |
 | `verify_news_integrity` | A cada 30 min | Silver | Verifica integridade de conteúdo |
 
-Deploy: `composer-deploy-dags.yaml` (automático ao modificar `src/data_platform/dags/`)
+Horários em BRT (`America/Sao_Paulo`). Lista completa (inclui `compute_entity_trending`, `project_entity_graph` e os backfills de NER, canonicalização e enriquecimento) em [docs/dags/README.md](docs/dags/README.md).
+
+Deploy: `composer-deploy-dags.yaml` (nome histórico; automático ao modificar `src/data_platform/dags/`), que publica no bucket `gs://destaquesgovbr-airflow` do Airflow próprio (VM `destaquesgovbr-airflow`, UI em https://airflow.dgb.app.gov.br). Operação: [docs/runbooks/airflow-vm.md](docs/runbooks/airflow-vm.md).
 
 ---
 

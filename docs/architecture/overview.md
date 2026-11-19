@@ -30,7 +30,7 @@ The Data Platform is an event-driven system that processes Brazilian government 
 │  PostgreSQL (Cloud SQL)      Bedrock (LLM)                          │
 │  Silver layer                 → themes + summaries                  │
 │       │                                                             │
-│       ↓ Airflow DAGs (Cloud Composer)                               │
+│       ↓ Airflow DAGs (Airflow próprio, VM)                          │
 │       │                                                             │
 │  BigQuery (Gold layer)       Typesense         HuggingFace          │
 │  Analytics/trending          Search            Open Data            │
@@ -81,11 +81,11 @@ See [Workers documentation](../workers/README.md) for details on each worker, to
 
 ---
 
-## Airflow DAGs (Cloud Composer)
+## Airflow DAGs (self-managed Airflow)
 
-7 DAGs in production, orchestrated by Cloud Composer (southamerica-east1). They handle batch processing and data movement between Medallion layers (Silver↔Gold).
+12 DAGs in production, orchestrated by a self-managed Airflow 3.1.8 on the VM `destaquesgovbr-airflow` (docker compose, `LocalExecutor`, southamerica-east1-a; UI at https://airflow.dgb.app.gov.br behind IAP). Cloud Composer was shut down in Phase 7 of the migration (`infra/_plan/migrar-composer-para-airflow-proprio.md`). The DAGs handle batch processing and data movement between Medallion layers (Silver↔Gold), plus the NER, canonicalization and enrichment backfills (Cloud Run Jobs).
 
-Deploy: `composer-deploy-dags.yaml` (triggered on push to `src/data_platform/dags/`)
+Deploy: `composer-deploy-dags.yaml` (historical name; triggered on push to `src/data_platform/{dags,jobs,typesense}/`, `cloud_run.py` or `poetry.lock`) publishes plugins and DAGs to `gs://destaquesgovbr-airflow`, which the VM's `dag-sync` mirrors every 60 s.
 
 See [DAGs documentation](../dags/README.md) for schedules, variables, and details on each DAG.
 
@@ -137,7 +137,7 @@ Workers recebem push subscriptions (HTTP POST para `/process`) com message base6
 ### Infrastructure
 - **Cloud**: Google Cloud Platform
 - **IaC**: Terraform (repo: destaquesgovbr/infra)
-- **Orchestration**: Cloud Composer (Airflow)
+- **Orchestration**: self-managed Airflow 3.1 (VM `destaquesgovbr-airflow`)
 - **Messaging**: Pub/Sub
 - **CI/CD**: GitHub Actions (10 workflows)
 
@@ -196,10 +196,11 @@ Centralized definition of computed features prevents drift between documentation
 
 ## Resilience
 
-### Cloud Composer
-- `prevent_destroy=true` in Terraform
-- Health check every 6h auto-deploys if bucket is empty
-- Cross-repo trigger on Composer changes
+### Airflow (VM `destaquesgovbr-airflow`)
+- GitOps: VM, compose, image and alerts managed by Terraform in the `infra` repo
+- Metadata Postgres on a data disk with daily snapshots (7-day retention)
+- "Airflow sem heartbeat" alert (DAG `airflow_heartbeat`, 45 min without a run) plus memory, disk and Ops Agent alerts, delivered to Telegram via `dgb.ops.alerts`
+- DAGs and plugins are mirrored from `gs://destaquesgovbr-airflow`; redeploying is re-running the repo's deploy workflow
 
 ### Workers
 - Pub/Sub retry with exponential backoff
@@ -217,4 +218,4 @@ See also:
 - [Database Schema](../database/schema.md)
 - [Development Setup](../development/setup.md)
 - [Typesense](../typesense/README.md)
-- [Composer Recovery Runbook](../runbooks/composer-recovery.md)
+- [Airflow VM Runbook](../runbooks/airflow-vm.md)

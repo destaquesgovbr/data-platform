@@ -19,7 +19,7 @@ Comprehensive documentation for the DestaquesGovBr Data Platform.
 | **Development** | [Docker Setup](development/docker-setup.md) | Local PostgreSQL + Typesense |
 | **Development** | [PostgresManager](development/postgres-manager.md) | PostgreSQL storage manager guide |
 | **Typesense** | [Integration](typesense/README.md) | Search engine integration |
-| **Runbooks** | [Composer Recovery](runbooks/composer-recovery.md) | Cloud Composer troubleshooting |
+| **Runbooks** | [Airflow VM](runbooks/airflow-vm.md) | Operação do Airflow próprio (VM `destaquesgovbr-airflow`) |
 | **Runbooks** | [Migration Rollback](runbooks/migration-rollback.md) | Database migration rollback |
 | **Migration** | [Performance](migration/performance-optimization.md) | Performance optimization notes |
 
@@ -48,7 +48,7 @@ docs/
 ├── migration/
 │   └── performance-optimization.md     # Performance tuning notes
 ├── runbooks/
-│   ├── composer-recovery.md            # Cloud Composer recovery
+│   ├── airflow-vm.md                   # Airflow próprio: operação e recuperação
 │   └── migration-rollback.md           # Migration rollback procedures
 └── typesense/
     ├── README.md                       # Typesense overview
@@ -90,12 +90,12 @@ make test         # Run tests
 
 ### Runbooks
 
-- [Composer Recovery](runbooks/composer-recovery.md) — When DAGs disappear from Airflow
+- [Airflow VM](runbooks/airflow-vm.md) — DAGs que somem ou não rodam, re-execução, catch-up, logs e alerta de heartbeat
 - [Migration Rollback](runbooks/migration-rollback.md) — Rolling back database migrations
 
 ### Monitoring
 
-- Airflow UI: Cloud Composer web interface
+- Airflow UI: https://airflow.dgb.app.gov.br (IAP)
 - BigQuery: dataset `dgb_gold` for analytics
 - Workers: Cloud Run logs and metrics
 
@@ -104,10 +104,10 @@ make test         # Run tests
 ## External Resources
 
 - [Cloud SQL Documentation](https://cloud.google.com/sql/docs/postgres)
-- [Cloud Composer Docs](https://cloud.google.com/composer/docs)
+- [Apache Airflow 3.1 Docs](https://airflow.apache.org/docs/apache-airflow/3.1.8/)
 - [Typesense Documentation](https://typesense.org/docs/)
 - [BigQuery Docs](https://cloud.google.com/bigquery/docs)
 
 ---
 
-**Last updated**: 2026-05-13
+**Last updated**: 2026-11-18

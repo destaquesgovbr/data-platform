@@ -1,6 +1,14 @@
 # Airflow DAGs
 
-DAGs em produção no Cloud Composer (southamerica-east1), responsáveis por processamento batch e movimentação de dados entre camadas da arquitetura Medallion.
+DAGs em produção no Airflow próprio (Airflow 3.1.8 na VM `destaquesgovbr-airflow`, UI em
+<https://airflow.dgb.app.gov.br>), responsáveis por processamento batch, movimentação de dados entre
+camadas da arquitetura Medallion e backfills via Cloud Run Jobs. O Cloud Composer foi desligado na
+Fase 7 da migração. Operação, re-execução e logs: [runbook do Airflow](../runbooks/airflow-vm.md).
+
+Os schedules valem em `America/Sao_Paulo` (`core.default_timezone` da VM); `run_id` e
+`logical_date` aparecem em UTC. Todas as DAGs têm `catchup=False`: ao despausar, o horário mais
+recente que passou roda na hora (ver o runbook antes de despausar `sync_pg_to_bigquery` e
+`sync_umami_to_bigquery`, que usam `WRITE_APPEND`).
 
 ---
 
@@ -15,6 +23,11 @@ DAGs em produção no Cloud Composer (southamerica-east1), responsáveis por pro
 | `generate_video_thumbnails` | `0 */4 * * *` | Silver | Video thumbnails |
 | `sync_umami_to_bigquery` | `0 9 * * *` | Gold | Umami → BigQuery |
 | `verify_news_integrity` | `*/30 * * * *` | Silver | Content integrity |
+| `compute_entity_trending` | `0 */6 * * *` | Silver | Trending de entidades → `entity_trending_scores` |
+| `project_entity_graph` | `0 */6 * * *` | Silver | Grafo de entidades (`news_entities`, `entity_edges`) e `news.content_key` |
+| `ner_backfill` | `0 2-23/6 * * *` | Silver | Backfill do NER histórico (Cloud Run Job) |
+| `canonicalize_backfill` | `0 */6 * * *` | Silver | Canonicalização de entidades (Cloud Run Job) |
+| `enrichment_backfill` | `30 1,4,22 * * *` | Silver | Backfills de tema, resumo e sentimento (Cloud Run Job, com params) |
 
 ---
 
@@ -52,7 +65,7 @@ criam ou reescrevem linhas sem ela. Mesmo cálculo do worker
 
 - **Job module**: `src/data_platform/jobs/features/flesch_ptbr_fill.py`
 - **Plugins**: o `composer-deploy-dags` instala o `pyphen` da versão do `poetry.lock` em
-  `plugins/pyphen/` (o ambiente não tem o pacote).
+  `plugins/pyphen/` (a imagem do Airflow não tem o pacote).
 - **Varredura completa** (manual): `dags trigger aggregate_engagement --conf '{"flesch_lookback_days": null}'`.
 
 ### compute_clusters
@@ -124,9 +137,10 @@ Workflow: `.github/workflows/composer-deploy-dags.yaml`
 gh workflow run composer-deploy-dags.yaml
 ```
 
-Desde a Fase 3 da migração do Composer o deploy publica nos dois buckets, o do Composer
-(`southamerica-east1-destaque-227e22da-bucket`) e o do Airflow próprio (`destaquesgovbr-airflow`),
-com `gcloud storage rsync --recursive --delete-unmatched-destination-objects`:
+O deploy publica no bucket do Airflow próprio (`gs://destaquesgovbr-airflow`), com
+`gcloud storage rsync --recursive --delete-unmatched-destination-objects`. O nome do workflow é
+histórico: desde a Fase 7 da migração (Composer desligado) o bucket do Composer
+(`southamerica-east1-destaque-227e22da-bucket`) não recebe mais nada.
 
 1. **Plugins** (job `deploy-plugins`, primeiro): `plugins/data_platform/` (os módulos de
    `jobs/`, `typesense/` e `cloud_run.py` importados pelas DAGs) e `plugins/pyphen/`, em cada
@@ -136,17 +150,19 @@ com `gcloud storage rsync --recursive --delete-unmatched-destination-objects`:
    `reusable-workflows/.github/workflows/airflow-deploy-dags.yml@v3`, que recebe a mesma lista
    (output `buckets` do job de plugins; o default de `buckets` do v3 não vale aqui).
 
-`AIRFLOW_DAG_BUCKETS` é a única lista do deploy. Um deploy roda por vez (grupo de concorrência
-`data-platform-airflow-deploy`): o em andamento termina e só o mais novo espera na fila.
+`AIRFLOW_DAG_BUCKETS` é a única lista do deploy (hoje só `destaquesgovbr-airflow`). Um deploy roda
+por vez (grupo de concorrência `data-platform-airflow-deploy`): o em andamento termina e só o mais
+novo espera na fila.
 
 A validação completa do v3 (Airflow 3.1.8 com constraints) roda com os plugins já publicados.
 Se ela falhar (ex.: na instalação do Airflow), os plugins novos ficam nos buckets com as DAGs
 antigas: rodar de novo os jobs que falharam (`gh run rerun <id> --failed`) logo em seguida.
 
-Na Fase 7 (desligar o Composer) o bucket do Composer sai de `AIRFLOW_DAG_BUCKETS`, **antes** de o
-bucket ser apagado: com o bucket na lista e já apagado o rsync dos plugins falha e as DAGs não são
-publicadas em lugar nenhum. No Airflow próprio as DAGs nascem pausadas
-(`dags_are_paused_at_creation=True`) e só são despausadas na virada (Fase 5).
+Um bucket na lista que não exista mais faz o rsync dos plugins falhar, e as DAGs não são publicadas
+em lugar nenhum. Na VM, o `dag-sync` espelha o bucket a cada 60 s: um arquivo novo aparece em até
+~2 min e uma mudança numa DAG existente vale em até ~4 min. DAG nova nasce pausada
+(`dags_are_paused_at_creation=True`): despause na UI depois do deploy, conferindo o catch-up no
+[runbook](../runbooks/airflow-vm.md#catch-up-ao-despausar).
 
 Ver [Decentralized DAGs](../architecture/decentralized-dags.md) para convenção completa.
 
@@ -158,11 +174,16 @@ Ver [Decentralized DAGs](../architecture/decentralized-dags.md) para convenção
 src/data_platform/dags/
 ├── sync_pg_to_bigquery.py
 ├── compute_trending.py
+├── compute_entity_trending.py
 ├── aggregate_engagement.py
 ├── compute_clusters.py
+├── project_entity_graph.py
 ├── generate_video_thumbnails.py
 ├── sync_umami_to_bigquery.py
-└── verify_news_integrity.py
+├── verify_news_integrity.py
+├── ner_backfill.py
+├── canonicalize_backfill.py
+└── enrichment_backfill.py
 ```
 
 DAGs importam jobs de `src/data_platform/jobs/` para a lógica de processamento. Todas usam o decorator `@dag` do Airflow TaskFlow API e `owner: "data-platform"` nos default_args.
