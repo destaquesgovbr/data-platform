@@ -102,9 +102,12 @@ gcloud compute ssh destaquesgovbr-airflow --zone=southamerica-east1-a \
   --command='cd /opt/airflow && sudo docker compose exec -T airflow-scheduler airflow dags list-import-errors'
 ```
 
-A REST API (`/api/v2`) também passa pelo IAP. Para scripts, o caminho mais simples é a CLI por SSH;
-o `streamlit-infra-health` é o exemplo de cliente que atravessa o IAP e pega o token do Airflow em
-`/auth/token`.
+A REST API (`/api/v2`) também passa pelo IAP. Para scripts, o caminho mais simples é a CLI por SSH.
+Um cliente da API precisa de dois tokens: um ID token com audiência igual ao client id OAuth do IAP,
+no header `Proxy-Authorization: Bearer` (o IAP lê esse header quando o `Authorization` é da
+aplicação), e o JWT do Airflow, pego em `GET /auth/token` (também pelo IAP) e mandado em
+`Authorization: Bearer`. A página de DAGs do `streamlit-infra-health` faz assim a partir do
+streamlit-infra-health#24 (`app/data/airflow.py`).
 
 ---
 
@@ -127,7 +130,8 @@ af dags next-execution sync_pg_to_bigquery
 af dags pause compute_trending
 af dags unpause compute_trending
 
-# Disparar um run manual (com params, se a DAG tiver)
+# Disparar um run manual (com params, se a DAG tiver). Numa DAG pausada o run fica `queued`
+# e só roda depois do despause. Nunca em sync_pg_to_bigquery e sync_umami_to_bigquery.
 af dags trigger compute_trending
 af dags trigger aggregate_engagement --conf '{"flesch_lookback_days": null}'
 
@@ -150,8 +154,9 @@ af tasks clear aggregate_engagement -t '^fill_flesch_ptbr$' -s 2026-11-18T08:00:
 ```
 
 Sem `-y` o comando lista o que vai limpar e pede confirmação; use assim na primeira vez. Na UI o
-equivalente é **Clear** no run ou na task (com "Only failed"). Runs manuais disparados sem
-`--logical-date` têm `logical_date` vazia e não casam com `-s`/`-e`: limpe esses pela UI.
+equivalente é **Clear** no run ou na task (com "Only failed"). Runs manuais disparados pela CLI
+sem `--logical-date` têm `logical_date` vazia e não casam com `-s`/`-e`; os disparados pela UI têm a
+hora do disparo, com segundos. Limpe os runs manuais pela UI.
 
 Antes de limpar uma task que **terminou com sucesso**, confira na tabela abaixo se a DAG aguenta
 rodar duas vezes o mesmo período.
@@ -189,6 +194,9 @@ Os três disparam Cloud Run Jobs e são retomáveis, então refazer é seguro:
 - **Run extra fora do horário:** `af dags trigger <dag>`. Com `max_active_runs=1` ele espera o run
   em andamento. Evite disparar `ner_backfill` e `enrichment_backfill` ao mesmo tempo (mesmo Job e
   mesmo banco) e prefira as janelas noturnas, fora do pico do worker ao vivo.
+- **DAG pausada:** o run disparado fica `queued` e só começa quando a DAG é despausada. O despause
+  também roda na hora o horário mais recente que passou ([Catch-up ao despausar](#catch-up-ao-despausar)):
+  são dois runs seguidos, e cada um gasta cota.
 - **`enrichment_backfill` com outros params** (campanha, datas, modelo): ensaie com `dry_run`, que
   só seleciona e lista, e depois rode de verdade com os mesmos params:
 
@@ -223,27 +231,40 @@ WHERE DATE(created_at) BETWEEN '2026-11-14' AND '2026-11-18'
 GROUP BY dia ORDER BY dia;
 ```
 
+O `SELECT` é a única fonte confiável do que já foi carregado. O metastore da VM não tem os runs do
+Composer (que carregou até 17/11/2026), e o `airflow-db-clean` semanal apaga os runs com mais de 30
+dias. A ausência de run no Airflow não quer dizer que o dia falta no BigQuery.
+
 Então:
 
 - **Run do dia falhou na task de carga** (`sync_facts`, `sync_pageviews`, `sync_events`): o dia não
   entrou. `tasks clear` só das tasks com falha (`-f`) daquele run.
-- **Dia sem run nenhum** (ex.: o Airflow ficou fora): crie só os runs que faltam, com a
-  `logical_date` do horário (o dia carregado é o anterior a ela). `--reprocess-behavior none` (o
-  padrão) pula as datas que já têm run, e `--dry-run` mostra quais seriam criadas:
+- **Dia sem run nenhum** (ex.: o Airflow ficou fora): crie só os runs dos dias que o `SELECT`
+  mostrou faltando, com a `logical_date` do horário (o dia carregado é o anterior a ela). O
+  `--reprocess-behavior none` (o padrão) só pula as datas que têm run no metastore da VM: não
+  protege os dias carregados pelo Composer nem os dias cujos runs o `airflow-db-clean` já apagou.
+  Por isso o intervalo `--from-date`/`--to-date` deve cobrir só os horários desses dias. O
+  `--dry-run` mostra quais runs seriam criados:
 
   ```bash
+  # Ex.: faltam no BigQuery os dias 10/12 e 11/12 → horários de 11/12 e 12/12 às 07:00 BRT
   af backfill create --dag-id sync_pg_to_bigquery \
-    --from-date 2026-11-16T07:00:00-03:00 --to-date 2026-11-18T07:00:00-03:00 \
+    --from-date 2026-12-11T07:00:00-03:00 --to-date 2026-12-12T07:00:00-03:00 \
     --reprocess-behavior none --dry-run
   ```
 
-  Sem `--dry-run` os runs aparecem na UI (aba Backfills) e rodam pelo scheduler.
+  Sem `--dry-run` os runs aparecem na UI (aba Backfills) e rodam pelo scheduler. **Numa DAG
+  pausada eles ficam `queued`** até o despause, e o despause também roda o horário mais recente que
+  passou: confira o dia desse run antes de despausar ([Catch-up ao despausar](#catch-up-ao-despausar)).
 - **Dia já carregado e é preciso recarregar** (dados corrigidos na origem): apague o dia no
   BigQuery antes (`DELETE ... WHERE DATE(published_at) = '<dia>'`, conferindo antes com o `SELECT`
-  acima) e só então refaça o run.
-- **Não dispare** essas DAGs com `af dags trigger` sem `--logical-date`: o run manual não tem
-  `logical_date`, a DAG usa a hora atual e carrega "ontem", o mesmo dia que o run agendado de hoje
-  carrega (ou já carregou).
+  acima) e só então refaça o run: `tasks clear` do run, se ele está no metastore, ou
+  `backfill create` daquele horário.
+- **Nunca dispare `sync_pg_to_bigquery` nem `sync_umami_to_bigquery` manualmente**, nem pela UI
+  (Trigger), nem pela API, nem com `af dags trigger`. O run manual tem `logical_date` igual à hora
+  do disparo (UI e API) ou vazia (CLI sem `--logical-date`; aí a DAG usa a hora atual). Nos dois
+  casos ele carrega o dia anterior a agora, o mesmo que o run agendado de hoje já carregou ou ainda
+  vai carregar. Para um dia que falta, use o `backfill create` acima, depois do `SELECT`.
 
 ---
 
@@ -268,11 +289,28 @@ dia, se ele já foi carregado por outro caminho (run manual, backfill ou `tasks 
 2. Confira esse dia no BigQuery com o `SELECT` acima.
 3. Se o dia **não** está lá, despause: o run cobre o buraco.
 4. Se o dia **já** está lá, ou apague o dia no BigQuery antes de despausar, ou despause só depois
-   do próximo horário da DAG passar (o run imediato passa a ser o desse horário, que carrega um dia
-   ainda não carregado). Foi o que se fez na virada do Composer (Fase 5).
+   do próximo horário da DAG passar, com `next-execution` já mostrando esse horário (o run imediato
+   passa a ser o dele, que carrega um dia ainda não carregado). Não espere mais de um horário: o
+   dia do meio fica sem carga e tem de ser refeito com `backfill create`.
 
 O mesmo vale ao recriar o metastore (VM nova sem o disco de dados): todas as DAGs voltam pausadas
 e sem histórico.
+
+### Virada pendente das DAGs que estavam no Composer
+
+**Status em 18/11/2026:** 7 das 12 DAGs deste repo já rodam na VM. As outras 5 estão **pausadas na
+VM, sem nenhum run**. Rodaram no Composer até 18/11, e o Composer foi apagado em seguida, então
+estão paradas até alguém despausar. Despausar segue o roteiro acima:
+
+| DAG | Último run no Composer | Quando despausar | Run imediato |
+|-----|------------------------|------------------|--------------|
+| `sync_pg_to_bigquery` | 18/11 07:00 BRT (carregou 17/11) | depois de 19/11 07:00 BRT, com `next-execution` em `2026-11-19T10:00:00+00:00`, e antes de 20/11 07:00 BRT | carrega 18/11 |
+| `sync_umami_to_bigquery` | 18/11 09:00 BRT (carregou 17/11) | depois de 19/11 09:00 BRT, com `next-execution` em `2026-11-19T12:00:00+00:00`, e antes de 20/11 09:00 BRT | carrega 18/11 |
+| `ner_backfill`, `canonicalize_backfill`, `enrichment_backfill` | 18/11 | uma de cada vez, nunca `ner_backfill` e `enrichment_backfill` juntas (mesmo Cloud Run Job), de preferência à noite | roda o horário mais recente que passou; se ele é de 18/11, o Composer já o rodou (retomável, mas gasta cota de LLM) |
+
+Despausar `sync_pg_to_bigquery` ou `sync_umami_to_bigquery` antes da janela carrega 17/11 de novo
+(duplicado). Depois da janela, 18/11 fica sem carga e precisa de `backfill create`. Antes de
+despausar, confira com o `SELECT` que 18/11 não está no BigQuery. Feita a virada, apague esta seção.
 
 ---
 

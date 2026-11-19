@@ -83,7 +83,9 @@ See [Workers documentation](../workers/README.md) for details on each worker, to
 
 ## Airflow DAGs (self-managed Airflow)
 
-12 DAGs in production, orchestrated by a self-managed Airflow 3.1.8 on the VM `destaquesgovbr-airflow` (docker compose, `LocalExecutor`, southamerica-east1-a; UI at https://airflow.dgb.app.gov.br behind IAP). Cloud Composer was shut down in Phase 7 of the migration (`infra/_plan/migrar-composer-para-airflow-proprio.md`). The DAGs handle batch processing and data movement between Medallion layers (Silver↔Gold), plus the NER, canonicalization and enrichment backfills (Cloud Run Jobs).
+12 DAGs, orchestrated by a self-managed Airflow 3.1.8 on the VM `destaquesgovbr-airflow` (docker compose, `LocalExecutor`, southamerica-east1-a; UI at https://airflow.dgb.app.gov.br behind IAP). Cloud Composer was shut down in Phase 7 of the migration (`infra/_plan/migrar-composer-para-airflow-proprio.md`). The DAGs handle batch processing and data movement between Medallion layers (Silver↔Gold), plus the NER, canonicalization and enrichment backfills (Cloud Run Jobs).
+
+**Pending cutover (2026-11-18):** `sync_pg_to_bigquery`, `sync_umami_to_bigquery`, `ner_backfill`, `canonicalize_backfill` and `enrichment_backfill` ran on Composer until 2026-11-18 and are still paused on the VM, with no runs; the other 7 already run there. Unpause them only in the windows given in the runbook ([pending cutover](../runbooks/airflow-vm.md#virada-pendente-das-dags-que-estavam-no-composer)).
 
 Deploy: `composer-deploy-dags.yaml` (historical name; triggered on push to `src/data_platform/{dags,jobs,typesense}/`, `cloud_run.py` or `poetry.lock`) publishes plugins and DAGs to `gs://destaquesgovbr-airflow`, which the VM's `dag-sync` mirrors every 60 s.
 

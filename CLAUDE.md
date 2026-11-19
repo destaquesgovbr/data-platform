@@ -59,7 +59,7 @@ data-platform/
 │   │   └── typesense_sync/         # dgb.news.enriched/embedded → Typesense
 │   │       ├── app.py
 │   │       └── handler.py
-│   ├── dags/                       # Airflow DAGs (12 em produção; ver docs/dags/README.md)
+│   ├── dags/                       # Airflow DAGs (12 na VM; ver docs/dags/README.md)
 │   │   ├── sync_pg_to_bigquery.py
 │   │   ├── compute_trending.py
 │   │   ├── compute_entity_trending.py
@@ -167,7 +167,9 @@ Todos os workers seguem o mesmo padrão: FastAPI app com endpoints `/health` (GE
 
 As DAGs rodam no Airflow 3.1.8 da VM `destaquesgovbr-airflow` (UI em https://airflow.dgb.app.gov.br, atrás do IAP). O Cloud Composer foi desligado (Fase 7 da migração, `infra/_plan/migrar-composer-para-airflow-proprio.md`).
 
-12 DAGs em produção: `sync_pg_to_bigquery`, `compute_trending`, `compute_entity_trending`, `aggregate_engagement`, `compute_clusters`, `project_entity_graph`, `generate_video_thumbnails`, `sync_umami_to_bigquery`, `verify_news_integrity`, `ner_backfill`, `canonicalize_backfill`, `enrichment_backfill`.
+12 DAGs publicadas na VM: `sync_pg_to_bigquery`, `compute_trending`, `compute_entity_trending`, `aggregate_engagement`, `compute_clusters`, `project_entity_graph`, `generate_video_thumbnails`, `sync_umami_to_bigquery`, `verify_news_integrity`, `ner_backfill`, `canonicalize_backfill`, `enrichment_backfill`.
+
+**Virada pendente (18/11/2026):** `sync_pg_to_bigquery`, `sync_umami_to_bigquery`, `ner_backfill`, `canonicalize_backfill` e `enrichment_backfill` ainda estão pausadas na VM, sem nenhum run (rodavam no Composer até 18/11). As outras 7 já rodam. Despausar só nas janelas da seção "Virada pendente" do [runbook](docs/runbooks/airflow-vm.md#virada-pendente-das-dags-que-estavam-no-composer).
 
 Deploy automático via `composer-deploy-dags.yaml` (nome histórico) ao modificar `src/data_platform/{dags,jobs,typesense}/`, `cloud_run.py` ou `poetry.lock`: publica plugins e DAGs em `gs://destaquesgovbr-airflow`, que o `dag-sync` da VM espelha a cada 60 s.
 

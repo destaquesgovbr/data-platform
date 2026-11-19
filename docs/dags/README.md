@@ -1,6 +1,6 @@
 # Airflow DAGs
 
-DAGs em produção no Airflow próprio (Airflow 3.1.8 na VM `destaquesgovbr-airflow`, UI em
+DAGs do Airflow próprio (Airflow 3.1.8 na VM `destaquesgovbr-airflow`, UI em
 <https://airflow.dgb.app.gov.br>), responsáveis por processamento batch, movimentação de dados entre
 camadas da arquitetura Medallion e backfills via Cloud Run Jobs. O Cloud Composer foi desligado na
 Fase 7 da migração. Operação, re-execução e logs: [runbook do Airflow](../runbooks/airflow-vm.md).
@@ -9,6 +9,11 @@ Os schedules valem em `America/Sao_Paulo` (`core.default_timezone` da VM); `run_
 `logical_date` aparecem em UTC. Todas as DAGs têm `catchup=False`: ao despausar, o horário mais
 recente que passou roda na hora (ver o runbook antes de despausar `sync_pg_to_bigquery` e
 `sync_umami_to_bigquery`, que usam `WRITE_APPEND`).
+
+> **Virada pendente (18/11/2026):** `sync_pg_to_bigquery`, `sync_umami_to_bigquery`,
+> `ner_backfill`, `canonicalize_backfill` e `enrichment_backfill` rodaram no Composer até 18/11 e
+> ainda estão pausadas na VM, sem nenhum run. As outras 7 já rodam. Janelas para despausar:
+> [runbook, "Virada pendente"](../runbooks/airflow-vm.md#virada-pendente-das-dags-que-estavam-no-composer).
 
 ---
 
