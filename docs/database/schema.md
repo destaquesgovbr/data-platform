@@ -222,6 +222,84 @@ CREATE TABLE scrape_runs (
 
 ---
 
+### scrape_agency_state
+
+Ingestion state per agency: one row per scraper `agency_key` (gov.br from `site_urls.yaml`, EBC
+from `ebc_urls.yaml`). Written by the scraper-api in the same transaction as `scrape_runs`
+(`record_scrape_run`) and by `/dispatch`; read by `/dispatch`, `GET /agencies/state` and the
+infra-health panel. Migration 038, seeded from `scrape_runs` and `news` (see
+[scripts/migrations/README.md](../../scripts/migrations/README.md#scrape_agency_state-038)). No
+FK to `agencies` (`ansn` and `povosindigenas` are not there); no `updated_at` trigger (the
+scraper sets it).
+
+```sql
+CREATE TABLE scrape_agency_state (
+    agency_key                      TEXT PRIMARY KEY,
+    tier                            TEXT NOT NULL DEFAULT 'h2'
+                                    CHECK (tier IN ('m30', 'h2', 'h6', 'd1')),
+    poll_interval_minutes           INTEGER NOT NULL DEFAULT 120 CHECK (poll_interval_minutes > 0),
+    rate_ewma_per_day               DOUBLE PRECISION,
+    tier_updated_at                 TIMESTAMPTZ,
+    next_due_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    boost_until                     TIMESTAMPTZ,
+    last_dispatched_at              TIMESTAMPTZ,
+    last_attempt_at                 TIMESTAMPTZ,   -- start of the latest attempt
+    last_success_at                 TIMESTAMPTZ,   -- watermark: start of the latest successful attempt
+    last_new_article_at             TIMESTAMPTZ,
+    consecutive_permanent_failures  INTEGER NOT NULL DEFAULT 0,
+    consecutive_transient_failures  INTEGER NOT NULL DEFAULT 0,
+    failure_streak_started_at       TIMESTAMPTZ,   -- start of the current failure streak (any kind)
+    circuit_state                   TEXT NOT NULL DEFAULT 'closed'
+                                    CHECK (circuit_state IN ('closed', 'open', 'half_open')),
+    circuit_opened_at               TIMESTAMPTZ,
+    circuit_failed_probes           INTEGER NOT NULL DEFAULT 0,
+    last_error_category             TEXT,
+    last_error_message              TEXT,          -- cut at 500 chars
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**Indexes**:
+- `scrape_agency_state_pkey` on `agency_key`
+- `idx_scrape_agency_state_next_due` on `next_due_at` (`/dispatch` picks what is due)
+
+**Key fields**:
+- `tier` / `poll_interval_minutes`: `m30`/30 (≥ 5 news/day), `h2`/120 (≥ 1), `h6`/360 (≥ 0.2),
+  `d1`/1440 (below). Recomputed once a day by `/dispatch`, with 20% hysteresis.
+- `rate_ewma_per_day`: news per day, EWMA with a 7-day half-life over the 28 complete BRT days
+  before today, by `news.published_at`, 0 on days without news:
+  `sum(n_d * w_d) / sum(w_d)`, `w_d = 0.5 ^ (age_d / 7)`, age 0 = yesterday.
+- `next_due_at`: attempt start + effective interval − 5 min; with the circuit open, the next
+  probe (2 h, 6 h, 24 h, then every 24 h).
+- `boost_until`: the effective interval is halved (tiers `h2`, `h6` and `d1` only) for 6 h after
+  a run that found new articles.
+- `last_success_at`: the watermark. The next window starts at
+  `(last_success_at in BRT − 1 h).date`, capped at today − 7; NULL = yesterday. Attempts with an
+  explicit window (backfill) do not move it.
+- `consecutive_*_failures` / `failure_streak_started_at`: 2 permanent failures in a row, or a
+  failure streak longer than 24 h, open the circuit.
+- `circuit_state`: `closed`, `open` (not scraped until the probe is due) or `half_open` (probe
+  running); `circuit_failed_probes` picks the next probe delay.
+- `last_error_category` / `last_error_message`: kept after a success (history).
+
+---
+
+### scrape_dispatch_meta
+
+Key-value store of the scraper-api `/dispatch` (migration 038), e.g. `tiers_recomputed_on`, the
+BRT day of the last tier recomputation.
+
+```sql
+CREATE TABLE scrape_dispatch_meta (
+    key         TEXT PRIMARY KEY,
+    value       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+---
+
 ### schema_version
 
 Tracks schema migrations.
