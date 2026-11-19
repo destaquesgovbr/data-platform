@@ -296,21 +296,14 @@ dia, se ele já foi carregado por outro caminho (run manual, backfill ou `tasks 
 O mesmo vale ao recriar o metastore (VM nova sem o disco de dados): todas as DAGs voltam pausadas
 e sem histórico.
 
-### Virada pendente das DAGs que estavam no Composer
+### Registro da virada do Composer (18–19/11/2026)
 
-**Status em 18/11/2026:** 7 das 12 DAGs deste repo já rodam na VM. As outras 5 estão **pausadas na
-VM, sem nenhum run**. Rodaram no Composer até 18/11, e o Composer foi apagado em seguida, então
-estão paradas até alguém despausar. Despausar segue o roteiro acima:
-
-| DAG | Último run no Composer | Quando despausar | Run imediato |
-|-----|------------------------|------------------|--------------|
-| `sync_pg_to_bigquery` | 18/11 07:00 BRT (carregou 17/11) | depois de 19/11 07:00 BRT, com `next-execution` em `2026-11-19T10:00:00+00:00`, e antes de 20/11 07:00 BRT | carrega 18/11 |
-| `sync_umami_to_bigquery` | 18/11 09:00 BRT (carregou 17/11) | depois de 19/11 09:00 BRT, com `next-execution` em `2026-11-19T12:00:00+00:00`, e antes de 20/11 09:00 BRT | carrega 18/11 |
-| `ner_backfill`, `canonicalize_backfill`, `enrichment_backfill` | 18/11 | uma de cada vez, nunca `ner_backfill` e `enrichment_backfill` juntas (mesmo Cloud Run Job), de preferência à noite | roda o horário mais recente que passou; se ele é de 18/11, o Composer já o rodou (retomável, mas gasta cota de LLM) |
-
-Despausar `sync_pg_to_bigquery` ou `sync_umami_to_bigquery` antes da janela carrega 17/11 de novo
-(duplicado). Depois da janela, 18/11 fica sem carga e precisa de `backfill create`. Antes de
-despausar, confira com o `SELECT` que 18/11 não está no BigQuery. Feita a virada, apague esta seção.
+As 12 DAGs deste repo rodam na VM desde a virada. As 7 idempotentes foram despausadas em 18/11 às
+20:20 BRT. As 5 restantes ficaram pausadas no Composer e foram despausadas na VM logo depois do
+próprio slot, para que a execução de catch-up de cada uma fosse a única daquele intervalo:
+`enrichment_backfill` (18/11 22:39 BRT), `canonicalize_backfill` (19/11 00:10), `ner_backfill`
+(02:11), `sync_pg_to_bigquery` (depois das 07:00) e `sync_umami_to_bigquery` (depois das 09:00). É o
+mesmo cuidado descrito acima para qualquer DAG `WRITE_APPEND` que volte de uma pausa.
 
 ---
 

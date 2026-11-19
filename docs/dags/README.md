@@ -10,10 +10,9 @@ Os schedules valem em `America/Sao_Paulo` (`core.default_timezone` da VM); `run_
 recente que passou roda na hora (ver o runbook antes de despausar `sync_pg_to_bigquery` e
 `sync_umami_to_bigquery`, que usam `WRITE_APPEND`).
 
-> **Virada pendente (18/11/2026):** `sync_pg_to_bigquery`, `sync_umami_to_bigquery`,
-> `ner_backfill`, `canonicalize_backfill` e `enrichment_backfill` rodaram no Composer até 18/11 e
-> ainda estão pausadas na VM, sem nenhum run. As outras 7 já rodam. Janelas para despausar:
-> [runbook, "Virada pendente"](../runbooks/airflow-vm.md#virada-pendente-das-dags-que-estavam-no-composer).
+> **Virada concluída (19/11/2026):** as 12 rodam na VM. As 5 não idempotentes (`sync_pg_to_bigquery`,
+> `sync_umami_to_bigquery`, `ner_backfill`, `canonicalize_backfill`, `enrichment_backfill`) foram despausadas
+> logo depois do próprio slot, para que cada intervalo rodasse uma vez só.
 
 ---
 

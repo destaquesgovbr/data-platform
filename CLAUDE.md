@@ -169,7 +169,7 @@ As DAGs rodam no Airflow 3.1.8 da VM `destaquesgovbr-airflow` (UI em https://air
 
 12 DAGs publicadas na VM: `sync_pg_to_bigquery`, `compute_trending`, `compute_entity_trending`, `aggregate_engagement`, `compute_clusters`, `project_entity_graph`, `generate_video_thumbnails`, `sync_umami_to_bigquery`, `verify_news_integrity`, `ner_backfill`, `canonicalize_backfill`, `enrichment_backfill`.
 
-**Virada pendente (18/11/2026):** `sync_pg_to_bigquery`, `sync_umami_to_bigquery`, `ner_backfill`, `canonicalize_backfill` e `enrichment_backfill` ainda estão pausadas na VM, sem nenhum run (rodavam no Composer até 18/11). As outras 7 já rodam. Despausar só nas janelas da seção "Virada pendente" do [runbook](docs/runbooks/airflow-vm.md#virada-pendente-das-dags-que-estavam-no-composer).
+**Virada concluída (19/11/2026):** as 12 rodam na VM. `sync_pg_to_bigquery`, `sync_umami_to_bigquery`, `ner_backfill`, `canonicalize_backfill` e `enrichment_backfill` foram despausadas logo depois do próprio slot, para que cada intervalo rodasse uma vez só (ver "catch-up ao despausar" no [runbook](docs/runbooks/airflow-vm.md)).
 
 Deploy automático via `composer-deploy-dags.yaml` (nome histórico) ao modificar `src/data_platform/{dags,jobs,typesense}/`, `cloud_run.py` ou `poetry.lock`: publica plugins e DAGs em `gs://destaquesgovbr-airflow`, que o `dag-sync` da VM espelha a cada 60 s.
 
