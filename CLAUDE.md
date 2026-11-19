@@ -1,6 +1,6 @@
 # DestaquesGovBr Data Platform
 
-> **Última Atualização**: 2026-11-18
+> **Última Atualização**: 2026-11-19
 
 ---
 
@@ -98,7 +98,7 @@ data-platform/
 │   ├── unit/
 │   └── integration/
 ├── scripts/
-│   ├── migrations/                 # Database migrations (001-037; 030/031 reservadas)
+│   ├── migrations/                 # Database migrations (001-038; 030/031 reservadas)
 │   └── bigquery/                   # BigQuery table creation SQL
 ├── docker/                         # Dockerfiles
 │   ├── postgres/                   # PostgreSQL init scripts
@@ -266,6 +266,8 @@ settings = get_settings()
 - `news` — Notícias (~300k registros, com embedding pgvector 768-dim)
 - `news_features` — Features computadas (JSONB)
 - `scrape_runs` — Tracking de execuções de scraping
+- `scrape_agency_state` — Estado da ingestão por agência: faixa, próxima raspagem, marca d'água e disjuntor (038; escrito pelo scraper-api)
+- `scrape_dispatch_meta` — Chave-valor do `/dispatch` do scraper-api (038)
 
 Ver detalhes em [docs/database/schema.md](docs/database/schema.md).
 

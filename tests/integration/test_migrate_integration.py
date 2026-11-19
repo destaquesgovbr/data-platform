@@ -8,12 +8,15 @@ Requires: PostgreSQL with pgvector extension (docker compose up).
 """
 
 import os
+import re
 import subprocess
 import sys
 import time
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import psycopg2
+import psycopg2.extras
 import pytest
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
@@ -720,6 +723,498 @@ class TestScrapeRunsArticlesNewMigration:
         result = _run_migrate(*comando, "--yes")
         assert result.returncode == 0, f"Retry failed:\n{result.stdout}\n{result.stderr}"
         assert ("articles_new" in _columns("scrape_runs")) is not aplicada_antes
+
+
+# Contrato da 038 (desenho dos Passos 2–4, §1): o scraper-api (state/repository.py), o /dispatch
+# e o painel do infra-health dependem destes nomes, tipos e nulidades.
+_TSTZ = "timestamp with time zone"
+_SCRAPE_AGENCY_STATE_CONTRATO = {
+    "agency_key": ("text", "NO"),
+    "tier": ("text", "NO"),
+    "poll_interval_minutes": ("integer", "NO"),
+    "rate_ewma_per_day": ("double precision", "YES"),
+    "tier_updated_at": (_TSTZ, "YES"),
+    "next_due_at": (_TSTZ, "NO"),
+    "boost_until": (_TSTZ, "YES"),
+    "last_dispatched_at": (_TSTZ, "YES"),
+    "last_attempt_at": (_TSTZ, "YES"),
+    "last_success_at": (_TSTZ, "YES"),
+    "last_new_article_at": (_TSTZ, "YES"),
+    "consecutive_permanent_failures": ("integer", "NO"),
+    "consecutive_transient_failures": ("integer", "NO"),
+    "failure_streak_started_at": (_TSTZ, "YES"),
+    "circuit_state": ("text", "NO"),
+    "circuit_opened_at": (_TSTZ, "YES"),
+    "circuit_failed_probes": ("integer", "NO"),
+    "last_error_category": ("text", "YES"),
+    "last_error_message": ("text", "YES"),
+    "created_at": (_TSTZ, "NO"),
+    "updated_at": (_TSTZ, "NO"),
+}
+
+_MIGRATION_038 = MIGRATIONS_DIR / "038_create_scrape_agency_state.sql"
+
+# Agências do cenário do seed com execução nos últimos 7 dias.
+_SEMEADAS = {"agencia_brasil", "saude", "gestao", "ibama", "mec", "antaq", "ansn"}
+
+# Notícias da ibama por idade do dia (0 = ontem), até o dia mais antigo da janela (27).
+_IBAMA_POR_IDADE = {0: 4, 2: 2, 9: 7, 26: 5, 27: 9}
+
+
+def _execute_com(sql: str, params: tuple) -> None:
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _hoje_brt() -> date:
+    """Hoje em BRT pelo relógio do banco, o mesmo que a 038 usa."""
+    return _execute("SELECT (NOW() AT TIME ZONE 'America/Sao_Paulo')::date")[0][0]
+
+
+def _ewma_esperada(por_idade: dict[int, int]) -> float:
+    """sum(n_d * w_d) / sum(w_d), w_d = 0.5 ** (idade / 7), nos 28 dias (0 nos sem notícia)."""
+    pesos = [0.5 ** (idade / 7) for idade in range(28)]
+    return sum(n * pesos[idade] for idade, n in por_idade.items()) / sum(pesos)
+
+
+def _faixa(taxa: float) -> tuple[str, int]:
+    if taxa >= 5:
+        return "m30", 30
+    if taxa >= 1:
+        return "h2", 120
+    if taxa >= 0.2:
+        return "h6", 360
+    return "d1", 1440
+
+
+def _noticias(agency: str, dia: date, qtd: int, hora: str = "12:00") -> None:
+    """`qtd` notícias da agência publicadas em `dia` às `hora` de Brasília."""
+    _execute_com(
+        "INSERT INTO news (unique_id, agency_id, agency_key, title, published_at) "
+        "SELECT %(prefixo)s || g, a.id, %(agency)s, 'Título', "
+        "(%(dia)s::date + %(hora)s::time) AT TIME ZONE 'America/Sao_Paulo' "
+        "FROM agencies AS a CROSS JOIN generate_series(1, %(qtd)s) AS g "
+        "WHERE a.key = %(agency)s",
+        {
+            "prefixo": f"{agency}-{dia.isoformat()}-{hora}-",
+            "agency": agency,
+            "dia": dia,
+            "hora": hora,
+            "qtd": qtd,
+        },
+    )
+
+
+def _execucao(
+    agency: str,
+    quando: datetime,
+    status: str = "success",
+    categoria: str | None = None,
+    mensagem: str | None = None,
+) -> None:
+    _execute_com(
+        "INSERT INTO scrape_runs (agency_key, status, error_category, error_message, scraped_at) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (agency, status, categoria, mensagem, quando),
+    )
+
+
+def _cenario_do_seed() -> datetime:
+    """Banco na 037 com histórico de news e scrape_runs; devolve o "agora" das execuções."""
+    result = _run_migrate("migrate", "--target", "037", "--yes")
+    assert result.returncode == 0, f"Setup failed:\n{result.stdout}\n{result.stderr}"
+    _execute(
+        "INSERT INTO agencies (key, name) VALUES ('agencia_brasil', 'Agência Brasil'), "
+        "('saude', 'Saúde'), ('gestao', 'Gestão'), ('ibama', 'Ibama'), ('mec', 'MEC'), "
+        "('antaq', 'Antaq'), ('sudam', 'Sudam'), ('planalto', 'Planalto')"
+    )
+    hoje = _hoje_brt()
+
+    def dia(idade: int) -> date:
+        return hoje - timedelta(days=idade + 1)
+
+    # agencia_brasil: 10 por dia nos 28 dias. Hoje (parcial) e o 29º dia ficam fora da janela.
+    for idade in range(28):
+        _noticias("agencia_brasil", dia(idade), 10)
+    _noticias("agencia_brasil", hoje, 50, "00:30")
+    _noticias("agencia_brasil", dia(28), 100, "23:00")
+    # saude: 2 por dia.
+    for idade in range(28):
+        _noticias("saude", dia(idade), 2)
+    # gestao: 3 ontem; a das 22:30 de Brasília já é hoje em UTC e conta como ontem.
+    _noticias("gestao", dia(0), 2)
+    _noticias("gestao", dia(0), 1, "22:30")
+    for idade, qtd in _IBAMA_POR_IDADE.items():
+        _noticias("ibama", dia(idade), qtd)
+    # Com notícias, mas sem execução nos últimos 7 dias: fora do seed.
+    _noticias("sudam", dia(1), 5)
+    _noticias("planalto", dia(1), 5)
+
+    agora = datetime.now(UTC)
+    # agencia_brasil: falha passageira e depois sucesso, que limpa o último erro.
+    _execucao("agencia_brasil", agora - timedelta(hours=3), "error", "network_error", "timeout")
+    _execucao("agencia_brasil", agora - timedelta(hours=1))
+    # mec: último sucesso há 20 dias (fora dos 7) e html_changed desde então.
+    _execucao("mec", agora - timedelta(days=20))
+    _execucao("mec", agora - timedelta(days=2), "error", "html_changed", "antiga")
+    _execucao("mec", agora - timedelta(minutes=30), "error", "html_changed", "x" * 600)
+    # antaq: nunca teve sucesso.
+    _execucao("antaq", agora - timedelta(hours=2), "error", "access_denied", "HTTP 403")
+    for chave in ("saude", "gestao", "ibama"):
+        _execucao(chave, agora - timedelta(hours=2))
+    # ansn: ativa no scraper, fora de agencies (sem FK) e sem notícias.
+    _execucao("ansn", agora - timedelta(hours=2))
+    # sudam: só execuções antigas.
+    _execucao("sudam", agora - timedelta(days=10))
+    return agora
+
+
+def _estado() -> dict[str, dict]:
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM scrape_agency_state")
+            return {row["agency_key"]: dict(row) for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+def _nos_do_plano(no: dict):
+    yield no
+    for filho in no.get("Plans", []):
+        yield from _nos_do_plano(filho)
+
+
+@pytest.mark.integration
+class TestScrapeAgencyStateMigration:
+    """038: scrape_agency_state e scrape_dispatch_meta, com o seed (Passo 2 da rearquitetura).
+
+    Estado por agência da ingestão (faixa, próxima raspagem, marca d'água, disjuntor), escrito
+    pelo scraper-api na transação de scrape_runs. Sem FK para agencies.
+    """
+
+    def test_038_nao_e_tratada_como_migracao_concorrente(self):
+        """A palavra do CREATE INDEX não transacional faria o teste stampar 013–037 sem rodar."""
+        assert "038" not in CONCURRENT_MIGRATIONS
+
+    def test_038_cria_scrape_agency_state_com_o_contrato(self):
+        _apply_all_migrations()
+
+        assert _columns("scrape_agency_state") == _SCRAPE_AGENCY_STATE_CONTRATO
+
+    def test_038_cria_scrape_dispatch_meta_com_o_contrato(self):
+        _apply_all_migrations()
+
+        assert _columns("scrape_dispatch_meta") == {
+            "key": ("text", "NO"),
+            "value": ("jsonb", "NO"),
+            "updated_at": (_TSTZ, "NO"),
+        }
+
+    def test_038_defaults_de_uma_agencia_nova(self):
+        """O ensure_rows do scraper insere só a chave: h2/120, vencida agora, circuito fechado."""
+        _apply_all_migrations()
+        _execute("INSERT INTO scrape_agency_state (agency_key) VALUES ('mec')")
+        _execute("INSERT INTO scrape_dispatch_meta (key) VALUES ('tiers_recomputed_on')")
+
+        row = _estado()["mec"]
+        assert (row["tier"], row["poll_interval_minutes"], row["circuit_state"]) == (
+            "h2",
+            120,
+            "closed",
+        )
+        assert row["consecutive_permanent_failures"] == 0
+        assert row["consecutive_transient_failures"] == 0
+        assert row["circuit_failed_probes"] == 0
+        assert row["next_due_at"] == row["created_at"] == row["updated_at"]
+        assert row["rate_ewma_per_day"] is None
+        assert row["last_success_at"] is None
+        assert _execute("SELECT value FROM scrape_dispatch_meta") == [({},)]
+
+    @pytest.mark.parametrize(
+        "coluna_valor",
+        ["tier = 'h1'", "circuit_state = 'aberto'", "poll_interval_minutes = 0"],
+    )
+    def test_038_checks_de_faixa_intervalo_e_circuito(self, coluna_valor):
+        _apply_all_migrations()
+        _execute("INSERT INTO scrape_agency_state (agency_key) VALUES ('mec')")
+
+        with pytest.raises(psycopg2.errors.CheckViolation):
+            _execute(f"UPDATE scrape_agency_state SET {coluna_valor} WHERE agency_key = 'mec'")
+
+    def test_038_indice_de_vencimento_e_sem_fk(self):
+        """O /dispatch busca por next_due_at; ansn e povosindigenas não estão em agencies."""
+        _apply_all_migrations()
+
+        assert _indexes("scrape_agency_state")["idx_scrape_agency_state_next_due"].endswith(
+            "USING btree (next_due_at)"
+        )
+        fks = _execute(
+            "SELECT count(*) FROM information_schema.table_constraints "
+            "WHERE constraint_type = 'FOREIGN KEY' "
+            "AND table_name IN ('scrape_agency_state', 'scrape_dispatch_meta')"
+        )
+        assert fks == [(0,)]
+        _execute("INSERT INTO scrape_agency_state (agency_key) VALUES ('povosindigenas')")
+
+    def test_038_comenta_tabela_e_formula_da_taxa(self):
+        _apply_all_migrations()
+
+        tabela = _execute("SELECT obj_description('scrape_agency_state'::regclass, 'pg_class')")
+        assert "scrape_runs" in tabela[0][0]
+        taxa = _execute(
+            "SELECT col_description('scrape_agency_state'::regclass, attnum) FROM pg_attribute "
+            "WHERE attrelid = 'scrape_agency_state'::regclass AND attname = 'rate_ewma_per_day'"
+        )
+        assert "meia-vida de 7 dias" in taxa[0][0]
+        assert "0.5 ^ (idade_d / 7)" in taxa[0][0]
+
+    def test_038_seed_uma_linha_por_agencia_com_execucao_em_7_dias(self):
+        """sudam (só execução de 10 dias atrás) e planalto (só notícias) ficam de fora."""
+        _cenario_do_seed()
+
+        _apply_all_migrations()
+
+        assert set(_estado()) == _SEMEADAS
+
+    def test_038_seed_taxa_ewma_e_faixa(self):
+        """EWMA de 28 dias BRT por published_at: hoje e o 29º dia ficam fora; 0 sem notícia."""
+        _cenario_do_seed()
+
+        _apply_all_migrations()
+
+        estado = _estado()
+        esperadas = {
+            "agencia_brasil": 10.0,
+            "saude": 2.0,
+            "gestao": _ewma_esperada({0: 3}),
+            "ibama": _ewma_esperada(_IBAMA_POR_IDADE),
+            "mec": 0.0,
+            "antaq": 0.0,
+            "ansn": 0.0,
+        }
+        for chave, taxa in esperadas.items():
+            row = estado[chave]
+            assert row["rate_ewma_per_day"] == pytest.approx(taxa, rel=1e-9, abs=1e-12), chave
+            assert (row["tier"], row["poll_interval_minutes"]) == _faixa(taxa), chave
+        # Uma agência por faixa no cenário.
+        assert {estado[c]["tier"] for c in ("agencia_brasil", "saude", "gestao", "mec")} == {
+            "m30",
+            "h2",
+            "h6",
+            "d1",
+        }
+        assert estado["ibama"]["tier"] == "h6"
+
+    def test_038_seed_marca_dagua_e_ultimo_erro(self):
+        agora = _cenario_do_seed()
+
+        _apply_all_migrations()
+
+        estado = _estado()
+        ab = estado["agencia_brasil"]
+        assert ab["last_attempt_at"] == ab["last_success_at"] == agora - timedelta(hours=1)
+        assert (ab["last_error_category"], ab["last_error_message"]) == (None, None)
+
+        # Marca d'água real, mesmo fora dos 7 dias: a janela do scraper limita a 7.
+        mec = estado["mec"]
+        assert mec["last_attempt_at"] == agora - timedelta(minutes=30)
+        assert mec["last_success_at"] == agora - timedelta(days=20)
+        assert mec["last_error_category"] == "html_changed"
+        assert mec["last_error_message"] == "x" * 500
+
+        antaq = estado["antaq"]
+        assert antaq["last_success_at"] is None
+        assert (antaq["last_error_category"], antaq["last_error_message"]) == (
+            "access_denied",
+            "HTTP 403",
+        )
+
+    def test_038_seed_comeca_com_circuito_fechado_e_vencido(self):
+        agora = _cenario_do_seed()
+
+        _apply_all_migrations()
+
+        for chave, row in _estado().items():
+            assert row["circuit_state"] == "closed", chave
+            assert (
+                row["consecutive_permanent_failures"],
+                row["consecutive_transient_failures"],
+                row["circuit_failed_probes"],
+            ) == (0, 0, 0), chave
+            for coluna in (
+                "boost_until",
+                "last_dispatched_at",
+                "last_new_article_at",
+                "failure_streak_started_at",
+                "circuit_opened_at",
+            ):
+                assert row[coluna] is None, (chave, coluna)
+            assert row["tier_updated_at"] == row["next_due_at"] == row["created_at"], chave
+            assert abs(row["next_due_at"] - agora) < timedelta(minutes=5), chave
+
+    def test_038_seed_usa_o_dia_de_brasilia_em_qualquer_timezone_da_sessao(self):
+        _cenario_do_seed()
+
+        _execute("SET TIME ZONE 'Asia/Tokyo'; " + _MIGRATION_038.read_text())
+
+        estado = _estado()
+        assert set(estado) == _SEMEADAS
+        assert estado["agencia_brasil"]["rate_ewma_per_day"] == pytest.approx(10.0)
+        assert estado["gestao"]["rate_ewma_per_day"] == pytest.approx(_ewma_esperada({0: 3}))
+        assert estado["ibama"]["rate_ewma_per_day"] == pytest.approx(
+            _ewma_esperada(_IBAMA_POR_IDADE)
+        )
+
+    def test_038_seed_idempotente_nao_sobrescreve_o_estado(self):
+        """Reaplicar só acrescenta agências novas; o estado gravado pelo scraper fica."""
+        _cenario_do_seed()
+        _apply_all_migrations()
+        _execute(
+            "UPDATE scrape_agency_state SET circuit_state = 'open', "
+            "consecutive_permanent_failures = 2 WHERE agency_key = 'mec'"
+        )
+        _execute("UPDATE scrape_agency_state SET tier = 'm30' WHERE agency_key = 'saude'")
+        _execucao("nova", datetime.now(UTC))
+
+        _execute(_MIGRATION_038.read_text())
+
+        estado = _estado()
+        assert set(estado) == _SEMEADAS | {"nova"}
+        assert (
+            estado["mec"]["circuit_state"],
+            estado["mec"]["consecutive_permanent_failures"],
+        ) == (
+            "open",
+            2,
+        )
+        assert estado["saude"]["tier"] == "m30"
+        assert estado["nova"]["tier"] == "d1"
+
+    def test_038_rollback_remove_as_tabelas_e_reaplica_o_seed(self):
+        _cenario_do_seed()
+        _apply_all_migrations()
+        runs = _execute("SELECT count(*) FROM scrape_runs")
+        noticias = _execute("SELECT count(*) FROM news")
+
+        result = _run_migrate("rollback", "038", "--yes")
+        assert result.returncode == 0, f"Rollback failed:\n{result.stdout}\n{result.stderr}"
+        assert _columns("scrape_agency_state") == {}
+        assert _columns("scrape_dispatch_meta") == {}
+        assert _execute("SELECT count(*) FROM scrape_runs") == runs
+        assert _execute("SELECT count(*) FROM news") == noticias
+
+        result = _run_migrate("migrate", "--yes")
+        assert result.returncode == 0, f"Re-apply failed:\n{result.stdout}\n{result.stderr}"
+        assert set(_estado()) == _SEMEADAS
+
+    def test_038_seed_le_news_pelo_indice_de_published_at(self):
+        """A taxa lê só a faixa de 28 dias de published_at, não a tabela inteira."""
+        _apply_all_migrations()
+        _execute("INSERT INTO agencies (key, name) VALUES ('mec', 'MEC')")
+        # ~3 anos de notícias (100 mil, uma a cada 15 min) em 50 agências: 28 dias são ~2,7%.
+        _execute(
+            "INSERT INTO news (unique_id, agency_id, agency_key, title, published_at) "
+            "SELECT 'n' || g, a.id, 'ag' || (g % 50), 'Título', NOW() - g * INTERVAL '15 minutes' "
+            "FROM agencies AS a CROSS JOIN generate_series(1, 100000) AS g WHERE a.key = 'mec'"
+        )
+        _execute(
+            "INSERT INTO scrape_runs (agency_key, status) "
+            "SELECT 'ag' || g, 'success' FROM generate_series(0, 49) AS g"
+        )
+        _execute("ANALYZE news; ANALYZE scrape_runs")
+        seed = re.search(
+            r"^WITH janela AS .*?ON CONFLICT \(agency_key\) DO NOTHING;",
+            _MIGRATION_038.read_text(),
+            re.S | re.M,
+        ).group(0)
+
+        plano = _execute("EXPLAIN (FORMAT JSON) " + seed)[0][0][0]["Plan"]
+
+        nos = list(_nos_do_plano(plano))
+        leituras_de_news = [n for n in nos if n.get("Relation Name") == "news"]
+        assert leituras_de_news
+        assert all(n["Node Type"] != "Seq Scan" for n in leituras_de_news)
+        assert "idx_news_published_at" in {n.get("Index Name") for n in nos}
+
+    def test_038_nao_espera_o_insert_do_scraper(self):
+        """O seed só lê scrape_runs e news: um INSERT do scraper em andamento não o bloqueia."""
+        result = _run_migrate("migrate", "--target", "037", "--yes")
+        assert result.returncode == 0, f"Setup failed:\n{result.stdout}\n{result.stderr}"
+        _execute("INSERT INTO agencies (key, name) VALUES ('mec', 'MEC')")
+
+        scraper = psycopg2.connect(DATABASE_URL)
+        try:
+            with scraper.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO scrape_runs (agency_key, status) VALUES ('mec', 'success')"
+                )
+                cur.execute(
+                    "INSERT INTO news (unique_id, agency_id, agency_key, title, published_at) "
+                    "SELECT 'em-andamento', id, 'mec', 'Título', NOW() FROM agencies"
+                )
+            try:
+                result = _run_migrate("migrate", "--target", "038", "--yes", timeout=60)
+            except subprocess.TimeoutExpired:
+                pytest.fail("a 038 esperou o INSERT do scraper")
+        finally:
+            scraper.rollback()
+            scraper.close()
+
+        assert result.returncode == 0, f"Migrate failed:\n{result.stdout}\n{result.stderr}"
+        assert _estado() == {}
+
+    @pytest.mark.parametrize(
+        ("comando", "aplicada_antes", "trava"),
+        [
+            (
+                ("migrate", "--target", "038"),
+                False,
+                "LOCK TABLE scrape_runs IN ACCESS EXCLUSIVE MODE",
+            ),
+            (("rollback", "038"), True, "SELECT count(*) FROM scrape_agency_state"),
+        ],
+        ids=["migrate", "rollback"],
+    )
+    def test_038_desiste_do_lock_em_vez_de_enfileirar(self, comando, aplicada_antes, trava):
+        """lock_timeout: atrás de uma transação que segura a tabela, a 038 falha inteira.
+
+        migrate: outra migração com ACCESS EXCLUSIVE em scrape_runs. rollback: o scraper lendo
+        o estado (ACCESS SHARE) bloqueia o DROP TABLE, que enfileiraria todo record_scrape_run.
+        """
+        if aplicada_antes:
+            _apply_all_migrations()
+        else:
+            result = _run_migrate("migrate", "--target", "037", "--yes")
+            assert result.returncode == 0, f"Setup failed:\n{result.stdout}\n{result.stderr}"
+
+        outra = psycopg2.connect(DATABASE_URL)
+        try:
+            with outra.cursor() as cur:
+                cur.execute(trava)
+            inicio = time.monotonic()
+            try:
+                result = _run_migrate(*comando, "--yes", timeout=60)
+            except subprocess.TimeoutExpired:
+                pytest.fail(f"`{' '.join(comando)}` esperou o lock sem prazo (sem lock_timeout)")
+            espera = time.monotonic() - inicio
+        finally:
+            outra.rollback()
+            outra.close()
+
+        assert result.returncode != 0
+        assert "lock timeout" in result.stdout + result.stderr
+        assert espera < 45
+        assert bool(_columns("scrape_agency_state")) is aplicada_antes
+
+        result = _run_migrate(*comando, "--yes")
+        assert result.returncode == 0, f"Retry failed:\n{result.stdout}\n{result.stderr}"
+        assert bool(_columns("scrape_agency_state")) is not aplicada_antes
 
 
 _TEXTO_LONGO = (

@@ -59,6 +59,7 @@ Normalized, enriched data in Cloud SQL:
 - `agencies` — Government agencies (158 records)
 - `themes` — Theme taxonomy (3-level hierarchy)
 - `scrape_runs` — Scraping execution tracking
+- `scrape_agency_state` — Ingestion state per agency (tier, next due time, watermark, circuit breaker)
 
 ### Gold Layer (BigQuery)
 
