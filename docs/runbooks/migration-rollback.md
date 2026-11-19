@@ -174,4 +174,4 @@ python scripts/migrate.py status
 
 See also:
 - [Migration System Documentation](../database/migrations.md)
-- [Composer Recovery Runbook](./composer-recovery.md)
+- [Airflow VM Runbook](./airflow-vm.md)

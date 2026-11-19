@@ -1,6 +1,6 @@
 # DestaquesGovBr Data Platform
 
-> **Última Atualização**: 2026-05-13
+> **Última Atualização**: 2026-11-18
 
 ---
 
@@ -11,7 +11,7 @@
 ### Pipeline (Event-Driven)
 
 ```
-Scrapers (repo scraper, via Airflow Cloud Composer)
+Scrapers (repo scraper, DAGs no Airflow próprio)
     ↓ Pub/Sub: dgb.news.scraped
     ├── Bronze Writer → GCS (raw JSON)
     ↓
@@ -23,7 +23,7 @@ PostgreSQL (Cloud SQL) ← Fonte de verdade (Silver layer)
     ↓ Pub/Sub: dgb.news.embedded
     └── Typesense Sync → Typesense (atualiza embedding)
     ↓
-Airflow DAGs (Cloud Composer)
+Airflow DAGs (Airflow próprio, VM destaquesgovbr-airflow)
     ├── sync_pg_to_bigquery → BigQuery Gold layer
     ├── compute_trending → trending_score em news_features
     ├── aggregate_engagement → view_count em news_features
@@ -59,14 +59,19 @@ data-platform/
 │   │   └── typesense_sync/         # dgb.news.enriched/embedded → Typesense
 │   │       ├── app.py
 │   │       └── handler.py
-│   ├── dags/                       # Airflow DAGs (7 em produção)
+│   ├── dags/                       # Airflow DAGs (12 na VM; ver docs/dags/README.md)
 │   │   ├── sync_pg_to_bigquery.py
 │   │   ├── compute_trending.py
+│   │   ├── compute_entity_trending.py
 │   │   ├── aggregate_engagement.py
 │   │   ├── compute_clusters.py
+│   │   ├── project_entity_graph.py
 │   │   ├── generate_video_thumbnails.py
 │   │   ├── sync_umami_to_bigquery.py
-│   │   └── verify_news_integrity.py
+│   │   ├── verify_news_integrity.py
+│   │   ├── ner_backfill.py
+│   │   ├── canonicalize_backfill.py
+│   │   └── enrichment_backfill.py
 │   ├── jobs/                       # Módulos de processamento
 │   │   ├── bigquery/               # sync_to_bigquery, trending, engagement, umami_sync
 │   │   ├── enrichment/             # AI enrichment (Bedrock)
@@ -129,7 +134,7 @@ data-platform/
 - **Typesense** (busca textual + semântica)
 
 ### Orchestration
-- **Cloud Composer** (Airflow) — 7 DAGs em produção
+- **Airflow 3.1** próprio (VM `destaquesgovbr-airflow`, docker compose, `LocalExecutor`) — 12 DAGs deste repo
 - **Pub/Sub** — event-driven workers
 
 ### Configuration
@@ -158,11 +163,18 @@ Todos os workers seguem o mesmo padrão: FastAPI app com endpoints `/health` (GE
 
 ---
 
-## Airflow DAGs (Cloud Composer)
+## Airflow DAGs (Airflow próprio)
 
-7 DAGs em produção: `sync_pg_to_bigquery`, `compute_trending`, `aggregate_engagement`, `compute_clusters`, `generate_video_thumbnails`, `sync_umami_to_bigquery`, `verify_news_integrity`.
+As DAGs rodam no Airflow 3.1.8 da VM `destaquesgovbr-airflow` (UI em https://airflow.dgb.app.gov.br, atrás do IAP). O Cloud Composer foi desligado (Fase 7 da migração, `infra/_plan/migrar-composer-para-airflow-proprio.md`).
 
-Deploy automático via `composer-deploy-dags.yaml` ao modificar `src/data_platform/dags/`.
+12 DAGs publicadas na VM: `sync_pg_to_bigquery`, `compute_trending`, `compute_entity_trending`, `aggregate_engagement`, `compute_clusters`, `project_entity_graph`, `generate_video_thumbnails`, `sync_umami_to_bigquery`, `verify_news_integrity`, `ner_backfill`, `canonicalize_backfill`, `enrichment_backfill`.
+
+**Virada concluída (19/11/2026):** as 12 rodam na VM. `sync_pg_to_bigquery`, `sync_umami_to_bigquery`, `ner_backfill`, `canonicalize_backfill` e `enrichment_backfill` foram despausadas logo depois do próprio slot, para que cada intervalo rodasse uma vez só (ver "catch-up ao despausar" no [runbook](docs/runbooks/airflow-vm.md)).
+
+Deploy automático via `composer-deploy-dags.yaml` (nome histórico) ao modificar `src/data_platform/{dags,jobs,typesense}/`, `cloud_run.py` ou `poetry.lock`: publica plugins e DAGs em `gs://destaquesgovbr-airflow`, que o `dag-sync` da VM espelha a cada 60 s.
+
+- Crons em `America/Sao_Paulo` (`core.default_timezone` da VM); `run_id` e `logical_date` aparecem em UTC.
+- DAG nova nasce **pausada**. Com `catchup=False`, despausar roda **na hora** o horário mais recente que passou: cuidado com `sync_pg_to_bigquery` e `sync_umami_to_bigquery` (`WRITE_APPEND`, duplicam um dia carregado duas vezes). Ver [docs/runbooks/airflow-vm.md](docs/runbooks/airflow-vm.md).
 
 Ver [docs/dags/README.md](docs/dags/README.md) para schedules, Airflow Variables, e detalhes de cada DAG.
 
@@ -300,7 +312,7 @@ make docker-down  # Para serviços
 | Workflow | Trigger | Descrição |
 |----------|---------|-----------|
 | `main-workflow.yaml` | Push/PR | Lint, test, type check |
-| `composer-deploy-dags.yaml` | Push `dags/`, `jobs/`, `typesense/` | Deploy de plugins e DAGs nos buckets do Composer e do Airflow próprio |
+| `composer-deploy-dags.yaml` | Push `dags/`, `jobs/`, `typesense/`, `cloud_run.py`, `poetry.lock` | Deploy de plugins e DAGs no bucket do Airflow próprio (`gs://destaquesgovbr-airflow`) |
 | `bronze-writer-deploy.yaml` | Push | Deploy bronze-writer |
 | `feature-worker-deploy.yaml` | Push | Deploy feature-worker |
 | `thumbnail-worker-deploy.yaml` | Push | Deploy thumbnail-worker |
@@ -312,16 +324,16 @@ make docker-down  # Para serviços
 
 ---
 
-## Resiliência (Cloud Composer)
+## Operação do Airflow (VM `destaquesgovbr-airflow`)
 
-- `prevent_destroy=true` no Terraform impede destruição acidental
-- CI/CD bloqueia planos que tentam recriar o Composer
-- Health check a cada 6h dispara deploy se bucket estiver vazio
-- Cross-repo trigger: mudanças no Composer disparam deploy automático
+- VM GitOps (repo `infra`): compose, env e imagem vêm do Terraform; nada se configura por SSH.
+- SSH só via IAP: `gcloud compute ssh destaquesgovbr-airflow --zone=southamerica-east1-a --tunnel-through-iap --project=inspire-7-finep`; CLI do Airflow com `cd /opt/airflow && sudo docker compose exec airflow-scheduler airflow ...`.
+- Alerta "Airflow sem heartbeat" (DAG `airflow_heartbeat` do repo `infra`, 45 min sem execução) chega no Telegram via `dgb.ops.alerts`.
+- Logs de task em `gs://destaquesgovbr-airflow/logs/` (e na UI); dos containers no Cloud Logging, log `gcplogs-docker-driver`.
 
-Se DAGs sumirem: `gh workflow run composer-deploy-dags.yaml`
+Se DAGs sumirem: `gh workflow run composer-deploy-dags.yaml` e conferir `airflow dags list-import-errors`.
 
-Ver [docs/runbooks/composer-recovery.md](docs/runbooks/composer-recovery.md).
+Ver [docs/runbooks/airflow-vm.md](docs/runbooks/airflow-vm.md).
 
 ---
 

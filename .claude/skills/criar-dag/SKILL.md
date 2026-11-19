@@ -15,15 +15,18 @@ Crie uma nova DAG seguindo o padrao estabelecido do projeto DGB.
 
 ### Ambiente
 
-- **Airflow**: 3.0.1 (Cloud Composer)
-- **Composer**: `destaquesgovbr-composer` (southamerica-east1)
+- **Airflow**: 3.1.8 proprio, na VM `destaquesgovbr-airflow` (docker compose, `LocalExecutor`, `southamerica-east1-a`). O Cloud Composer foi desligado em 11/2026 (Fase 7 de `infra/_plan/migrar-composer-para-airflow-proprio.md`)
+- **UI e REST API**: https://airflow.dgb.app.gov.br (atras do IAP)
+- **Bucket**: `gs://destaquesgovbr-airflow` (`dags/<repo>/` e `plugins/<pacote>/`), espelhado na VM pelo container `dag-sync` a cada 60 s
+- **Fuso dos crons**: `America/Sao_Paulo` (`core.default_timezone`); `run_id` e `logical_date` aparecem em UTC
 - **GCP Project**: `inspire-7-finep`
-- **Python**: 3.12
+- **Python**: 3.11 (o da imagem do Airflow, `infra/airflow/Dockerfile`)
+- **Operacao** (SSH, CLI, logs, catch-up ao despausar): `docs/runbooks/airflow-vm.md`
 
 ### Pipeline de Dados
 
 ```
-Scrapers (Cloud Run, a cada 10 min)
+Scraping (DAGs scrape_agencies, a cada 2 h das 06 as 22 h BRT, e scrape_ebc)
     ↓ Pub/Sub: dgb.news.scraped
 Bronze Writer → GCS (raw JSON)
     ↓
@@ -43,9 +46,12 @@ Portal Web (Next.js)
 | Connection ID | Tipo | Descricao |
 |---|---|---|
 | `postgres_default` | PostgreSQL | Cloud SQL (private IP via VPC peering) |
+| `umami_postgres` | PostgreSQL | BD do Umami (mesmo Cloud SQL) |
 | `huggingface_default` | HTTP | Token HF no campo `password` |
 | `embeddings_api` | HTTP | Cloud Run endpoint no `host`, API key no `password` |
-| `federation_postgres` | PostgreSQL | BD ActivityPub (mesmo Cloud SQL) |
+| `aws_bedrock` | AWS | Credenciais do Bedrock (enriquecimento por LLM) |
+
+Todas vem do Secret Manager (secrets `airflow-connections-*`), pelo secrets backend da VM.
 
 **Uso**:
 ```python
@@ -71,6 +77,9 @@ records = pg_hook.get_records(SQL_QUERY, parameters=[param1])
 | `gcp_region` | `southamerica-east1` |
 | `postgres_db` | Nome do banco PostgreSQL |
 
+Lista completa: secrets `airflow-variables-*` no Secret Manager
+(`gcloud secrets list --filter='name~airflow-variables-' --project=inspire-7-finep`).
+
 ### Schema PostgreSQL (tabelas principais)
 
 **`news`** (~300k registros):
@@ -91,37 +100,39 @@ records = pg_hook.get_records(SQL_QUERY, parameters=[param1])
 
 ### Repos com DAGs Existentes
 
-| Repo | DAG | Schedule | Descricao |
-|---|---|---|---|
-| `scraper` | `scrape_{agency}` (~155 DAGs) | `*/10 * * * *` | Scraping dinamico |
-| `data-platform` | `sync_pg_to_bigquery` | `0 7 * * *` | PG → BigQuery (Gold) |
-| `data-platform` | `compute_trending` | `0 */6 * * *` | Trending scores |
-| `data-platform` | `aggregate_engagement` | `0 8 * * *` | Pageview aggregation |
-| `data-platform` | `compute_clusters` | `30 7 * * *` | Similarity clustering |
-| `data-platform` | `generate_video_thumbnails` | A cada 4h | Thumbnails de video |
-| `data-platform` | `sync_umami_to_bigquery` | `0 9 * * *` | Umami → BigQuery |
-| `data-platform` | `verify_news_integrity` | `*/30 * * * *` | Verificacao integridade |
+| Repo | Subpasta no bucket | DAGs |
+|---|---|---|
+| `scraper` | `dags/scraper/` | `scrape_agencies` (task mapeada por agencia, `0 6-22/2 * * *`), `scrape_ebc`, `monitor_scraping_health`, `cleanup_old_scrape_runs`, `scraper_coverage_report` |
+| `data-platform` | `dags/data-platform/` | 12 DAGs (sync BigQuery, trending, clusters, grafo de entidades, thumbnails, integridade, backfills de NER/canonicalizacao/enriquecimento); schedules em `docs/dags/README.md` |
+| `clipping` | `dags/clipping/` | `dispatch_clippings` |
+| `data-publishing` | `dags/data-publishing/` | `sync_postgres_to_huggingface` |
+| `infra` | `dags/platform/` (reservada) | `airflow_heartbeat` |
+
+Convencao completa: `docs/architecture/decentralized-dags.md`.
 
 ### Padrao de Deploy
 
 ```
 {repo}/
-├── src/{modulo_plugin}/     → plugins Composer (PYTHONPATH)
+├── src/{modulo_plugin}/     → plugins (gs://destaquesgovbr-airflow/plugins/{modulo_plugin}/, no sys.path das tasks)
 │   ├── __init__.py          → relative imports
 │   └── ...                  → logica de negocio
 ├── dags/
 │   ├── minha_dag.py         → DAG (importa do plugin)
-│   └── requirements.txt     → deps pip para Composer
+│   └── requirements.txt     → so documentacao: nao e instalado (ver 2.3)
 └── .github/workflows/
-    └── composer-deploy-dags.yaml  → chama reusable workflow
+    └── deploy-dags.yaml     → chama o reusable workflow
 ```
 
-O reusable workflow `destaquesgovbr/reusable-workflows/.github/workflows/composer-deploy-dags.yml@v1` faz:
-1. Valida syntax Python e imports
-2. Autentica via Workload Identity (OIDC)
-3. Sync DAGs para `{bucket}/dags/{subdir}/`
-4. Sync plugins para `{bucket}/plugins/{basename(plugins_local_path)}/`
-5. Espera Airflow parsear
+O reusable workflow `destaquesgovbr/reusable-workflows/.github/workflows/airflow-deploy-dags.yml@v3` faz:
+1. Confere os inputs (subpasta obrigatoria, sem `/`, nunca `platform`)
+2. Valida as DAGs com o Airflow 3.1.8 da imagem (`py_compile` recursivo; imports com `check_imports: true`, sem bloquear)
+3. Autentica via Workload Identity (OIDC)
+4. Sync dos plugins para `gs://destaquesgovbr-airflow/plugins/{basename(plugins_local_path)}/` e das DAGs para `gs://destaquesgovbr-airflow/dags/{dags_bucket_subdir}/` (o rsync apaga no destino o que saiu do repo)
+5. Espera 60 s. Nao confere se a DAG apareceu no Airflow (ver 4.4)
+
+O `composer-deploy-dags.yml@v1` esta descontinuado: o Composer foi desligado e ele falha no
+`gcloud composer environments describe`.
 
 ---
 
@@ -182,7 +193,7 @@ class MinhaClasse:
 ```
 
 **Regras**:
-- Usar relative imports (`.core`, `.utils`) — o nome do folder pode mudar no Composer
+- Usar relative imports (`.core`, `.utils`) dentro do pacote: ele e publicado em `plugins/{basename}/` e as DAGs o importam por esse nome
 - Nao depender de variaves de ambiente — receber tudo via parametros
 - Retornar dict com estatisticas para o log do Airflow
 - Usar `logging` padrao (Airflow captura automaticamente)
@@ -208,7 +219,7 @@ from airflow.hooks.base import BaseHook
 @dag(
     dag_id="{dag_id}",
     description="[Descricao curta]",
-    schedule="0 5 * * *",  # Ajustar conforme necessidade
+    schedule="0 5 * * *",  # Ajustar conforme necessidade (horario de Brasilia)
     start_date=datetime(2025, 1, 1),
     catchup=False,
     tags=["{area}", "postgres", "daily"],
@@ -260,33 +271,49 @@ dag_instance = {dag_id}_dag()
 
 **Regras**:
 - Imports pesados (`from {nome_modulo} import ...`) DENTRO da `@task`, nao no topo do arquivo — evita erro de parse se o plugin ainda nao esta deployado
-- Sempre tratar `logical_date is None` para execucao manual
+- Sempre tratar `logical_date is None`: e o caso do trigger pela CLI sem `--logical-date` (pela UI e pela API o run manual tem a hora do disparo)
+- Se a DAG grava com append (ex.: `WRITE_APPEND` no BigQuery), o run manual repete o periodo do run agendado: documente no `doc_md` que ela nao deve ser disparada a mao (como `sync_pg_to_bigquery`)
 - Usar `@dag` + `@task` decorators (Airflow 3 TaskFlow API)
 - `catchup=False` sempre (a menos que haja motivo especifico)
+- Em task **mapeada** (`.expand()`), NAO use `retry_exponential_backoff`: no Airflow 3.1 o retry dela derruba o loop do scheduler. Use so `retry_delay` fixo
 - Instanciar a DAG no final: `dag_instance = {dag_id}_dag()`
 
 ### 2.3 Dependencias Python
 
-**IMPORTANTE**: O `dags/requirements.txt` NAO e instalado automaticamente pelo Composer.
-Se a DAG precisa de pacotes Python nao incluidos no Composer por padrao, eles devem ser
-instalados via Terraform no repo `infra` (variavel `pypi_packages` do recurso `google_composer_environment`).
+**IMPORTANTE**: o `dags/requirements.txt` NAO e instalado. As tasks rodam na imagem do Airflow
+proprio (`infra/airflow/Dockerfile`; com `LocalExecutor`, dentro do container do scheduler).
 
-Pacotes ja incluidos no Composer (nao precisam ser adicionados):
-- `apache-airflow`, `psycopg2`, `pandas`, `requests`
+Ja estao na imagem (lista em `infra/airflow/requirements.txt`): `apache-airflow` 3.1.8, providers
+`google`, `postgres` e `standard`, `google-cloud-{bigquery,storage,run,logging}`, `google-auth`,
+`pandas`, `numpy`, `pyarrow`, `psycopg2-binary`, `SQLAlchemy`, `httpx`, `requests`, `PyYAML`,
+`huggingface_hub` e `typesense`.
 
-Se precisar de pacotes extras (ex: `boto3`, `httpx`):
-1. Criar PR no repo `infra` adicionando o pacote em `pypi_packages` do Terraform
-2. Aguardar merge e `terraform apply`
-3. Composer instalara o pacote automaticamente
+Se precisar de pacote extra:
+1. **Caso geral**: PR no repo `infra` adicionando o pacote em `airflow/requirements.txt` (sem versao
+   vale a das constraints do Airflow; fora delas, fixar a versao). O workflow `airflow-image.yml`
+   builda a imagem, e um segundo PR troca `airflow_image_tag` em `terraform/variables.tf`; o apply
+   recria os containers da VM. Ver `infra/airflow/README.md`
+2. **Pacote puro Python, pequeno e so desta DAG**: pode ir junto dos plugins, como o `pyphen` que o
+   deploy do data-platform vendoriza em `plugins/pyphen/`
+3. So mergear a DAG depois que o pacote estiver na VM; senao ela entra com import error
 
 Manter `dags/requirements.txt` apenas como documentacao das deps necessarias (nao e usado no deploy).
 
 ### 2.4 Deploy Workflow
 
-Crie `.github/workflows/composer-deploy-dags.yaml`:
+Se o repo ja publica DAGs, NAO crie outro workflow: confira se os `paths` do existente cobrem os
+arquivos novos.
+
+| Repo | Workflow |
+|---|---|
+| `data-platform` | `composer-deploy-dags.yaml` (nome historico). DAGs em `src/data_platform/dags/`; os plugins sao montados num job proprio, e um modulo novo de `src/data_platform/jobs/` precisa entrar no passo "Prepare plugins directory" |
+| `scraper`, `data-publishing` | `composer-deploy-dags.yaml` (nome historico) |
+| `clipping` | `deploy-dags.yaml` |
+
+Repo novo: crie `.github/workflows/deploy-dags.yaml`:
 
 ```yaml
-name: Deploy {Nome} DAGs to Composer
+name: Deploy {Nome} DAGs to Airflow
 
 on:
   push:
@@ -302,7 +329,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: destaquesgovbr/reusable-workflows/.github/workflows/composer-deploy-dags.yml@v1
+    uses: destaquesgovbr/reusable-workflows/.github/workflows/airflow-deploy-dags.yml@v3
     with:
       dags_local_path: dags
       dags_bucket_subdir: {repo_name}
@@ -312,8 +339,9 @@ jobs:
 ```
 
 **Notas**:
-- `dags_bucket_subdir` define o subfolder em `{bucket}/dags/` (usar nome do repo)
-- `plugins_local_path` define a fonte; o destino sera `{bucket}/plugins/{basename}/`
+- `dags_bucket_subdir` define a subpasta em `gs://destaquesgovbr-airflow/dags/` (usar o nome do repo; `platform` e reservada)
+- `plugins_local_path` define a fonte; o destino sera `gs://destaquesgovbr-airflow/plugins/{basename}/`
+- `buckets` fica no default (`destaquesgovbr-airflow`)
 - `permissions.id-token: write` e obrigatorio para WIF/OIDC
 - Se o repo NAO tem plugins (ex: scraper), omitir `plugins_local_path`
 
@@ -350,22 +378,34 @@ Criar PR no repo `infra`, aguardar merge e terraform apply.
 
 ### 3.2 Airflow Connection (se necessaria)
 
-Se a DAG precisa de uma connection que ainda nao existe, criar via Secret Manager:
+O secrets backend da VM le os secrets `airflow-connections-{connection_id}` do Secret Manager com a
+SA da VM, `destaquesgovbr-composer@inspire-7-finep.iam.gserviceaccount.com` (o nome ficou do
+Composer; no Terraform e `google_service_account.composer`). Secret e IAM sao Terraform: PR no repo
+`infra`, em `terraform/composer_secrets.tf`, no mesmo padrao dos existentes. Nao crie secret nem
+conceda IAM com `gcloud` direto.
 
-```bash
-# Formato URI para Airflow (prefix airflow-connections-)
-echo "http://:API_KEY@hostname" | \
-  gcloud secrets create airflow-connections-{connection_id} \
-    --data-file=- \
-    --replication-policy=automatic \
-    --project=inspire-7-finep
+```hcl
+resource "google_secret_manager_secret" "airflow_{connection_id}_conn" {
+  secret_id = "airflow-connections-{connection_id}"
 
-# Conceder acesso ao Composer SA
-gcloud secrets add-iam-policy-binding airflow-connections-{connection_id} \
-  --member="serviceAccount:destaquesgovbr-composer@inspire-7-finep.iam.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor" \
-  --project=inspire-7-finep
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_iam_member" "composer_airflow_{connection_id}" {
+  secret_id = google_secret_manager_secret.airflow_{connection_id}_conn.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.composer.email}"
+}
 ```
+
+O valor e a URI da connection (ex.: `http://:API_KEY@hostname`). Se ele vem de outro recurso do
+Terraform, entra numa `google_secret_manager_secret_version` no mesmo PR. Se e uma credencial
+externa, o Terraform cria so o secret e o usuario adiciona a versao depois (o arquivo tem exemplos
+de `gcloud secrets versions add` nos comentarios).
 
 Connections HTTP no Airflow: o `host` e o hostname (sem `https://`), `password` e a API key. Na DAG, reconstruir a URL:
 ```python
@@ -376,18 +416,10 @@ api_key = conn.password
 
 ### 3.3 Airflow Variable (se necessaria)
 
-```bash
-echo "valor" | \
-  gcloud secrets create airflow-variables-{variable_name} \
-    --data-file=- \
-    --replication-policy=automatic \
-    --project=inspire-7-finep
-
-gcloud secrets add-iam-policy-binding airflow-variables-{variable_name} \
-  --member="serviceAccount:destaquesgovbr-composer@inspire-7-finep.iam.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor" \
-  --project=inspire-7-finep
-```
+Mesmo padrao da 3.2, com o secret `airflow-variables-{variable_name}` (PR no `infra`, em
+`terraform/composer_secrets.tf`, com o `google_secret_manager_secret_iam_member` para
+`google_service_account.composer`). Para variavel cujo valor sai de outro recurso (URL de Cloud
+Run, nome de Job), a `google_secret_manager_secret_version` vai no mesmo PR.
 
 ---
 
@@ -396,7 +428,7 @@ gcloud secrets add-iam-policy-binding airflow-variables-{variable_name} \
 ### 4.1 Commit e Push
 
 ```bash
-git add dags/ src/{nome_modulo}/ .github/workflows/composer-deploy-dags.yaml tests/
+git add dags/ src/{nome_modulo}/ .github/workflows/deploy-dags.yaml tests/
 git commit -m "feat: add {dag_id} DAG and {nome_modulo} plugin"
 git push -u origin {branch}
 ```
@@ -410,57 +442,59 @@ gh pr merge --merge --admin
 
 ### 4.3 Trigger Deploy
 
+O push na main ja dispara o deploy. Para rodar de novo (use o nome do workflow do repo, ver 2.4):
+
 ```bash
-gh workflow run composer-deploy-dags.yaml
-gh run list --workflow=composer-deploy-dags.yaml --limit 1
+gh workflow run deploy-dags.yaml
+gh run list --workflow=deploy-dags.yaml --limit 1
 gh run watch {run_id}
 ```
 
 ### 4.4 Verificar DAG no Airflow
 
-```bash
-AIRFLOW_URI=$(gcloud composer environments describe destaquesgovbr-composer \
-  --location=southamerica-east1 --format="value(config.airflowUri)")
+Arquivo novo aparece em ate ~2 min depois do deploy (60 s do `dag-sync` + ate 60 s do refresh do
+bundle). UI: https://airflow.dgb.app.gov.br (o IAP exige `roles/iap.httpsResourceAccessor`).
 
-curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  "$AIRFLOW_URI/api/v2/dags/{dag_id}" | python3 -c "
-import sys,json
-d=json.load(sys.stdin)
-print(f'DAG: {d[\"dag_id\"]}, paused: {d[\"is_paused\"]}, schedule: {d.get(\"timetable_summary\",\"?\")}')
-"
-```
-
-Se a DAG nao aparecer, verificar import errors:
+Pela CLI do Airflow, via SSH pelo IAP (so os admins do Airflow tem `roles/iap.tunnelResourceAccessor`):
 
 ```bash
-curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  "$AIRFLOW_URI/api/v2/importErrors" | python3 -c "
-import sys,json
-data=json.load(sys.stdin)
-for e in data.get('import_errors',[]):
-    print(f'{e[\"filename\"]}: {e[\"stack_trace\"][:300]}')
-"
+gcloud compute ssh destaquesgovbr-airflow --zone=southamerica-east1-a \
+  --tunnel-through-iap --project=inspire-7-finep \
+  --command='cd /opt/airflow && sudo docker compose exec -T airflow-scheduler airflow dags list-import-errors && sudo docker compose exec -T airflow-scheduler airflow dags list | grep {dag_id}'
 ```
 
-### 4.5 Trigger Manual
+`dags list-import-errors` deve sair vazio. Se a DAG nao aparecer, seguir "DAG sumiu ou nao aparece"
+em `docs/runbooks/airflow-vm.md` (do data-platform). A REST API (`/api/v2`) tambem passa pelo IAP e
+pede dois tokens (ID token do IAP e o JWT do Airflow em `/auth/token`); para conferir uma DAG, a CLI
+por SSH e mais simples.
+
+### 4.5 Despausar e Trigger Manual
+
+DAG nova nasce **pausada**, e run de DAG pausada fica `queued` sem rodar. Antes de despausar, ler
+"Catch-up ao despausar" no runbook: com `catchup=False`, o despause roda **na hora** o horario mais
+recente que ja passou.
+
+Pela UI (toggle da DAG e botao Trigger) ou pela CLI, na VM:
 
 ```bash
-LOGICAL_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-curl -s -X POST \
-  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  -H "Content-Type: application/json" \
-  "$AIRFLOW_URI/api/v2/dags/{dag_id}/dagRuns" \
-  -d "{\"logical_date\": \"$LOGICAL_DATE\"}"
+cd /opt/airflow
+sudo docker compose exec airflow-scheduler airflow dags unpause {dag_id}
+sudo docker compose exec airflow-scheduler airflow dags trigger {dag_id}
 ```
+
+Nao dispare manualmente DAG que grava com append (ver 2.2): o run manual repete o periodo do run
+agendado.
 
 ### 4.6 Monitorar Execucao
 
+Na UI (DAG → run → task → Logs) ou pela CLI, na VM:
+
 ```bash
-DAG_RUN_ID="manual__..."
-curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  "$AIRFLOW_URI/api/v2/dags/{dag_id}/dagRuns/$DAG_RUN_ID" | \
-  python3 -c "import sys,json; d=json.load(sys.stdin); print(d['state'])"
+sudo docker compose exec airflow-scheduler airflow dags list-runs {dag_id}
+sudo docker compose exec airflow-scheduler airflow dags state {dag_id} '<run_id>'
 ```
+
+Logs das tasks tambem ficam em `gs://destaquesgovbr-airflow/logs/dag_id={dag_id}/` (30 dias).
 
 ---
 
@@ -468,11 +502,13 @@ curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
 
 - [ ] Plugin em `src/{nome_modulo}/` com relative imports
 - [ ] DAG em `dags/{dag_id}.py` com imports dentro da `@task`
-- [ ] `dags/requirements.txt` com deps extras
-- [ ] `.github/workflows/composer-deploy-dags.yaml` configurado
+- [ ] `dags/requirements.txt` com deps extras (so documentacao)
+- [ ] Pacote extra na imagem (`infra/airflow/requirements.txt`) ou nos plugins (se necessario)
+- [ ] Workflow de deploy com `airflow-deploy-dags.yml@v3` (ou o workflow existente do repo cobrindo os arquivos novos)
 - [ ] Testes unitarios para o plugin
 - [ ] WIF configurado (se repo novo)
-- [ ] Airflow connection criada (se necessaria)
+- [ ] Secret e IAM da connection/variable por PR no `infra` (se necessario)
 - [ ] Deploy workflow executou com sucesso
-- [ ] DAG visivel no Airflow UI
-- [ ] Trigger manual executou com sucesso
+- [ ] DAG visivel no Airflow UI, sem import error
+- [ ] DAG despausada (conferido o catch-up)
+- [ ] Trigger manual executou com sucesso (se a DAG aguenta rodar de novo o mesmo periodo)

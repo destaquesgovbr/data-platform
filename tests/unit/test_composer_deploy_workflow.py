@@ -1,14 +1,14 @@
-"""composer-deploy-dags.yaml publica DAGs e plugins no Composer e no Airflow próprio (Fase 3).
+"""composer-deploy-dags.yaml publica DAGs e plugins no bucket do Airflow próprio.
 
-O Composer não tem pyphen nos pacotes PyPI do ambiente (gerenciados pelo Terraform). O deploy
-instala o pyphen da versão travada no poetry.lock (a mesma do feature-worker) na raiz dos
-plugins, que está no sys.path dos workers, e copia jobs/features para data_platform/jobs
-(DP-1c).
+A imagem do Airflow próprio não tem pyphen (infra/airflow/requirements.txt). O deploy instala o
+pyphen da versão travada no poetry.lock (a mesma do feature-worker) na raiz dos plugins, que está
+no sys.path das tasks, e copia jobs/features para data_platform/jobs (DP-1c).
 
-Na Fase 3 da migração do Composer os plugins vão para os dois buckets (AIRFLOW_DAG_BUCKETS),
-sem `gcloud composer describe`, e as DAGs pelo airflow-deploy-dags.yml@v3, que recebe a mesma
-lista (output do job de plugins). Plugins antes das DAGs, que os importam, e só depois de um
-py_compile das DAGs e dos plugins; um deploy por vez.
+Desde a Fase 7 da migração (Composer desligado) a lista AIRFLOW_DAG_BUCKETS é só o bucket do
+Airflow próprio, sem `gcloud composer describe`. Os plugins vão para cada bucket da lista e as
+DAGs pelo airflow-deploy-dags.yml@v3, que recebe a mesma lista (output do job de plugins).
+Plugins antes das DAGs, que os importam, e só depois de um py_compile das DAGs e dos plugins;
+um deploy por vez.
 """
 
 import os
@@ -96,12 +96,25 @@ def test_deploy_dispara_quando_o_lock_muda():
     assert "poetry.lock" in _trigger_paths()
 
 
-# --- Fase 3: dois buckets ---------------------------------------------------------------
+# --- Buckets (Fase 7: só o do Airflow próprio) --------------------------------------------
 
 
-def test_buckets_sao_o_do_composer_e_o_do_airflow_proprio():
-    """Fase 7 (desligar o Composer) tira o bucket do Composer daqui (plugins e DAGs)."""
-    assert _workflow()["env"]["AIRFLOW_DAG_BUCKETS"].split() == [COMPOSER_BUCKET, AIRFLOW_BUCKET]
+def test_publica_so_no_bucket_do_airflow_proprio():
+    """Fase 7: o Composer foi desligado e o bucket dele é apagado (plugins e DAGs saem dele).
+
+    Com um bucket apagado na lista o rsync dos plugins falha e as DAGs não são publicadas.
+    """
+    workflow = _workflow()
+    assert workflow["env"]["AIRFLOW_DAG_BUCKETS"].split() == [AIRFLOW_BUCKET]
+    # Nenhum valor do workflow (env, run, with) cita o bucket do Composer; o YAML lido não
+    # tem os comentários, que podem citá-lo.
+    assert COMPOSER_BUCKET not in repr(workflow)
+
+
+def test_nome_do_workflow_e_dos_jobs_sem_composer():
+    workflow = _workflow()
+    assert "composer" not in workflow["name"].lower()
+    assert all("composer" not in job.get("name", "").lower() for job in workflow["jobs"].values())
 
 
 def test_plugins_vao_para_cada_bucket_com_rsync_que_apaga_orfaos():
@@ -138,7 +151,7 @@ def test_repassa_a_lista_de_buckets_como_output(tmp_path):
 
 
 def test_nao_depende_mais_do_gcloud_composer():
-    """O bucket do Composer é fixo; describe exigia composer.admin, que sai na Fase 7."""
+    """Sem `gcloud composer describe`: o papel composer.admin do github-actions saiu na Fase 7."""
     workflow = _workflow()
     assert not [k for k in workflow["env"] if k.startswith("COMPOSER_")]
     assert not [run for run in _plugin_steps().values() if "gcloud composer" in run]
